@@ -7,6 +7,7 @@ on:
       - master
     paths:
       - .github/workflows/build-osmand-smart.yml
+      - OsmAnd/**
 
 permissions:
   contents: read
