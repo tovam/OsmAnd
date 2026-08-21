@@ -76,7 +76,25 @@ jobs:
 
       - name: Build Android Full ARM64 debug APK
         working-directory: android
-        run: ./gradlew assembleAndroidFullLegacyArm64Debug
+        run: |
+          set -o pipefail
+          ./gradlew assembleAndroidFullLegacyArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
+
+      - name: Publish Gradle failure details
+        if: failure()
+        run: |
+          {
+            echo "### Gradle build failure"
+            echo '```text'
+            tail -n 100 "${RUNNER_TEMP}/gradle-build.log"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          details="$(tail -n 100 "${RUNNER_TEMP}/gradle-build.log")"
+          details="${details//'%'/'%25'}"
+          details="${details//$'\r'/'%0D'}"
+          details="${details//$'\n'/'%0A'}"
+          echo "::error title=Gradle build failed::${details}"
 
       - name: Show remaining disk space
         if: always()
