@@ -1,0 +1,56 @@
+name: Release OsmAnd Smart APK
+
+on:
+  workflow_run:
+    workflows:
+      - Build OsmAnd Smart APK
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: osmand-smart-android-full-opengl-arm64-debug
+          path: release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Locate APK
+        id: apk
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          apks=(release/**/*.apk)
+
+          if (( ${#apks[@]} != 1 )); then
+            echo "Expected exactly one APK, found ${#apks[@]}" >&2
+            exit 1
+          fi
+
+          printf 'path=%s\n' "${apks[0]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create public prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: smart-build-${{ github.event.workflow_run.run_number }}-${{ github.event.workflow_run.run_attempt }}
+          RELEASE_TITLE: OsmAnd Smart OpenGL build #${{ github.event.workflow_run.run_number }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+        run: |
+          gh release create "${RELEASE_TAG}" "${APK_PATH}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${TARGET_SHA}" \
+            --title "${RELEASE_TITLE}" \
+            --notes "Debug ARM64 OpenGL build for testing. Application ID: com.tovam.osmandsmart." \
+            --prerelease
