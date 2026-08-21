@@ -2,6 +2,11 @@ name: Build OsmAnd Smart APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/build-osmand-smart.yml
 
 permissions:
   contents: read
