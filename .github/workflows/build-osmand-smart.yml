@@ -74,11 +74,11 @@ jobs:
       - name: Show available disk space
         run: df -h
 
-      - name: Build Android Full ARM64 debug APK
+      - name: Build Android Full OpenGL ARM64 debug APK
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew assembleAndroidFullLegacyArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
+          ./gradlew assembleAndroidFullOpenglArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
 
       - name: Publish Gradle failure details
         if: failure()
@@ -103,7 +103,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: osmand-smart-android-full-arm64-debug
+          name: osmand-smart-android-full-opengl-arm64-debug
           path: android/OsmAnd/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 90
