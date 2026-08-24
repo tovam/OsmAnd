@@ -30,6 +30,7 @@ object FunctionGemmaRuntime {
         GPU_OUTPUT_CORRUPTED,
         TIMEOUT,
         NO_TOOL_CALL,
+        INVALID_MODEL_OUTPUT,
         INFERENCE_ERROR,
     }
 
@@ -106,7 +107,20 @@ Après un appel d'outil accepté, réponds seulement OK."""
             }, INFERENCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
             val response = conversation.sendMessage(Message.of(userText)).toString()
-            val request = tools.captured.get()
+            val request = when (val call = tools.captured.get()) {
+                is CapturedCall.Location -> SmartSearchGuard.guardLocation(userText, call.query)
+                is CapturedCall.Poi -> SmartSearchGuard.guardPoi(
+                    userText,
+                    call.name,
+                    call.category,
+                    call.context,
+                    call.place,
+                    call.resultMode,
+                    call.availability,
+                    SmartSearchCategoryRegistry.get(context),
+                )
+                null -> null
+            }
             when {
                 timedOut.get() -> postError(callback, ErrorCode.TIMEOUT, "Le GPU n’a pas répondu à temps")
                 request != null -> mainHandler.post { callback.onResult(request) }
@@ -121,6 +135,7 @@ Après un appel d'outil accepté, réponds seulement OK."""
         } catch (error: Throwable) {
             val code = when {
                 timedOut.get() -> ErrorCode.TIMEOUT
+                error is IllegalArgumentException -> ErrorCode.INVALID_MODEL_OUTPUT
                 error.message?.contains("GPU", ignoreCase = true) == true -> ErrorCode.GPU_UNAVAILABLE
                 else -> ErrorCode.INFERENCE_ERROR
             }
@@ -186,8 +201,21 @@ Après un appel d'outil accepté, réponds seulement OK."""
         mainHandler.post { callback.onError(code, message) }
     }
 
+    private sealed interface CapturedCall {
+        data class Poi(
+            val name: String?,
+            val category: String?,
+            val context: String,
+            val place: String?,
+            val resultMode: String,
+            val availability: String,
+        ) : CapturedCall
+
+        data class Location(val query: String) : CapturedCall
+    }
+
     private class OsmandSearchTools {
-        val captured = AtomicReference<SmartSearchRequest?>()
+        val captured = AtomicReference<CapturedCall?>()
 
         @Tool(description = "Search OsmAnd POIs by one normalized app category or one verbatim establishment name.")
         fun searchPoi(
@@ -204,8 +232,8 @@ Après un appel d'outil accepté, réponds seulement OK."""
             @ToolParam(description = "One of ANY, OPEN_NOW, OPEN_24_7, OPEN_AT_ARRIVAL.")
             availability: String,
         ): Map<String, Any> {
-            val request = SmartSearchRequest.poi(name, category, context, place, resultMode, availability)
-            check(captured.compareAndSet(null, request)) { "Only one search call is allowed" }
+            val call = CapturedCall.Poi(name, category, context, place, resultMode, availability)
+            check(captured.compareAndSet(null, call)) { "Only one search call is allowed" }
             return mapOf("accepted" to true)
         }
 
@@ -214,8 +242,8 @@ Après un appel d'outil accepté, réponds seulement OK."""
             @ToolParam(description = "Verbatim address, coordinates, Plus Code, or unique place text.")
             query: String,
         ): Map<String, Any> {
-            val request = SmartSearchRequest.location(query)
-            check(captured.compareAndSet(null, request)) { "Only one search call is allowed" }
+            val call = CapturedCall.Location(query)
+            check(captured.compareAndSet(null, call)) { "Only one search call is allowed" }
             return mapOf("accepted" to true)
         }
     }

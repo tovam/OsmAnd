@@ -57,7 +57,7 @@ public final class SmartSearchCategoryRegistry {
 
 	@Nullable
 	public Definition find(@Nullable String category) {
-		return category == null ? null : definitions.get(category);
+		return category == null ? null : definitions.get(category.trim());
 	}
 
 	@NonNull

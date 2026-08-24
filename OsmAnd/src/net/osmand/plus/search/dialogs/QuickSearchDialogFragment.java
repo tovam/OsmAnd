@@ -647,7 +647,10 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 							.show();
 				} else {
 					new AlertDialog.Builder(requireContext())
-							.setTitle(R.string.functiongemma_gpu_error_title)
+							.setTitle(code == FunctionGemmaRuntime.ErrorCode.INVALID_MODEL_OUTPUT
+									|| code == FunctionGemmaRuntime.ErrorCode.NO_TOOL_CALL
+									? R.string.functiongemma_parse_error_title
+									: R.string.functiongemma_gpu_error_title)
 							.setMessage(message)
 							.setPositiveButton(R.string.shared_string_ok, null)
 							.show();

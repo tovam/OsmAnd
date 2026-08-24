@@ -5808,4 +5808,5 @@ Download tile maps directly, or copy them as SQLite database files to OsmAnd\'s 
 	<string name="functiongemma_no_route">Calculate a route first to search along it.</string>
 	<string name="functiongemma_no_result_on_route">No matching place was found ahead on the route.</string>
 	<string name="functiongemma_gpu_error_title">FunctionGemma GPU error</string>
+	<string name="functiongemma_parse_error_title">Search request not understood</string>
 </resources>

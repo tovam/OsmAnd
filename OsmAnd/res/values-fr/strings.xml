@@ -5303,4 +5303,5 @@
 	<string name="functiongemma_no_route">Calcule d’abord un itinéraire pour chercher sur son trajet.</string>
 	<string name="functiongemma_no_result_on_route">Aucun lieu correspondant n’a été trouvé devant sur l’itinéraire.</string>
 	<string name="functiongemma_gpu_error_title">Erreur GPU de FunctionGemma</string>
+	<string name="functiongemma_parse_error_title">Demande de recherche non comprise</string>
 </resources>
