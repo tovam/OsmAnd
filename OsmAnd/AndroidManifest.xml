@@ -88,6 +88,8 @@
 		android:supportsRtl="true" android:usesCleartextTraffic="true"
 		android:hasFragileUserData="true" android:requestLegacyExternalStorage="true"
 		android:localeConfig="@xml/locales_config">
+		<uses-native-library android:name="libvndksupport.so" android:required="false" />
+		<uses-native-library android:name="libOpenCL.so" android:required="false" />
 
 		<meta-data android:name="com.google.android.backup.api_key" android:value="AEdPqrEAAAAIqF3tNGT66etVBn_vgzpfAY1wmIzKV1Ss6Ku-2A" />
 		<meta-data android:name="com.sec.android.support.multiwindow" android:value="true" />

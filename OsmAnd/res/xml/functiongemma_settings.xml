@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:tools="http://schemas.android.com/tools"
+	android:key="functiongemma_settings"
+	android:title="@string/functiongemma_settings_title">
+
+	<Preference
+		android:key="functiongemma_info"
+		android:layout="@layout/preference_info"
+		android:persistent="false"
+		android:selectable="false"
+		android:title="@string/functiongemma_info"
+		tools:icon="@drawable/ic_action_info_dark" />
+
+	<androidx.preference.SwitchPreferenceCompat
+		android:key="functiongemma_enabled"
+		android:layout="@layout/preference_switch"
+		android:persistent="false"
+		android:summary="@string/functiongemma_enabled_summary"
+		android:title="@string/functiongemma_enabled_title" />
+
+	<net.osmand.plus.settings.preferences.EditTextPreferenceEx
+		android:key="functiongemma_model_url"
+		android:layout="@layout/preference_with_descr"
+		android:persistent="false"
+		android:title="@string/functiongemma_model_url_title"
+		tools:summary="https://github.com/…/functiongemma-osmand.litertlm" />
+
+	<net.osmand.plus.settings.preferences.EditTextPreferenceEx
+		android:key="functiongemma_model_sha256"
+		android:layout="@layout/preference_with_descr"
+		android:persistent="false"
+		android:title="@string/functiongemma_sha256_title"
+		tools:summary="@string/functiongemma_sha256_optional" />
+
+	<Preference
+		android:key="functiongemma_download"
+		android:layout="@layout/preference_button"
+		android:persistent="false"
+		android:title="@string/functiongemma_download_title"
+		tools:icon="@drawable/ic_action_import" />
+
+	<Preference
+		android:key="functiongemma_status"
+		android:layout="@layout/preference_with_descr"
+		android:persistent="false"
+		android:selectable="false"
+		android:title="@string/functiongemma_status_title" />
+
+	<Preference
+		android:key="functiongemma_delete"
+		android:layout="@layout/preference_button"
+		android:persistent="false"
+		android:title="@string/functiongemma_delete_title"
+		tools:icon="@drawable/ic_action_delete_dark" />
+
+</PreferenceScreen>

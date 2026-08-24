@@ -14,6 +14,15 @@
 		tools:icon="@drawable/ic_action_settings" />
 
 	<Preference
+		android:key="functiongemma_settings"
+		android:layout="@layout/preference_with_descr"
+		android:persistent="false"
+		android:summary="@string/functiongemma_main_summary"
+		android:title="@string/functiongemma_settings_title"
+		app:fragment="net.osmand.plus.settings.fragments.FunctionGemmaSettingsFragment"
+		tools:icon="@drawable/ic_action_stars" />
+
+	<Preference
 		android:layout="@layout/divider_half_item_with_background"
 		android:selectable="false" />
 

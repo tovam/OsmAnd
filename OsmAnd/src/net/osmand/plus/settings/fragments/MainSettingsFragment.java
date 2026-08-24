@@ -70,6 +70,8 @@ public class MainSettingsFragment extends BaseSettingsFragment implements OnSele
 		availableAppModes = new LinkedHashSet<>(ApplicationMode.values(app));
 		Preference globalSettings = requirePreference("global_settings");
 		globalSettings.setIcon(getContentIcon(R.drawable.ic_action_settings));
+		Preference functionGemma = requirePreference("functiongemma_settings");
+		functionGemma.setIcon(getContentIcon(R.drawable.ic_action_stars));
 		setupBackupAndRestorePref();
 		Preference purchasesSettings = requirePreference(PURCHASES_SETTINGS);
 		purchasesSettings.setIcon(getContentIcon(R.drawable.ic_action_purchases));

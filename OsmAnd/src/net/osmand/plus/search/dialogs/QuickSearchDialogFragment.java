@@ -57,6 +57,10 @@ import net.osmand.plus.activities.MapActivity;
 import net.osmand.plus.base.BaseFullScreenDialogFragment;
 import net.osmand.plus.download.DownloadIndexesThread.DownloadEvents;
 import net.osmand.plus.exploreplaces.ExplorePlacesFragment;
+import net.osmand.plus.helpers.AmenityLocationPoint;
+import net.osmand.plus.helpers.LocationPointWrapper;
+import net.osmand.plus.helpers.WaypointDialogHelper;
+import net.osmand.plus.helpers.WaypointHelper;
 import net.osmand.plus.mapcontextmenu.MapContextMenu;
 import net.osmand.plus.myplaces.favorites.FavoriteGroup;
 import net.osmand.plus.plugins.PluginsHelper;
@@ -70,6 +74,11 @@ import net.osmand.plus.search.QuickSearchHelper;
 import net.osmand.plus.search.QuickSearchHelper.SearchHistoryAPI;
 import net.osmand.plus.search.ShareHistoryAsyncTask;
 import net.osmand.plus.search.ShareHistoryAsyncTask.OnShareHistoryListener;
+import net.osmand.plus.search.smart.FunctionGemmaModelManager;
+import net.osmand.plus.search.smart.FunctionGemmaRuntime;
+import net.osmand.plus.search.smart.SmartSearchCategoryRegistry;
+import net.osmand.plus.search.smart.SmartSearchCategoryRegistry.Definition;
+import net.osmand.plus.search.smart.SmartSearchRequest;
 import net.osmand.plus.search.history.HistoryEntry;
 import net.osmand.plus.search.history.SearchHistoryHelper;
 import net.osmand.plus.search.listitems.QuickSearchButtonListItem;
@@ -80,11 +89,15 @@ import net.osmand.plus.search.listitems.QuickSearchMoreListItem;
 import net.osmand.plus.search.listitems.QuickSearchMoreListItem.SearchMoreItemOnClickListener;
 import net.osmand.plus.search.listitems.QuickSearchSearchOnWebListItem;
 import net.osmand.plus.search.listitems.QuickSearchSimpleButtonListItem;
+import net.osmand.plus.routepreparationmenu.ShowAlongTheRouteBottomSheet;
+import net.osmand.plus.routing.RouteCalculationResult;
 import net.osmand.plus.settings.backend.ApplicationMode;
 import net.osmand.plus.settings.backend.OsmandSettings;
 import net.osmand.plus.settings.enums.HistorySource;
+import net.osmand.plus.settings.fragments.BaseSettingsFragment;
 import net.osmand.plus.settings.fragments.HistorySettingsDialogFragment;
 import net.osmand.plus.settings.fragments.OnPreferenceChanged;
+import net.osmand.plus.settings.fragments.SettingsScreenType;
 import net.osmand.plus.utils.AndroidUtils;
 import net.osmand.plus.utils.InsetTarget;
 import net.osmand.plus.utils.InsetTargetsCollection;
@@ -101,6 +114,7 @@ import net.osmand.search.core.SearchCoreFactory.SearchAmenityTypesAPI;
 import net.osmand.search.core.spatial.SpatialTextSearchAPI;
 import net.osmand.util.Algorithms;
 import net.osmand.util.MapUtils;
+import net.osmand.util.OpeningHoursParser;
 import net.osmand.util.RegionCodeUtils;
 
 import java.io.File;
@@ -179,6 +193,13 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 	private EditText searchEditText;
 	private ProgressBar progressBar;
 	private ImageButton clearButton;
+	private ImageButton smartSearchButton;
+	private boolean smartSearchRunning;
+	private boolean applyingSmartRequest;
+	private boolean smartPoiFilteringActive;
+	private SmartSearchRequest.Availability smartAvailabilityFilter;
+	private Long smartOpenAtMillis;
+	private int smartResultLimit = -1;
 
 	private AccessibilityAssistant accessibilityAssistant;
 	private NavigationInfo navigationInfo;
@@ -489,6 +510,9 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 			@Override
 			public void afterTextChanged(Editable s) {
 				String newQueryText = s.toString();
+				if (!applyingSmartRequest) {
+					clearSmartResultConstraints();
+				}
 				updateClearButtonAndHint();
 				updateClearButtonVisibility(true);
 				boolean textEmpty = newQueryText.isEmpty();
@@ -508,7 +532,9 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 					}
 				}
 				if (!searchQuery.equalsIgnoreCase(newQueryText)) {
-					resetSpatialSearchScope();
+					if (!applyingSmartRequest) {
+						resetSpatialSearchScope();
+					}
 					categorySearchByFilter = false;
 					currentSearchFilterId = null;
 					currentCategoryFilterParams = null;
@@ -530,6 +556,10 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 		});
 
 		progressBar = view.findViewById(R.id.searchProgressBar);
+		smartSearchButton = view.findViewById(R.id.smartSearchButton);
+		smartSearchButton.setImageDrawable(iconsCache.getThemedIcon(R.drawable.ic_action_stars));
+		smartSearchButton.setVisibility(FunctionGemmaModelManager.get(app).isEnabled() ? View.VISIBLE : View.GONE);
+		smartSearchButton.setOnClickListener(v -> runSmartSearch());
 		clearButton = view.findViewById(R.id.clearButton);
 		clearButton.setImageDrawable(iconsCache.getThemedIcon(R.drawable.ic_action_remove_dark));
 		clearButton.setOnClickListener(v -> {
@@ -567,6 +597,335 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 		updateFab();
 
 		return view;
+	}
+
+	private void runSmartSearch() {
+		if (smartSearchRunning) {
+			return;
+		}
+		String text = searchEditText.getText().toString().trim();
+		if (Algorithms.isEmpty(text)) {
+			app.showShortToastMessage(R.string.search_poi_category_hint);
+			return;
+		}
+		AndroidUtils.hideSoftKeyboard(requireActivity(), searchEditText);
+		setSmartSearchRunning(true);
+		FunctionGemmaRuntime.parse(app, text, new FunctionGemmaRuntime.Callback() {
+			@Override
+			public void onResult(@NonNull SmartSearchRequest request) {
+				setSmartSearchRunning(false);
+				applySmartSearchRequest(request);
+			}
+
+			@Override
+			public void onClarification(@NonNull String message) {
+				setSmartSearchRunning(false);
+				if (isAdded()) {
+					new AlertDialog.Builder(requireContext())
+							.setTitle(R.string.functiongemma_clarification_title)
+							.setMessage(message)
+							.setPositiveButton(R.string.shared_string_ok, null)
+							.show();
+				}
+			}
+
+			@Override
+			public void onError(@NonNull FunctionGemmaRuntime.ErrorCode code, @NonNull String message) {
+				setSmartSearchRunning(false);
+				if (!isAdded()) {
+					return;
+				}
+				if (code == FunctionGemmaRuntime.ErrorCode.MODEL_NOT_INSTALLED) {
+					new AlertDialog.Builder(requireContext())
+							.setTitle(R.string.functiongemma_settings_title)
+							.setMessage(message)
+							.setNegativeButton(R.string.shared_string_cancel, null)
+							.setPositiveButton(R.string.functiongemma_configure_model, (dialog, which) -> {
+								dismissAllowingStateLoss();
+								BaseSettingsFragment.showInstance(requireActivity(), SettingsScreenType.FUNCTION_GEMMA);
+							})
+							.show();
+				} else {
+					new AlertDialog.Builder(requireContext())
+							.setTitle(R.string.functiongemma_gpu_error_title)
+							.setMessage(message)
+							.setPositiveButton(R.string.shared_string_ok, null)
+							.show();
+				}
+			}
+		});
+	}
+
+	private void setSmartSearchRunning(boolean running) {
+		smartSearchRunning = running;
+		if (smartSearchButton != null) {
+			smartSearchButton.setEnabled(!running);
+			smartSearchButton.setAlpha(running ? 0.45f : 1f);
+		}
+		if (progressBar != null) {
+			if (running) {
+				showProgressBar();
+			} else if (!searching) {
+				hideProgressBar();
+			}
+		}
+	}
+
+	private void applySmartSearchRequest(@NonNull SmartSearchRequest request) {
+		if (!isAdded()) {
+			return;
+		}
+		if (request.kind == SmartSearchRequest.Kind.LOCATION) {
+			clearSmartResultConstraints();
+			applyingSmartRequest = true;
+			try {
+				replaceQueryWithText(Objects.requireNonNull(request.query));
+			} finally {
+				applyingSmartRequest = false;
+			}
+			return;
+		}
+		if (request.context == SmartSearchRequest.Context.UNSPECIFIED) {
+			showSmartContextChoice(request);
+		} else {
+			applySmartPoiRequest(request);
+		}
+	}
+
+	private void showSmartContextChoice(@NonNull SmartSearchRequest request) {
+		List<String> labels = new ArrayList<>();
+		List<SmartSearchRequest.Context> contexts = new ArrayList<>();
+		labels.add(getString(R.string.functiongemma_area_current));
+		contexts.add(SmartSearchRequest.Context.CURRENT_LOCATION);
+		labels.add(getString(R.string.functiongemma_area_map));
+		contexts.add(SmartSearchRequest.Context.MAP_CENTER);
+		if (app.getRoutingHelper().getFinalLocation() != null) {
+			labels.add(getString(R.string.functiongemma_area_destination));
+			contexts.add(SmartSearchRequest.Context.DESTINATION);
+		}
+		if (app.getRoutingHelper().isRouteCalculated()) {
+			labels.add(getString(R.string.functiongemma_area_route));
+			contexts.add(SmartSearchRequest.Context.ROUTE);
+		}
+		new AlertDialog.Builder(requireContext())
+				.setTitle(R.string.functiongemma_choose_area)
+				.setItems(labels.toArray(new String[0]), (dialog, which) -> {
+					SmartSearchRequest.Context context = contexts.get(which);
+					SmartSearchRequest contextual = SmartSearchRequest.poi(
+							request.name, request.category, context.name(), null,
+							Objects.requireNonNull(request.resultMode).name(),
+							Objects.requireNonNull(request.availability).name());
+					applySmartPoiRequest(contextual);
+				})
+				.setNegativeButton(R.string.shared_string_cancel, null)
+				.show();
+	}
+
+	private void applySmartPoiRequest(@NonNull SmartSearchRequest request) {
+		clearSmartResultConstraints();
+		smartPoiFilteringActive = true;
+		smartAvailabilityFilter = request.availability;
+		smartResultLimit = request.resultMode == SmartSearchRequest.ResultMode.NEAREST ? 1 : -1;
+		selectedSortByOption = request.resultMode == SmartSearchRequest.ResultMode.NEAREST
+				? SortByOption.NEAREST : SortByOption.RELEVANCE;
+
+		if (request.availability == SmartSearchRequest.Availability.OPEN_NOW) {
+			smartOpenAtMillis = System.currentTimeMillis();
+		} else if (request.availability == SmartSearchRequest.Availability.OPEN_AT_ARRIVAL
+				&& request.context == SmartSearchRequest.Context.DESTINATION) {
+			smartOpenAtMillis = getDestinationArrivalTimeMillis();
+			if (smartOpenAtMillis == null) {
+				app.showShortToastMessage(R.string.functiongemma_no_route);
+				return;
+			}
+		}
+
+		if (request.context == SmartSearchRequest.Context.ROUTE) {
+			applySmartRouteSearch(request);
+			return;
+		}
+		if (request.context == SmartSearchRequest.Context.NAMED_PLACE) {
+			String target = !Algorithms.isEmpty(request.name)
+					? request.name
+					: SmartSearchCategoryRegistry.get(app).fallbackQuery(Objects.requireNonNull(request.category));
+			String query = target + " " + Objects.requireNonNull(request.place);
+			applyingSmartRequest = true;
+			try {
+				replaceQueryWithText(query);
+			} finally {
+				applyingSmartRequest = false;
+			}
+			return;
+		}
+		if (!configureSmartSearchCenter(Objects.requireNonNull(request.context))) {
+			return;
+		}
+		PoiUIFilter filter = createSmartPoiFilter(request);
+		applyingSmartRequest = true;
+		try {
+			showFilter(filter);
+		} finally {
+			applyingSmartRequest = false;
+		}
+	}
+
+	private boolean configureSmartSearchCenter(@NonNull SmartSearchRequest.Context context) {
+		MapActivity mapActivity = getMapActivity();
+		if (mapActivity == null) {
+			return false;
+		}
+		LatLon target;
+		boolean mapCenter = false;
+		String scopeName = null;
+		switch (context) {
+			case CURRENT_LOCATION:
+				if (!OsmAndLocationProvider.isLocationPermissionAvailable(mapActivity)) {
+					OsmAndLocationProvider.requestFineLocationPermissionIfNeeded(mapActivity);
+					return false;
+				}
+				location = app.getLocationProvider().getLastKnownLocation();
+				if (location == null) {
+					app.showShortToastMessage(R.string.unknown_location);
+					return false;
+				}
+				target = new LatLon(location.getLatitude(), location.getLongitude());
+				break;
+			case MAP_CENTER:
+				target = getCurrentMapCenter();
+				mapCenter = true;
+				scopeName = getString(R.string.functiongemma_area_map);
+				break;
+			case DESTINATION:
+				target = app.getRoutingHelper().getFinalLocation();
+				scopeName = getString(R.string.functiongemma_area_destination);
+				if (target == null) {
+					app.showShortToastMessage(R.string.functiongemma_no_destination);
+					return false;
+				}
+				break;
+			default:
+				return false;
+		}
+		if (target == null) {
+			return false;
+		}
+		useMapCenter = mapCenter;
+		useSpatialSearchLocation = context == SmartSearchRequest.Context.DESTINATION;
+		spatialSearchLocation = useSpatialSearchLocation ? target : null;
+		spatialSearchScopeName = scopeName;
+		centerLatLon = null;
+		updateSearchAroundLocation(target);
+		updateUseMapCenterUI();
+		updateClearButtonAndHint();
+		updateToolbarButton();
+		return true;
+	}
+
+	@NonNull
+	private PoiUIFilter createSmartPoiFilter(@NonNull SmartSearchRequest request) {
+		Definition definition = SmartSearchCategoryRegistry.get(app).find(request.category);
+		AbstractPoiType type = null;
+		if (definition != null && definition.osmandPoiType != null) {
+			type = app.getPoiTypes().getAnyPoiTypeByKey(definition.osmandPoiType);
+		}
+		if (type == null && definition != null && definition.osmandAdditionalType != null) {
+			type = app.getPoiTypes().getAnyPoiAdditionalTypeByKey(definition.osmandAdditionalType);
+		}
+		String title = !Algorithms.isEmpty(request.name)
+				? request.name
+				: definition != null ? definition.fallbackQuery : Objects.requireNonNull(request.category);
+		PoiUIFilter filter = type != null
+				? new PoiUIFilter(type, app, "_smart")
+				: new PoiUIFilter(title, "user_smart_search", null, app);
+		String nameFilter = request.name;
+		if (Algorithms.isEmpty(nameFilter) && definition != null && definition.osmandAdditionalType != null) {
+			nameFilter = definition.osmandAdditionalType.replace('_', ':');
+		}
+		filter.setFilterByName(nameFilter);
+		return filter;
+	}
+
+	private void applySmartRouteSearch(@NonNull SmartSearchRequest request) {
+		MapActivity mapActivity = getMapActivity();
+		if (mapActivity == null || !app.getRoutingHelper().isRouteCalculated()) {
+			app.showShortToastMessage(R.string.functiongemma_no_route);
+			return;
+		}
+		PoiUIFilter filter = createSmartPoiFilter(request);
+		app.getPoiFilters().replaceSelectedPoiFilters(filter);
+		WaypointHelper waypointHelper = app.getWaypointHelper();
+		waypointHelper.switchWaypointTypeAsync(WaypointHelper.POI, true, () -> {
+			if (!isAdded()) {
+				return;
+			}
+			List<LocationPointWrapper> points = filterSmartRoutePoints(request, waypointHelper);
+			if (points.isEmpty()) {
+				app.showShortToastMessage(R.string.functiongemma_no_result_on_route);
+				return;
+			}
+			if (request.resultMode == SmartSearchRequest.ResultMode.NEXT
+					|| request.resultMode == SmartSearchRequest.ResultMode.LAST) {
+				LocationPointWrapper selected = request.resultMode == SmartSearchRequest.ResultMode.NEXT
+						? points.get(0) : points.get(points.size() - 1);
+				dismissAllowingStateLoss();
+				WaypointDialogHelper.showOnMap(app, mapActivity, selected.getPoint(), false);
+			} else {
+				dismissAllowingStateLoss();
+				ShowAlongTheRouteBottomSheet.showInstance(mapActivity.getSupportFragmentManager(),
+						null, WaypointHelper.POI);
+			}
+		});
+	}
+
+	@NonNull
+	private List<LocationPointWrapper> filterSmartRoutePoints(@NonNull SmartSearchRequest request,
+	                                                         @NonNull WaypointHelper waypointHelper) {
+		List<LocationPointWrapper> visible = new ArrayList<>();
+		for (LocationPointWrapper point : new ArrayList<>(waypointHelper.getWaypoints(WaypointHelper.POI))) {
+			if (waypointHelper.isPointPassed(point)) {
+				continue;
+			}
+			Amenity amenity = point.getPoint() instanceof AmenityLocationPoint amenityPoint
+					? amenityPoint.getAmenity() : null;
+			long time = request.availability == SmartSearchRequest.Availability.OPEN_AT_ARRIVAL
+					? estimateRouteArrivalTimeMillis(point, waypointHelper)
+					: System.currentTimeMillis();
+			if (amenity != null && !matchesSmartAvailability(amenity,
+					Objects.requireNonNull(request.availability), time)) {
+				waypointHelper.removeVisibleLocationPoint(point);
+				continue;
+			}
+			visible.add(point);
+		}
+		return visible;
+	}
+
+	private long estimateRouteArrivalTimeMillis(@NonNull LocationPointWrapper point,
+	                                           @NonNull WaypointHelper waypointHelper) {
+		RouteCalculationResult route = app.getRoutingHelper().getRoute();
+		Location projection = app.getRoutingHelper().getLastProjection();
+		int totalDistance = route.getDistanceToFinish(projection);
+		int totalTime = route.getLeftTime(projection);
+		int pointDistance = waypointHelper.getRouteDistance(point);
+		double ratio = totalDistance > 0 ? Math.min(1d, Math.max(0d, pointDistance / (double) totalDistance)) : 0d;
+		return System.currentTimeMillis() + Math.round(totalTime * ratio * 1000d);
+	}
+
+	@Nullable
+	private Long getDestinationArrivalTimeMillis() {
+		if (!app.getRoutingHelper().isRouteCalculated()) {
+			return null;
+		}
+		RouteCalculationResult route = app.getRoutingHelper().getRoute();
+		int seconds = route.getLeftTime(app.getRoutingHelper().getLastProjection());
+		return System.currentTimeMillis() + seconds * 1000L;
+	}
+
+	private void clearSmartResultConstraints() {
+		smartPoiFilteringActive = false;
+		smartAvailabilityFilter = null;
+		smartOpenAtMillis = null;
+		smartResultLimit = -1;
 	}
 
 	@Override
@@ -3013,7 +3372,59 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 			visibleResults = getFilteredResultCollection(unfilteredResultCollection);
 			append = false;
 		}
+		if (smartPoiFilteringActive) {
+			visibleResults = filterSmartSearchResults(visibleResults);
+			append = false;
+		}
 		renderSearchResult(visibleResults, append);
+	}
+
+	@Nullable
+	private SearchResultCollection filterSmartSearchResults(@Nullable SearchResultCollection source) {
+		if (source == null) {
+			return null;
+		}
+		List<SearchResult> filtered = new ArrayList<>();
+		for (SearchResult result : source.getCurrentSearchResults()) {
+			if (!(result.object instanceof Amenity amenity)) {
+				continue;
+			}
+			long time = smartOpenAtMillis != null ? smartOpenAtMillis : System.currentTimeMillis();
+			if (smartAvailabilityFilter != null
+					&& !matchesSmartAvailability(amenity, smartAvailabilityFilter, time)) {
+				continue;
+			}
+			filtered.add(result);
+			if (smartResultLimit > 0 && filtered.size() >= smartResultLimit) {
+				break;
+			}
+		}
+		SearchResultCollection result = new SearchResultCollection(source.getPhrase());
+		result.addSearchResults(filtered, false, false);
+		return result;
+	}
+
+	private boolean matchesSmartAvailability(@NonNull Amenity amenity,
+	                                        @NonNull SmartSearchRequest.Availability availability,
+	                                        long timeMillis) {
+		if (availability == SmartSearchRequest.Availability.ANY) {
+			return true;
+		}
+		String openingHours = amenity.getOpeningHours();
+		if (Algorithms.isEmpty(openingHours)) {
+			return false;
+		}
+		if (availability == SmartSearchRequest.Availability.OPEN_24_7) {
+			return "24/7".equalsIgnoreCase(openingHours)
+					|| "Mo-Su 00:00-24:00".equalsIgnoreCase(openingHours);
+		}
+		OpeningHoursParser.OpeningHours parsed = OpeningHoursParser.parseOpenedHours(openingHours);
+		if (parsed == null) {
+			return false;
+		}
+		Calendar calendar = Calendar.getInstance();
+		calendar.setTimeInMillis(timeMillis);
+		return parsed.isOpenedForTime(calendar);
 	}
 
 	private boolean retainAvailableResultPoiTypeFilters(@NonNull SearchResultCollection collection) {

@@ -47,6 +47,9 @@ android {
 
 	kotlinOptions {
 		jvmTarget = "17"
+		// LiteRT-LM 0.8.0 targets Java 11 but was published with Kotlin 2.2
+		// metadata. Keep OsmAnd's existing toolchain and accept that metadata.
+		freeCompilerArgs += ["-Xskip-metadata-version-check"]
 	}
 
 	defaultConfig {

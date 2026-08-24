@@ -93,6 +93,7 @@ import net.osmand.plus.poi.PoiFiltersHelper;
 import net.osmand.plus.quickaction.MapButtonsHelper;
 import net.osmand.plus.render.RendererRegistry;
 import net.osmand.plus.render.TravelRendererHelper;
+import net.osmand.plus.search.smart.FunctionGemmaRuntime;
 import net.osmand.plus.resources.ResourceManager;
 import net.osmand.plus.routepreparationmenu.RoutingOptionsHelper;
 import net.osmand.plus.routing.RoutingHelper;
@@ -382,6 +383,7 @@ public class OsmandApplication extends MultiDexApplication {
 
 	@Override
 	public void onTerminate() {
+		FunctionGemmaRuntime.release();
 		super.onTerminate();
 		if (routingHelper != null) {
 			routingHelper.getVoiceRouter().onApplicationTerminate();
@@ -543,6 +545,7 @@ public class OsmandApplication extends MultiDexApplication {
 
 	@Override
 	public void onLowMemory() {
+		FunctionGemmaRuntime.release();
 		super.onLowMemory();
 		resourceManager.onLowMemory();
 	}

@@ -34,7 +34,7 @@
                 app:contentInsetRight="0dp"
                 app:contentInsetEnd="0dp">
 
-                <include layout="@layout/search_text_layout"/>
+                <include layout="@layout/search_text_layout_smart"/>
 
             </androidx.appcompat.widget.Toolbar>
 

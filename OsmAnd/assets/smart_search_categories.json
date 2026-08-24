@@ -1,0 +1,940 @@
+{
+  "airport": {
+    "osmand_poi_type": "aerodrome",
+    "osmand_additional_type": null,
+    "fallback_query": "aéroport",
+    "training_labels": [
+      "aéroport"
+    ]
+  },
+  "alpine_hut": {
+    "osmand_poi_type": "alpine_hut",
+    "osmand_additional_type": null,
+    "fallback_query": "refuge de montagne",
+    "training_labels": [
+      "refuge de montagne"
+    ]
+  },
+  "atm": {
+    "osmand_poi_type": "atm",
+    "osmand_additional_type": null,
+    "fallback_query": "distributeur de billets",
+    "training_labels": [
+      "distributeur de billets"
+    ]
+  },
+  "bakery": {
+    "osmand_poi_type": "bakery",
+    "osmand_additional_type": null,
+    "fallback_query": "boulangerie",
+    "training_labels": [
+      "boulangerie"
+    ]
+  },
+  "bank": {
+    "osmand_poi_type": "bank",
+    "osmand_additional_type": null,
+    "fallback_query": "banque",
+    "training_labels": [
+      "banque"
+    ]
+  },
+  "bar": {
+    "osmand_poi_type": "bar",
+    "osmand_additional_type": null,
+    "fallback_query": "bar",
+    "training_labels": [
+      "bar"
+    ]
+  },
+  "bicycle_rental": {
+    "osmand_poi_type": "bicycle_rental",
+    "osmand_additional_type": null,
+    "fallback_query": "location de vélos",
+    "training_labels": [
+      "location de vélos"
+    ]
+  },
+  "bicycle_repair": {
+    "osmand_poi_type": "bicycle_repair_station",
+    "osmand_additional_type": null,
+    "fallback_query": "atelier de réparation vélo",
+    "training_labels": [
+      "atelier de réparation vélo",
+      "atelier vélo",
+      "réparateur vélo"
+    ]
+  },
+  "bookshop": {
+    "osmand_poi_type": "books",
+    "osmand_additional_type": null,
+    "fallback_query": "librairie",
+    "training_labels": [
+      "librairie"
+    ]
+  },
+  "bus_stop": {
+    "osmand_poi_type": "bus_stop",
+    "osmand_additional_type": null,
+    "fallback_query": "arrêt de bus",
+    "training_labels": [
+      "arrêt de bus"
+    ]
+  },
+  "butcher": {
+    "osmand_poi_type": "butcher",
+    "osmand_additional_type": null,
+    "fallback_query": "boucherie",
+    "training_labels": [
+      "boucherie"
+    ]
+  },
+  "cafe": {
+    "osmand_poi_type": "cafe",
+    "osmand_additional_type": null,
+    "fallback_query": "café",
+    "training_labels": [
+      "café"
+    ]
+  },
+  "cafe_wifi": {
+    "osmand_poi_type": "cafe",
+    "osmand_additional_type": null,
+    "fallback_query": "café avec wifi",
+    "training_labels": [
+      "café avec wifi"
+    ]
+  },
+  "camping": {
+    "osmand_poi_type": "camp_site",
+    "osmand_additional_type": null,
+    "fallback_query": "camping",
+    "training_labels": [
+      "camping"
+    ]
+  },
+  "car_parts": {
+    "osmand_poi_type": "car_parts",
+    "osmand_additional_type": null,
+    "fallback_query": "magasin de pièces automobiles",
+    "training_labels": [
+      "magasin de pièces automobiles"
+    ]
+  },
+  "car_rental": {
+    "osmand_poi_type": "car_rental",
+    "osmand_additional_type": null,
+    "fallback_query": "location de voitures",
+    "training_labels": [
+      "location de voitures"
+    ]
+  },
+  "car_repair": {
+    "osmand_poi_type": "car_repair",
+    "osmand_additional_type": null,
+    "fallback_query": "garage automobile",
+    "training_labels": [
+      "garage automobile"
+    ]
+  },
+  "changing_table": {
+    "osmand_poi_type": null,
+    "osmand_additional_type": "changing_table_filter",
+    "fallback_query": "table à langer",
+    "training_labels": [
+      "table à langer"
+    ]
+  },
+  "cheese_shop": {
+    "osmand_poi_type": "cheese",
+    "osmand_additional_type": null,
+    "fallback_query": "fromagerie",
+    "training_labels": [
+      "fromagerie"
+    ]
+  },
+  "cinema": {
+    "osmand_poi_type": "cinema",
+    "osmand_additional_type": null,
+    "fallback_query": "cinéma",
+    "training_labels": [
+      "cinéma"
+    ]
+  },
+  "climbing_gym": {
+    "osmand_poi_type": "climbing",
+    "osmand_additional_type": null,
+    "fallback_query": "salle d'escalade",
+    "training_labels": [
+      "salle d'escalade"
+    ]
+  },
+  "clinic": {
+    "osmand_poi_type": "clinic",
+    "osmand_additional_type": null,
+    "fallback_query": "clinique",
+    "training_labels": [
+      "clinique"
+    ]
+  },
+  "covered_market": {
+    "osmand_poi_type": "marketplace",
+    "osmand_additional_type": "covered_yes",
+    "fallback_query": "marché couvert",
+    "training_labels": [
+      "marché couvert"
+    ]
+  },
+  "coworking": {
+    "osmand_poi_type": "coworking_space",
+    "osmand_additional_type": null,
+    "fallback_query": "espace de coworking",
+    "training_labels": [
+      "espace de coworking"
+    ]
+  },
+  "defibrillator": {
+    "osmand_poi_type": "defibrillator",
+    "osmand_additional_type": null,
+    "fallback_query": "défibrillateur",
+    "training_labels": [
+      "défibrillateur"
+    ]
+  },
+  "dentist": {
+    "osmand_poi_type": "dentist",
+    "osmand_additional_type": null,
+    "fallback_query": "dentiste",
+    "training_labels": [
+      "dentiste"
+    ]
+  },
+  "dog_park": {
+    "osmand_poi_type": "dog_park",
+    "osmand_additional_type": null,
+    "fallback_query": "parc pour chiens",
+    "training_labels": [
+      "parc pour chiens"
+    ]
+  },
+  "drinking_water": {
+    "osmand_poi_type": "drinking_water",
+    "osmand_additional_type": null,
+    "fallback_query": "fontaine d'eau potable",
+    "training_labels": [
+      "fontaine d'eau potable",
+      "point d'eau potable"
+    ]
+  },
+  "emergency": {
+    "osmand_poi_type": "emergency",
+    "osmand_additional_type": null,
+    "fallback_query": "urgences",
+    "training_labels": [
+      "urgences"
+    ]
+  },
+  "ev_charging": {
+    "osmand_poi_type": "charging_station",
+    "osmand_additional_type": null,
+    "fallback_query": "borne de recharge",
+    "training_labels": [
+      "borne de recharge"
+    ]
+  },
+  "ev_charging_150kw": {
+    "osmand_poi_type": "charging_station",
+    "osmand_additional_type": null,
+    "fallback_query": "borne 150 kW",
+    "training_labels": [
+      "borne 150 kW"
+    ]
+  },
+  "ev_charging_350kw": {
+    "osmand_poi_type": "charging_station",
+    "osmand_additional_type": null,
+    "fallback_query": "borne de recharge 350 kW",
+    "training_labels": [
+      "borne de recharge 350 kW"
+    ]
+  },
+  "ev_charging_ccs": {
+    "osmand_poi_type": "charging_station",
+    "osmand_additional_type": "socket_type2_combo",
+    "fallback_query": "borne CCS",
+    "training_labels": [
+      "borne CCS",
+      "borne de recharge CCS"
+    ]
+  },
+  "ev_charging_fast": {
+    "osmand_poi_type": "charging_station",
+    "osmand_additional_type": null,
+    "fallback_query": "borne de recharge rapide",
+    "training_labels": [
+      "borne de recharge rapide"
+    ]
+  },
+  "ev_charging_tesla": {
+    "osmand_poi_type": "charging_station",
+    "osmand_additional_type": "socket_tesla_supercharger",
+    "fallback_query": "borne Tesla",
+    "training_labels": [
+      "borne Tesla"
+    ]
+  },
+  "ev_charging_type2": {
+    "osmand_poi_type": "charging_station",
+    "osmand_additional_type": "socket_type2",
+    "fallback_query": "borne de recharge Type 2",
+    "training_labels": [
+      "borne de recharge Type 2"
+    ]
+  },
+  "fast_food": {
+    "osmand_poi_type": "fast_food",
+    "osmand_additional_type": null,
+    "fallback_query": "fast-food",
+    "training_labels": [
+      "fast-food"
+    ]
+  },
+  "fire_station": {
+    "osmand_poi_type": "fire_station",
+    "osmand_additional_type": null,
+    "fallback_query": "caserne de pompiers",
+    "training_labels": [
+      "caserne de pompiers"
+    ]
+  },
+  "fishmonger": {
+    "osmand_poi_type": "seafood",
+    "osmand_additional_type": null,
+    "fallback_query": "poissonnerie",
+    "training_labels": [
+      "poissonnerie"
+    ]
+  },
+  "fitness_centre": {
+    "osmand_poi_type": "fitness_centre",
+    "osmand_additional_type": null,
+    "fallback_query": "salle de sport",
+    "training_labels": [
+      "salle de sport"
+    ]
+  },
+  "florist": {
+    "osmand_poi_type": "florist",
+    "osmand_additional_type": null,
+    "fallback_query": "fleuriste",
+    "training_labels": [
+      "fleuriste"
+    ]
+  },
+  "fuel_adblue": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": "fuel_adblue",
+    "fallback_query": "station avec AdBlue",
+    "training_labels": [
+      "station avec AdBlue"
+    ]
+  },
+  "fuel_car_wash": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": "car_wash_yes",
+    "fallback_query": "station avec lavage auto",
+    "training_labels": [
+      "station avec lavage auto"
+    ]
+  },
+  "fuel_diesel": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": "fuel_diesel",
+    "fallback_query": "station diesel",
+    "training_labels": [
+      "station diesel"
+    ]
+  },
+  "fuel_e85": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": "fuel_e85",
+    "fallback_query": "station E85",
+    "training_labels": [
+      "station E85"
+    ]
+  },
+  "fuel_hydrogen": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": null,
+    "fallback_query": "station hydrogène",
+    "training_labels": [
+      "station hydrogène"
+    ]
+  },
+  "fuel_lpg": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": "fuel_lpg",
+    "fallback_query": "station GPL",
+    "training_labels": [
+      "station GPL"
+    ]
+  },
+  "fuel_station": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": null,
+    "fallback_query": "station essence",
+    "training_labels": [
+      "station essence",
+      "station-service"
+    ]
+  },
+  "fuel_tire_air": {
+    "osmand_poi_type": "fuel",
+    "osmand_additional_type": "compressed_air_yes",
+    "fallback_query": "station avec gonflage des pneus",
+    "training_labels": [
+      "station avec gonflage des pneus"
+    ]
+  },
+  "grocery": {
+    "osmand_poi_type": "convenience",
+    "osmand_additional_type": null,
+    "fallback_query": "épicerie",
+    "training_labels": [
+      "épicerie"
+    ]
+  },
+  "hardware_store": {
+    "osmand_poi_type": "doityourself",
+    "osmand_additional_type": null,
+    "fallback_query": "magasin de bricolage",
+    "training_labels": [
+      "magasin de bricolage"
+    ]
+  },
+  "hospital": {
+    "osmand_poi_type": "hospital",
+    "osmand_additional_type": null,
+    "fallback_query": "hôpital",
+    "training_labels": [
+      "hôpital"
+    ]
+  },
+  "hostel": {
+    "osmand_poi_type": "hostel",
+    "osmand_additional_type": null,
+    "fallback_query": "auberge de jeunesse",
+    "training_labels": [
+      "auberge de jeunesse"
+    ]
+  },
+  "hotel": {
+    "osmand_poi_type": "hotel",
+    "osmand_additional_type": null,
+    "fallback_query": "hôtel",
+    "training_labels": [
+      "hôtel"
+    ]
+  },
+  "ice_cream": {
+    "osmand_poi_type": "ice_cream",
+    "osmand_additional_type": null,
+    "fallback_query": "glacier",
+    "training_labels": [
+      "glacier"
+    ]
+  },
+  "kebab": {
+    "osmand_poi_type": "fast_food",
+    "osmand_additional_type": "cuisine_kebab",
+    "fallback_query": "kebab",
+    "training_labels": [
+      "kebab"
+    ]
+  },
+  "laundry": {
+    "osmand_poi_type": "laundry",
+    "osmand_additional_type": null,
+    "fallback_query": "laverie",
+    "training_labels": [
+      "laverie",
+      "laverie automatique"
+    ]
+  },
+  "library": {
+    "osmand_poi_type": "library",
+    "osmand_additional_type": null,
+    "fallback_query": "bibliothèque",
+    "training_labels": [
+      "bibliothèque"
+    ]
+  },
+  "luggage_storage": {
+    "osmand_poi_type": null,
+    "osmand_additional_type": null,
+    "fallback_query": "consigne à bagages",
+    "training_labels": [
+      "consigne à bagages"
+    ]
+  },
+  "market": {
+    "osmand_poi_type": "marketplace",
+    "osmand_additional_type": null,
+    "fallback_query": "marché",
+    "training_labels": [
+      "marché"
+    ]
+  },
+  "medical_centre": {
+    "osmand_poi_type": "doctors",
+    "osmand_additional_type": null,
+    "fallback_query": "centre médical",
+    "training_labels": [
+      "centre médical"
+    ]
+  },
+  "medical_laboratory": {
+    "osmand_poi_type": "laboratory",
+    "osmand_additional_type": null,
+    "fallback_query": "laboratoire d'analyses",
+    "training_labels": [
+      "laboratoire d'analyses"
+    ]
+  },
+  "medical_radiology": {
+    "osmand_poi_type": "doctors",
+    "osmand_additional_type": "healthcare_speciality_radiology",
+    "fallback_query": "centre de radiologie",
+    "training_labels": [
+      "centre de radiologie"
+    ]
+  },
+  "motorhome_area": {
+    "osmand_poi_type": "caravan_site",
+    "osmand_additional_type": null,
+    "fallback_query": "aire de camping-car",
+    "training_labels": [
+      "aire de camping-car",
+      "aire pour camping-car"
+    ]
+  },
+  "motorhome_dump": {
+    "osmand_poi_type": "sanitary_dump_station",
+    "osmand_additional_type": null,
+    "fallback_query": "aire de vidange camping-car",
+    "training_labels": [
+      "aire de vidange camping-car"
+    ]
+  },
+  "museum": {
+    "osmand_poi_type": "museum",
+    "osmand_additional_type": null,
+    "fallback_query": "musée",
+    "training_labels": [
+      "musée"
+    ]
+  },
+  "on_duty_pharmacy": {
+    "osmand_poi_type": "pharmacy",
+    "osmand_additional_type": null,
+    "fallback_query": "pharmacie de garde",
+    "training_labels": [
+      "pharmacie de garde"
+    ]
+  },
+  "optician": {
+    "osmand_poi_type": "optician",
+    "osmand_additional_type": null,
+    "fallback_query": "opticien",
+    "training_labels": [
+      "opticien"
+    ]
+  },
+  "organic_shop": {
+    "osmand_poi_type": null,
+    "osmand_additional_type": null,
+    "fallback_query": "magasin bio",
+    "training_labels": [
+      "magasin bio"
+    ]
+  },
+  "outdoor_shop": {
+    "osmand_poi_type": "outdoor",
+    "osmand_additional_type": null,
+    "fallback_query": "magasin de randonnée",
+    "training_labels": [
+      "magasin de randonnée"
+    ]
+  },
+  "park": {
+    "osmand_poi_type": "park",
+    "osmand_additional_type": null,
+    "fallback_query": "jardin public",
+    "training_labels": [
+      "jardin public",
+      "parc"
+    ]
+  },
+  "park_and_ride": {
+    "osmand_poi_type": "parking",
+    "osmand_additional_type": null,
+    "fallback_query": "parking-relais",
+    "training_labels": [
+      "parking-relais"
+    ]
+  },
+  "parking": {
+    "osmand_poi_type": "parking",
+    "osmand_additional_type": null,
+    "fallback_query": "parking",
+    "training_labels": [
+      "parking"
+    ]
+  },
+  "parking_accessible": {
+    "osmand_poi_type": "parking",
+    "osmand_additional_type": "wheelchair_yes",
+    "fallback_query": "parking accessible",
+    "training_labels": [
+      "parking accessible"
+    ]
+  },
+  "parking_covered": {
+    "osmand_poi_type": "parking",
+    "osmand_additional_type": "covered_yes",
+    "fallback_query": "parking couvert",
+    "training_labels": [
+      "parking couvert"
+    ]
+  },
+  "parking_free": {
+    "osmand_poi_type": "parking",
+    "osmand_additional_type": "fee_no",
+    "fallback_query": "parking gratuit",
+    "training_labels": [
+      "parking gratuit"
+    ]
+  },
+  "pharmacy": {
+    "osmand_poi_type": "pharmacy",
+    "osmand_additional_type": null,
+    "fallback_query": "pharmacie",
+    "training_labels": [
+      "pharmacie"
+    ]
+  },
+  "physiotherapist": {
+    "osmand_poi_type": "physiotherapist",
+    "osmand_additional_type": null,
+    "fallback_query": "kinésithérapeute",
+    "training_labels": [
+      "kinésithérapeute"
+    ]
+  },
+  "picnic_area": {
+    "osmand_poi_type": "picnic_site",
+    "osmand_additional_type": null,
+    "fallback_query": "aire de pique-nique",
+    "training_labels": [
+      "aire de pique-nique"
+    ]
+  },
+  "pizzeria": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "cuisine_pizza",
+    "fallback_query": "pizzeria",
+    "training_labels": [
+      "pizzeria"
+    ]
+  },
+  "playground": {
+    "osmand_poi_type": "playground",
+    "osmand_additional_type": null,
+    "fallback_query": "terrain de jeux",
+    "training_labels": [
+      "terrain de jeux",
+      "aire de jeux"
+    ]
+  },
+  "police": {
+    "osmand_poi_type": "police",
+    "osmand_additional_type": null,
+    "fallback_query": "commissariat",
+    "training_labels": [
+      "commissariat"
+    ]
+  },
+  "post_office": {
+    "osmand_poi_type": "post_office",
+    "osmand_additional_type": null,
+    "fallback_query": "bureau de poste",
+    "training_labels": [
+      "bureau de poste"
+    ]
+  },
+  "pub": {
+    "osmand_poi_type": "pub",
+    "osmand_additional_type": null,
+    "fallback_query": "pub",
+    "training_labels": [
+      "pub"
+    ]
+  },
+  "public_shower": {
+    "osmand_poi_type": "shower",
+    "osmand_additional_type": null,
+    "fallback_query": "douche publique",
+    "training_labels": [
+      "douche publique"
+    ]
+  },
+  "railway_station": {
+    "osmand_poi_type": "railway_station",
+    "osmand_additional_type": null,
+    "fallback_query": "gare",
+    "training_labels": [
+      "gare",
+      "gare ferroviaire"
+    ]
+  },
+  "rest_area": {
+    "osmand_poi_type": "rest_area",
+    "osmand_additional_type": null,
+    "fallback_query": "aire de repos",
+    "training_labels": [
+      "aire de repos"
+    ]
+  },
+  "restaurant": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": null,
+    "fallback_query": "restaurant",
+    "training_labels": [
+      "restaurant"
+    ]
+  },
+  "restaurant_accessible": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "wheelchair_yes",
+    "fallback_query": "restaurant accessible en fauteuil roulant",
+    "training_labels": [
+      "restaurant accessible en fauteuil roulant"
+    ]
+  },
+  "restaurant_family": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": null,
+    "fallback_query": "restaurant familial",
+    "training_labels": [
+      "restaurant familial"
+    ]
+  },
+  "restaurant_gluten_free": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "diet_gluten_free_filter_yes",
+    "fallback_query": "restaurant sans gluten",
+    "training_labels": [
+      "restaurant sans gluten"
+    ]
+  },
+  "restaurant_halal": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "diet_halal_filter_yes",
+    "fallback_query": "restaurant halal",
+    "training_labels": [
+      "restaurant halal"
+    ]
+  },
+  "restaurant_terrace": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "outdoor_seating_filter_yes",
+    "fallback_query": "restaurant avec terrasse",
+    "training_labels": [
+      "restaurant avec terrasse"
+    ]
+  },
+  "restaurant_vegan": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "diet_vegan_filter_yes",
+    "fallback_query": "restaurant végan",
+    "training_labels": [
+      "restaurant végan"
+    ]
+  },
+  "restaurant_vegetarian": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "diet_vegetarian_filter_yes",
+    "fallback_query": "restaurant végétarien",
+    "training_labels": [
+      "restaurant végétarien"
+    ]
+  },
+  "sandwich_shop": {
+    "osmand_poi_type": "fast_food",
+    "osmand_additional_type": "cuisine_sandwich",
+    "fallback_query": "sandwicherie",
+    "training_labels": [
+      "sandwicherie"
+    ]
+  },
+  "secure_bicycle_parking": {
+    "osmand_poi_type": "bicycle_parking",
+    "osmand_additional_type": null,
+    "fallback_query": "parking vélo sécurisé",
+    "training_labels": [
+      "parking vélo sécurisé"
+    ]
+  },
+  "shelter": {
+    "osmand_poi_type": "shelter",
+    "osmand_additional_type": null,
+    "fallback_query": "abri",
+    "training_labels": [
+      "abri"
+    ]
+  },
+  "shopping_mall": {
+    "osmand_poi_type": "mall",
+    "osmand_additional_type": null,
+    "fallback_query": "centre commercial",
+    "training_labels": [
+      "centre commercial"
+    ]
+  },
+  "sports_shop": {
+    "osmand_poi_type": "sports",
+    "osmand_additional_type": null,
+    "fallback_query": "magasin de sport",
+    "training_labels": [
+      "magasin de sport"
+    ]
+  },
+  "subway_station": {
+    "osmand_poi_type": "subway_station",
+    "osmand_additional_type": null,
+    "fallback_query": "station de métro",
+    "training_labels": [
+      "station de métro"
+    ]
+  },
+  "supermarket": {
+    "osmand_poi_type": "supermarket",
+    "osmand_additional_type": null,
+    "fallback_query": "supermarché",
+    "training_labels": [
+      "supermarché"
+    ]
+  },
+  "supervised_beach": {
+    "osmand_poi_type": "beach",
+    "osmand_additional_type": null,
+    "fallback_query": "plage surveillée",
+    "training_labels": [
+      "plage surveillée"
+    ]
+  },
+  "sushi_restaurant": {
+    "osmand_poi_type": "restaurant",
+    "osmand_additional_type": "cuisine_sushi",
+    "fallback_query": "sushi",
+    "training_labels": [
+      "sushi"
+    ]
+  },
+  "swimming_pool": {
+    "osmand_poi_type": "swimming_pool",
+    "osmand_additional_type": null,
+    "fallback_query": "piscine",
+    "training_labels": [
+      "piscine"
+    ]
+  },
+  "taxi": {
+    "osmand_poi_type": "taxi",
+    "osmand_additional_type": null,
+    "fallback_query": "station de taxis",
+    "training_labels": [
+      "station de taxis"
+    ]
+  },
+  "tea_room": {
+    "osmand_poi_type": "cafe",
+    "osmand_additional_type": "cuisine_tea_shop",
+    "fallback_query": "salon de thé",
+    "training_labels": [
+      "salon de thé"
+    ]
+  },
+  "toilets": {
+    "osmand_poi_type": "toilets",
+    "osmand_additional_type": null,
+    "fallback_query": "toilettes publiques",
+    "training_labels": [
+      "toilettes publiques"
+    ]
+  },
+  "toilets_accessible": {
+    "osmand_poi_type": "toilets",
+    "osmand_additional_type": "toilets_wheelchair_yes",
+    "fallback_query": "toilettes accessibles",
+    "training_labels": [
+      "toilettes accessibles"
+    ]
+  },
+  "toilets_changing_table": {
+    "osmand_poi_type": "toilets",
+    "osmand_additional_type": "changing_table_filter",
+    "fallback_query": "toilettes avec table à langer",
+    "training_labels": [
+      "toilettes avec table à langer"
+    ]
+  },
+  "tourist_information": {
+    "osmand_poi_type": "information_office",
+    "osmand_additional_type": null,
+    "fallback_query": "office de tourisme",
+    "training_labels": [
+      "office de tourisme"
+    ]
+  },
+  "trailhead": {
+    "osmand_poi_type": "trailhead",
+    "osmand_additional_type": null,
+    "fallback_query": "départ de randonnée",
+    "training_labels": [
+      "départ de randonnée"
+    ]
+  },
+  "tram_stop": {
+    "osmand_poi_type": "tram_stop",
+    "osmand_additional_type": null,
+    "fallback_query": "station de tramway",
+    "training_labels": [
+      "station de tramway"
+    ]
+  },
+  "vehicle_inspection": {
+    "osmand_poi_type": "vehicle_inspection",
+    "osmand_additional_type": null,
+    "fallback_query": "centre de contrôle technique",
+    "training_labels": [
+      "centre de contrôle technique"
+    ]
+  },
+  "veterinary": {
+    "osmand_poi_type": "veterinary",
+    "osmand_additional_type": null,
+    "fallback_query": "vétérinaire",
+    "training_labels": [
+      "vétérinaire"
+    ]
+  },
+  "viewpoint": {
+    "osmand_poi_type": "viewpoint",
+    "osmand_additional_type": null,
+    "fallback_query": "point de vue",
+    "training_labels": [
+      "point de vue"
+    ]
+  }
+}

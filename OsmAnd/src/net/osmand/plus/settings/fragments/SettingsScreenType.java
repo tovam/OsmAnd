@@ -21,6 +21,7 @@ import net.osmand.plus.settings.fragments.voice.VoiceAnnouncesFragment;
 public enum SettingsScreenType {
 
 	MAIN_SETTINGS(MainSettingsFragment.class.getName(), false, null, R.xml.settings_main_screen, R.layout.global_preference_toolbar),
+	FUNCTION_GEMMA(FunctionGemmaSettingsFragment.class.getName(), false, null, R.xml.functiongemma_settings, R.layout.global_preference_toolbar),
 	GLOBAL_SETTINGS(GlobalSettingsFragment.class.getName(), false, null, R.xml.global_settings, R.layout.global_preference_toolbar),
 	CONFIGURE_PROFILE(ConfigureProfileFragment.class.getName(), true, null, R.xml.configure_profile, R.layout.profile_preference_toolbar_with_switch),
 	PROXY_SETTINGS(ProxySettingsFragment.class.getName(), false, null, R.xml.proxy_preferences, R.layout.global_preferences_toolbar_with_switch),
