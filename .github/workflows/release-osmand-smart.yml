@@ -52,5 +52,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --target "${TARGET_SHA}" \
             --title "${RELEASE_TITLE}" \
-            --notes "Debug ARM64 OpenGL build for testing. Application ID: com.tovam.osmandsmart." \
+            --notes "Debug ARM64 OpenGL CPU build for testing. Application ID: com.tovam.osmandsmart. Signed with the repository's stable test key, with a monotonically increasing versionCode so later APKs install as updates." \
             --prerelease

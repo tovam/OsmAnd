@@ -26,12 +26,12 @@ public final class SmartSearchGuard {
 			"(?:^|\\s)(?:a|vers|autour de|pres de)\\s+([A-Z][\\p{L}'’ -]{1,60}?)(?:[,.!?;:]|$)");
 
 	private static final Pattern ROUTE_CUE = words(
-			"sur (?:ma|la|notre) route|sur (?:mon|l')itineraire|sur (?:mon|le) trajet|"
+			"sur (?:toute? )?(?:ma|la|notre) route|sur (?:tout )?(?:mon|l')itineraire|sur (?:tout )?(?:mon|le) trajet|"
 					+ "le long (?:de|du)|sur le chemin|devant (?:moi|nous)|dans (?:mon|le) sens|"
-					+ "sans (?:revenir|retourner) en arriere|sans demi tour|avant la destination|"
+					+ "sans (?:revenir|retourner) en arriere|sans demi tour|avant (?:ma|la) destination|"
 					+ "avant d'arriver|avant d'atteindre|portion restante|trajet|itineraire|parcours|guidage");
 	private static final Pattern DESTINATION_CUE = words(
-			"a destination|pres de (?:ma |la )?destination|autour de (?:ma |la )?destination|"
+			"a (?:ma |la )?destination|pres de (?:ma |la )?destination|autour de (?:ma |la )?destination|"
 					+ "a l'arrivee|vers l'arrivee|pres de l'arrivee|point d'arrivee|point final|terminus|"
 					+ "fin du trajet|fin du guidage|quand j'arrive|quand nous arrivons|quand j'y serai");
 	private static final Pattern MAP_CUE = words(
@@ -42,10 +42,10 @@ public final class SmartSearchGuard {
 					+ "la ou je suis|la ou je me trouve|dans les parages|dans mon secteur|ici|d'ici");
 
 	private static final Pattern LAST_CUE = words(
-			"dernier|derniere|ultime|le plus pres de la fin|le plus proche de la fin|"
+			"dernier(?:e|s|es)?|ultime(?:s)?|le plus pres de la fin|le plus proche de la fin|"
 					+ "le plus pres de la destination|le plus proche de la destination");
 	private static final Pattern NEXT_CUE = words(
-			"prochain|prochaine|premier|premiere|suivant|suivante|devant (?:moi|nous)|"
+			"prochain(?:e|s|es)?|premier(?:e|s|es)?|suivant(?:e|s|es)?|plus loin|devant (?:moi|nous)|"
 					+ "sans (?:revenir|retourner) en arriere|sans demi tour");
 	private static final Pattern NEAREST_CUE = words(
 			"le plus proche|la plus proche|les plus proches|le moins loin|la moins loin|"
@@ -224,7 +224,11 @@ public final class SmartSearchGuard {
 		return switch (inferred) {
 			case "restaurant" -> modelCategory.startsWith("restaurant_")
 					|| "pizzeria".equals(modelCategory) || "sushi_restaurant".equals(modelCategory);
-			case "parking" -> modelCategory.startsWith("parking_") || "park_and_ride".equals(modelCategory);
+			case "cafe" -> modelCategory.startsWith("cafe_");
+			case "pharmacy" -> modelCategory.startsWith("pharmacy_")
+					|| "on_duty_pharmacy".equals(modelCategory);
+			case "parking" -> modelCategory.startsWith("parking_")
+					|| modelCategory.endsWith("_parking") || "park_and_ride".equals(modelCategory);
 			case "toilets" -> modelCategory.startsWith("toilets_");
 			case "fuel_station" -> modelCategory.startsWith("fuel_");
 			case "ev_charging" -> modelCategory.startsWith("ev_charging_");

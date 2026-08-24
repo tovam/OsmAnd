@@ -79,6 +79,9 @@ jobs:
         working-directory: android
         run: |
           set -o pipefail
+          export APK_NUMBER_VERSION=$((6000000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
+          export APK_VERSION_SUFFIX="#smart${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          echo "Building update-compatible versionCode ${APK_NUMBER_VERSION}"
           ./gradlew assembleAndroidFullOpenglArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
 
       - name: Publish Gradle failure details

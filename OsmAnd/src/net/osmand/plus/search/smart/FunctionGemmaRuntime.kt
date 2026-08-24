@@ -26,8 +26,7 @@ object FunctionGemmaRuntime {
     enum class ErrorCode {
         DISABLED,
         MODEL_NOT_INSTALLED,
-        GPU_UNAVAILABLE,
-        GPU_OUTPUT_CORRUPTED,
+        MODEL_OUTPUT_CORRUPTED,
         TIMEOUT,
         NO_TOOL_CALL,
         INVALID_MODEL_OUTPUT,
@@ -40,18 +39,15 @@ object FunctionGemmaRuntime {
         fun onError(code: ErrorCode, message: String)
     }
 
-    private const val INFERENCE_TIMEOUT_SECONDS = 30L
+    private const val INFERENCE_TIMEOUT_SECONDS = 90L
     private const val TOOL_CAPTURE_CANCEL_POLL_MS = 25L
     private const val ENGINE_IDLE_SECONDS = 120L
-    // Some Android OpenCL drivers retain conversation allocations until Engine.close().
-    private const val MAX_CONVERSATIONS_PER_ENGINE = 4
     private const val MAX_NUM_TOKENS = 1024
     private val executor = Executors.newSingleThreadExecutor()
     private val watchdog = Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var engine: Engine? = null
     private var engineModelStamp: String? = null
-    private var engineConversationCount = 0
     private var idleReleaseTask: ScheduledFuture<*>? = null
 
     private const val DEVELOPER_PROMPT = """Tu convertis une demande de recherche géographique en un appel d'outil pour OsmAnd.
@@ -86,18 +82,18 @@ Après un appel d'outil accepté, réponds seulement OK."""
             }
             return
         }
-        executor.execute { parseOnGpu(appContext, manager.modelFile, text, callback) }
+        executor.execute { parseOnCpu(appContext, manager.modelFile, text, callback) }
     }
 
     @OptIn(ExperimentalApi::class)
-    private fun parseOnGpu(context: Context, modelFile: File, userText: String, callback: Callback) {
+    private fun parseOnCpu(context: Context, modelFile: File, userText: String, callback: Callback) {
         var conversation: Conversation? = null
         var timeoutTask: ScheduledFuture<*>? = null
         var toolCaptureCancelTask: ScheduledFuture<*>? = null
         val timedOut = AtomicBoolean(false)
         val tools = OsmandSearchTools()
         try {
-            val activeEngine = getOrCreateGpuEngine(context, modelFile)
+            val activeEngine = getOrCreateCpuEngine(context, modelFile)
             // The exported FunctionGemma bundle embeds a Hugging Face tokenizer.
             // LiteRT-LM constrained decoding only supports SentencePiece tokenizers.
             ExperimentalFlags.enableConversationConstrainedDecoding = false
@@ -125,11 +121,11 @@ Après un appel d'outil accepté, réponds seulement OK."""
             val request = tools.captured.get()?.let { requestFromCapturedCall(context, userText, it) }
             when {
                 request != null -> mainHandler.post { callback.onResult(request) }
-                timedOut.get() -> postError(callback, ErrorCode.TIMEOUT, "Le GPU n’a pas répondu à temps")
+                timedOut.get() -> postError(callback, ErrorCode.TIMEOUT, "FunctionGemma n’a pas répondu à temps sur le CPU")
                 response.contains("<pad>", ignoreCase = true) -> postError(
                     callback,
-                    ErrorCode.GPU_OUTPUT_CORRUPTED,
-                    "Le backend GPU a produit une sortie de modèle corrompue (<pad>)",
+                    ErrorCode.MODEL_OUTPUT_CORRUPTED,
+                    "Le modèle a produit une sortie corrompue (<pad>) sur le CPU",
                 )
                 response.isNotBlank() -> mainHandler.post { callback.onClarification(response) }
                 else -> postError(callback, ErrorCode.NO_TOOL_CALL, "FunctionGemma n’a produit aucun appel de recherche")
@@ -151,7 +147,6 @@ Après un appel d'outil accepté, réponds seulement OK."""
                 val code = when {
                     timedOut.get() -> ErrorCode.TIMEOUT
                     error is IllegalArgumentException -> ErrorCode.INVALID_MODEL_OUTPUT
-                    error.message?.contains("GPU", ignoreCase = true) == true -> ErrorCode.GPU_UNAVAILABLE
                     else -> ErrorCode.INFERENCE_ERROR
                 }
                 val message = if (code == ErrorCode.TIMEOUT) {
@@ -188,14 +183,13 @@ Après un appel d'outil accepté, réponds seulement OK."""
     }
 
     @Synchronized
-    private fun getOrCreateGpuEngine(context: Context, modelFile: File): Engine {
+    private fun getOrCreateCpuEngine(context: Context, modelFile: File): Engine {
         idleReleaseTask?.cancel(false)
         idleReleaseTask = null
         val stamp = "${modelFile.absolutePath}:${modelFile.length()}:${modelFile.lastModified()}"
         val current = engine
         if (current != null && engineModelStamp == stamp
             && runCatching { current.isInitialized() }.getOrDefault(false)) {
-            engineConversationCount++
             return current
         }
         if (current != null) {
@@ -203,12 +197,11 @@ Après un appel d'outil accepté, réponds seulement OK."""
         }
         engine = null
         engineModelStamp = null
-        engineConversationCount = 0
         val cacheDirectory = File(context.cacheDir, "functiongemma").apply { mkdirs() }
         val next = Engine(
             EngineConfig(
                 modelPath = modelFile.absolutePath,
-                backend = Backend.GPU,
+                backend = Backend.CPU,
                 maxNumTokens = MAX_NUM_TOKENS,
                 cacheDir = cacheDirectory.absolutePath,
             )
@@ -221,17 +214,12 @@ Après un appel d'outil accepté, réponds seulement OK."""
         }
         engine = next
         engineModelStamp = stamp
-        engineConversationCount = 1
         return next
     }
 
     @Synchronized
     private fun scheduleIdleRelease() {
         idleReleaseTask?.cancel(false)
-        if (engineConversationCount >= MAX_CONVERSATIONS_PER_ENGINE) {
-            closeEngine()
-            return
-        }
         idleReleaseTask = watchdog.schedule({
             executor.execute { closeEngine() }
         }, ENGINE_IDLE_SECONDS, TimeUnit.SECONDS)
@@ -249,7 +237,6 @@ Après un appel d'outil accepté, réponds seulement OK."""
         val current = engine
         engine = null
         engineModelStamp = null
-        engineConversationCount = 0
         runCatching { current?.close() }
     }
 

@@ -646,10 +646,8 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 							})
 							.show();
 				} else {
-					int title = code == FunctionGemmaRuntime.ErrorCode.GPU_UNAVAILABLE
-							|| code == FunctionGemmaRuntime.ErrorCode.GPU_OUTPUT_CORRUPTED
-							? R.string.functiongemma_gpu_error_title
-							: code == FunctionGemmaRuntime.ErrorCode.INVALID_MODEL_OUTPUT
+					int title = code == FunctionGemmaRuntime.ErrorCode.INVALID_MODEL_OUTPUT
+							|| code == FunctionGemmaRuntime.ErrorCode.MODEL_OUTPUT_CORRUPTED
 							|| code == FunctionGemmaRuntime.ErrorCode.NO_TOOL_CALL
 							? R.string.functiongemma_parse_error_title
 							: R.string.functiongemma_runtime_error_title;
