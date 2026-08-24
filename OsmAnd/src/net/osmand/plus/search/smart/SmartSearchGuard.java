@@ -119,7 +119,8 @@ public final class SmartSearchGuard {
 		}
 
 		String inferredCategory = inferCategory(normalized);
-		String category = registry.find(inferredCategory) != null ? inferredCategory : null;
+		String category = literalName == null && registry.find(inferredCategory) != null
+				? inferredCategory : null;
 		if (category != null && literalName == null && registry.find(modelCategory) != null
 				&& isSpecificVariant(category, modelCategory)) {
 			category = modelCategory;
