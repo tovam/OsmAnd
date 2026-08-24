@@ -42,12 +42,15 @@ object FunctionGemmaRuntime {
 
     private const val INFERENCE_TIMEOUT_SECONDS = 12L
     private const val ENGINE_IDLE_SECONDS = 120L
+    // Some Android OpenCL drivers retain conversation allocations until Engine.close().
+    private const val MAX_CONVERSATIONS_PER_ENGINE = 4
     private const val MAX_NUM_TOKENS = 1024
     private val executor = Executors.newSingleThreadExecutor()
     private val watchdog = Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var engine: Engine? = null
     private var engineModelStamp: String? = null
+    private var engineConversationCount = 0
     private var idleReleaseTask: ScheduledFuture<*>? = null
 
     private const val DEVELOPER_PROMPT = """Tu convertis une demande de recherche géographique en un appel d'outil pour OsmAnd.
@@ -155,11 +158,15 @@ Après un appel d'outil accepté, réponds seulement OK."""
         val current = engine
         if (current != null && engineModelStamp == stamp
             && runCatching { current.isInitialized() }.getOrDefault(false)) {
+            engineConversationCount++
             return current
         }
         if (current != null) {
             runCatching { current.close() }
         }
+        engine = null
+        engineModelStamp = null
+        engineConversationCount = 0
         val cacheDirectory = File(context.cacheDir, "functiongemma").apply { mkdirs() }
         val next = Engine(
             EngineConfig(
@@ -177,12 +184,17 @@ Après un appel d'outil accepté, réponds seulement OK."""
         }
         engine = next
         engineModelStamp = stamp
+        engineConversationCount = 1
         return next
     }
 
     @Synchronized
     private fun scheduleIdleRelease() {
         idleReleaseTask?.cancel(false)
+        if (engineConversationCount >= MAX_CONVERSATIONS_PER_ENGINE) {
+            closeEngine()
+            return
+        }
         idleReleaseTask = watchdog.schedule({
             executor.execute { closeEngine() }
         }, ENGINE_IDLE_SECONDS, TimeUnit.SECONDS)
@@ -200,6 +212,7 @@ Après un appel d'outil accepté, réponds seulement OK."""
         val current = engine
         engine = null
         engineModelStamp = null
+        engineConversationCount = 0
         runCatching { current?.close() }
     }
 
