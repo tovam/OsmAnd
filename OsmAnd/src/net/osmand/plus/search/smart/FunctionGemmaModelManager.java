@@ -234,6 +234,7 @@ public final class FunctionGemmaModelManager {
 			publish(State.VERIFYING, downloaded, total, null);
 			verifyModel(partial, expectedSha256);
 			Os.rename(partial.getAbsolutePath(), model.getAbsolutePath());
+			FunctionGemmaRuntime.release();
 			publish(State.READY, model.length(), model.length(), null);
 		} catch (DownloadCancelledException e) {
 			if (partial.exists()) {

@@ -40,7 +40,8 @@ object FunctionGemmaRuntime {
         fun onError(code: ErrorCode, message: String)
     }
 
-    private const val INFERENCE_TIMEOUT_SECONDS = 12L
+    private const val INFERENCE_TIMEOUT_SECONDS = 30L
+    private const val TOOL_CAPTURE_CANCEL_POLL_MS = 25L
     private const val ENGINE_IDLE_SECONDS = 120L
     // Some Android OpenCL drivers retain conversation allocations until Engine.close().
     private const val MAX_CONVERSATIONS_PER_ENGINE = 4
@@ -92,10 +93,11 @@ Après un appel d'outil accepté, réponds seulement OK."""
     private fun parseOnGpu(context: Context, modelFile: File, userText: String, callback: Callback) {
         var conversation: Conversation? = null
         var timeoutTask: ScheduledFuture<*>? = null
+        var toolCaptureCancelTask: ScheduledFuture<*>? = null
         val timedOut = AtomicBoolean(false)
+        val tools = OsmandSearchTools()
         try {
             val activeEngine = getOrCreateGpuEngine(context, modelFile)
-            val tools = OsmandSearchTools()
             // The exported FunctionGemma bundle embeds a Hugging Face tokenizer.
             // LiteRT-LM constrained decoding only supports SentencePiece tokenizers.
             ExperimentalFlags.enableConversationConstrainedDecoding = false
@@ -106,29 +108,24 @@ Après un appel d'outil accepté, réponds seulement OK."""
             )
             conversation = activeEngine.createConversation(config)
             val runningConversation = conversation
+            // LiteRT-LM 0.8 automatically asks the model for a final response after executing a
+            // tool. OsmAnd already has the complete search request at that point, so repeatedly
+            // cancel that unnecessary second generation as soon as the tool has been captured.
+            toolCaptureCancelTask = watchdog.scheduleAtFixedRate({
+                if (tools.captured.get() != null) {
+                    runCatching { runningConversation.cancelProcess() }
+                }
+            }, TOOL_CAPTURE_CANCEL_POLL_MS, TOOL_CAPTURE_CANCEL_POLL_MS, TimeUnit.MILLISECONDS)
             timeoutTask = watchdog.schedule({
                 timedOut.set(true)
                 runCatching { runningConversation.cancelProcess() }
             }, INFERENCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
             val response = conversation.sendMessage(Message.of(userText)).toString()
-            val request = when (val call = tools.captured.get()) {
-                is CapturedCall.Location -> SmartSearchGuard.guardLocation(userText, call.query)
-                is CapturedCall.Poi -> SmartSearchGuard.guardPoi(
-                    userText,
-                    call.name,
-                    call.category,
-                    call.context,
-                    call.place,
-                    call.resultMode,
-                    call.availability,
-                    SmartSearchCategoryRegistry.get(context),
-                )
-                null -> null
-            }
+            val request = tools.captured.get()?.let { requestFromCapturedCall(context, userText, it) }
             when {
-                timedOut.get() -> postError(callback, ErrorCode.TIMEOUT, "Le GPU n’a pas répondu à temps")
                 request != null -> mainHandler.post { callback.onResult(request) }
+                timedOut.get() -> postError(callback, ErrorCode.TIMEOUT, "Le GPU n’a pas répondu à temps")
                 response.contains("<pad>", ignoreCase = true) -> postError(
                     callback,
                     ErrorCode.GPU_OUTPUT_CORRUPTED,
@@ -138,18 +135,56 @@ Après un appel d'outil accepté, réponds seulement OK."""
                 else -> postError(callback, ErrorCode.NO_TOOL_CALL, "FunctionGemma n’a produit aucun appel de recherche")
             }
         } catch (error: Throwable) {
-            val code = when {
-                timedOut.get() -> ErrorCode.TIMEOUT
-                error is IllegalArgumentException -> ErrorCode.INVALID_MODEL_OUTPUT
-                error.message?.contains("GPU", ignoreCase = true) == true -> ErrorCode.GPU_UNAVAILABLE
-                else -> ErrorCode.INFERENCE_ERROR
+            val capturedCall = tools.captured.get()
+            if (capturedCall != null) {
+                try {
+                    val request = requestFromCapturedCall(context, userText, capturedCall)
+                    mainHandler.post { callback.onResult(request) }
+                } catch (validationError: Throwable) {
+                    postError(
+                        callback,
+                        ErrorCode.INVALID_MODEL_OUTPUT,
+                        validationError.message ?: validationError.javaClass.simpleName,
+                    )
+                }
+            } else {
+                val code = when {
+                    timedOut.get() -> ErrorCode.TIMEOUT
+                    error is IllegalArgumentException -> ErrorCode.INVALID_MODEL_OUTPUT
+                    error.message?.contains("GPU", ignoreCase = true) == true -> ErrorCode.GPU_UNAVAILABLE
+                    else -> ErrorCode.INFERENCE_ERROR
+                }
+                val message = if (code == ErrorCode.TIMEOUT) {
+                    "FunctionGemma n’a produit aucun appel de recherche en ${INFERENCE_TIMEOUT_SECONDS} secondes"
+                } else {
+                    error.message ?: error.javaClass.simpleName
+                }
+                postError(callback, code, message)
             }
-            postError(callback, code, error.message ?: error.javaClass.simpleName)
         } finally {
             timeoutTask?.cancel(false)
+            toolCaptureCancelTask?.cancel(false)
             runCatching { conversation?.close() }
             scheduleIdleRelease()
         }
+    }
+
+    private fun requestFromCapturedCall(
+        context: Context,
+        userText: String,
+        call: CapturedCall,
+    ): SmartSearchRequest = when (call) {
+        is CapturedCall.Location -> SmartSearchGuard.guardLocation(userText, call.query)
+        is CapturedCall.Poi -> SmartSearchGuard.guardPoi(
+            userText,
+            call.name,
+            call.category,
+            call.context,
+            call.place,
+            call.resultMode,
+            call.availability,
+            SmartSearchCategoryRegistry.get(context),
+        )
     }
 
     @Synchronized
