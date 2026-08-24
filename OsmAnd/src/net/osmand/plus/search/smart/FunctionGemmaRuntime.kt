@@ -127,7 +127,7 @@ Après un appel d'outil accepté, réponds seulement OK."""
                 response.contains("<pad>", ignoreCase = true) -> postError(
                     callback,
                     ErrorCode.GPU_OUTPUT_CORRUPTED,
-                    "Le backend GPU a produit une sortie Gemma 270M corrompue",
+                    "Le backend GPU a produit une sortie de modèle corrompue (<pad>)",
                 )
                 response.isNotBlank() -> mainHandler.post { callback.onClarification(response) }
                 else -> postError(callback, ErrorCode.NO_TOOL_CALL, "FunctionGemma n’a produit aucun appel de recherche")
@@ -153,10 +153,11 @@ Après un appel d'outil accepté, réponds seulement OK."""
         idleReleaseTask = null
         val stamp = "${modelFile.absolutePath}:${modelFile.length()}:${modelFile.lastModified()}"
         val current = engine
-        if (current != null && engineModelStamp == stamp && current.isInitialized()) {
+        if (current != null && engineModelStamp == stamp
+            && runCatching { current.isInitialized() }.getOrDefault(false)) {
             return current
         }
-        if (current != null && current.isInitialized()) {
+        if (current != null) {
             runCatching { current.close() }
         }
         val cacheDirectory = File(context.cacheDir, "functiongemma").apply { mkdirs() }
@@ -168,7 +169,12 @@ Après un appel d'outil accepté, réponds seulement OK."""
                 cacheDir = cacheDirectory.absolutePath,
             )
         )
-        next.initialize()
+        try {
+            next.initialize()
+        } catch (error: Throwable) {
+            runCatching { next.close() }
+            throw error
+        }
         engine = next
         engineModelStamp = stamp
         return next
