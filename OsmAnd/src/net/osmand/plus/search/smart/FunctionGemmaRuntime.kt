@@ -96,7 +96,9 @@ Après un appel d'outil accepté, réponds seulement OK."""
         try {
             val activeEngine = getOrCreateGpuEngine(context, modelFile)
             val tools = OsmandSearchTools()
-            ExperimentalFlags.enableConversationConstrainedDecoding = true
+            // The exported FunctionGemma bundle embeds a Hugging Face tokenizer.
+            // LiteRT-LM constrained decoding only supports SentencePiece tokenizers.
+            ExperimentalFlags.enableConversationConstrainedDecoding = false
             val config = ConversationConfig(
                 systemMessage = Message.of(DEVELOPER_PROMPT),
                 tools = listOf(tools),
