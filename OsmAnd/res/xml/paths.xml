@@ -5,6 +5,10 @@
         name="share"
         path="share"/>
 
+	<cache-path
+		name="app_updates"
+		path="app-updates" />
+
     <external-files-path
         name="files"
         path="/"/>

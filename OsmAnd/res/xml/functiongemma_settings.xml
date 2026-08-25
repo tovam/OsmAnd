@@ -54,4 +54,23 @@
 		android:title="@string/functiongemma_delete_title"
 		tools:icon="@drawable/ic_action_delete_dark" />
 
+	<PreferenceCategory
+		android:key="smart_app_updates_category"
+		android:layout="@layout/preference_category_with_descr"
+		android:title="@string/smart_app_updates_category" />
+
+	<Preference
+		android:key="smart_app_update_status"
+		android:layout="@layout/preference_with_descr"
+		android:persistent="false"
+		android:selectable="false"
+		android:title="@string/smart_app_update_status_title" />
+
+	<Preference
+		android:key="smart_app_update_action"
+		android:layout="@layout/preference_button"
+		android:persistent="false"
+		android:title="@string/smart_app_update_check"
+		tools:icon="@drawable/ic_action_update" />
+
 </PreferenceScreen>
