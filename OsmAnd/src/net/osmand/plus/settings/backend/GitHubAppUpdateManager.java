@@ -177,6 +177,7 @@ public final class GitHubAppUpdateManager {
 			return;
 		}
 		cancelRequested.set(false);
+		publish(State.DOWNLOADING, release, 0, release.size, null);
 		executor.execute(() -> runDownload(release));
 	}
 
@@ -193,7 +194,12 @@ public final class GitHubAppUpdateManager {
 	}
 
 	public void reportError(@NonNull String error) {
-		publish(State.ERROR, availableRelease, 0, 0, error);
+		File apk = verifiedApk;
+		if (apk != null && apk.isFile()) {
+			publish(State.READY_TO_INSTALL, availableRelease, apk.length(), apk.length(), error);
+		} else {
+			publish(State.ERROR, availableRelease, 0, 0, error);
+		}
 	}
 
 	public long getInstalledVersionCode() {

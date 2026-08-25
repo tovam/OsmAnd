@@ -5827,6 +5827,7 @@ Download tile maps directly, or copy them as SQLite database files to OsmAnd\'s 
 	<string name="smart_app_update_status_downloading">Downloading update: %1$s</string>
 	<string name="smart_app_update_status_verifying">Verifying package name, version and signing certificate…</string>
 	<string name="smart_app_update_status_ready">%1$s (%2$d) is downloaded, signed correctly and ready to install.</string>
+	<string name="smart_app_update_status_ready_after_error">Installation error: %1$s. %2$s (%3$d) remains downloaded and ready to install.</string>
 	<string name="smart_app_update_status_error">Error: %1$s. Installed: %2$s (%3$d).</string>
 	<string name="smart_app_update_permission_title">Allow app updates</string>
 	<string name="smart_app_update_permission_message">Android must allow OsmAnd Smart to install APK files from this source. Enable “Allow from this source”, then return to OsmAnd.</string>

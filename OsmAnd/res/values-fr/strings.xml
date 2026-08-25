@@ -5321,6 +5321,7 @@
 	<string name="smart_app_update_status_downloading">Téléchargement de la mise à jour : %1$s</string>
 	<string name="smart_app_update_status_verifying">Vérification du package, de la version et de la signature…</string>
 	<string name="smart_app_update_status_ready">%1$s (%2$d) est téléchargée, correctement signée et prête à installer.</string>
+	<string name="smart_app_update_status_ready_after_error">Erreur d’installation : %1$s. %2$s (%3$d) reste téléchargée et prête à installer.</string>
 	<string name="smart_app_update_status_error">Erreur : %1$s. Installée : %2$s (%3$d).</string>
 	<string name="smart_app_update_permission_title">Autoriser les mises à jour</string>
 	<string name="smart_app_update_permission_message">Android doit autoriser OsmAnd Smart à installer les APK provenant de cette source. Active « Autoriser depuis cette source », puis reviens dans OsmAnd.</string>

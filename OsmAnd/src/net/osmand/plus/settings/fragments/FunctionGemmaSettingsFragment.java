@@ -282,8 +282,13 @@ public class FunctionGemmaSettingsFragment extends BaseSettingsFragment
 				break;
 			case READY_TO_INSTALL:
 				action.setTitle(R.string.smart_app_update_install);
-				status.setSummary(getString(R.string.smart_app_update_status_ready,
-						safeReleaseTitle(snapshot), snapshot.versionCode));
+				if (Algorithms.isEmpty(snapshot.error)) {
+					status.setSummary(getString(R.string.smart_app_update_status_ready,
+							safeReleaseTitle(snapshot), snapshot.versionCode));
+				} else {
+					status.setSummary(getString(R.string.smart_app_update_status_ready_after_error,
+							snapshot.error, safeReleaseTitle(snapshot), snapshot.versionCode));
+				}
 				break;
 			case ERROR:
 				action.setTitle(R.string.smart_app_update_retry);
