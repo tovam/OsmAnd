@@ -43,6 +43,7 @@ object FunctionGemmaRuntime {
     private const val TOOL_CAPTURE_CANCEL_POLL_MS = 25L
     private const val ENGINE_IDLE_SECONDS = 120L
     private const val MAX_NUM_TOKENS = 1024
+    private const val MAX_CLARIFICATION_LENGTH = 300
     private val executor = Executors.newSingleThreadExecutor()
     private val watchdog = Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -90,6 +91,7 @@ Après un appel d'outil accepté, réponds seulement OK."""
         var conversation: Conversation? = null
         var timeoutTask: ScheduledFuture<*>? = null
         var toolCaptureCancelTask: ScheduledFuture<*>? = null
+        var rawResponse = ""
         val timedOut = AtomicBoolean(false)
         val tools = OsmandSearchTools()
         try {
@@ -117,17 +119,35 @@ Après un appel d'outil accepté, réponds seulement OK."""
                 runCatching { runningConversation.cancelProcess() }
             }, INFERENCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-            val response = conversation.sendMessage(Message.of(userText)).toString()
+            rawResponse = conversation.sendMessage(Message.of(userText)).toString()
             val request = tools.captured.get()?.let { requestFromCapturedCall(context, userText, it) }
+            val recovered = if (request == null && looksLikeFunctionProtocol(rawResponse)) {
+                recoverDeterministicPoi(context, userText)
+            } else {
+                null
+            }
             when {
                 request != null -> mainHandler.post { callback.onResult(request) }
+                recovered != null -> mainHandler.post { callback.onResult(recovered) }
                 timedOut.get() -> postError(callback, ErrorCode.TIMEOUT, "FunctionGemma n’a pas répondu à temps sur le CPU")
-                response.contains("<pad>", ignoreCase = true) -> postError(
+                rawResponse.contains("<pad>", ignoreCase = true) -> postError(
                     callback,
                     ErrorCode.MODEL_OUTPUT_CORRUPTED,
                     "Le modèle a produit une sortie corrompue (<pad>) sur le CPU",
                 )
-                response.isNotBlank() -> mainHandler.post { callback.onClarification(response) }
+                looksLikeFunctionProtocol(rawResponse) -> postError(
+                    callback,
+                    ErrorCode.INVALID_MODEL_OUTPUT,
+                    "FunctionGemma a produit un appel d’outil invalide",
+                )
+                isUsefulClarification(rawResponse) -> mainHandler.post {
+                    callback.onClarification(rawResponse.trim())
+                }
+                rawResponse.isNotBlank() -> postError(
+                    callback,
+                    ErrorCode.INVALID_MODEL_OUTPUT,
+                    "FunctionGemma a produit une réponse inexploitable",
+                )
                 else -> postError(callback, ErrorCode.NO_TOOL_CALL, "FunctionGemma n’a produit aucun appel de recherche")
             }
         } catch (error: Throwable) {
@@ -144,8 +164,18 @@ Après un appel d'outil accepté, réponds seulement OK."""
                     )
                 }
             } else {
+                val recovered = if (looksLikeFunctionProtocol(rawResponse)) {
+                    recoverDeterministicPoi(context, userText)
+                } else {
+                    null
+                }
+                if (recovered != null) {
+                    mainHandler.post { callback.onResult(recovered) }
+                    return
+                }
                 val code = when {
                     timedOut.get() -> ErrorCode.TIMEOUT
+                    looksLikeFunctionProtocol(rawResponse) -> ErrorCode.INVALID_MODEL_OUTPUT
                     error is IllegalArgumentException -> ErrorCode.INVALID_MODEL_OUTPUT
                     else -> ErrorCode.INFERENCE_ERROR
                 }
@@ -180,6 +210,37 @@ Après un appel d'outil accepté, réponds seulement OK."""
             call.availability,
             SmartSearchCategoryRegistry.get(context),
         )
+    }
+
+    private fun recoverDeterministicPoi(context: Context, userText: String): SmartSearchRequest? =
+        runCatching {
+            SmartSearchGuard.guardPoi(
+                userText,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                SmartSearchCategoryRegistry.get(context),
+            )
+        }.getOrNull()
+
+    private fun looksLikeFunctionProtocol(response: String): Boolean {
+        val normalized = response.trim().lowercase()
+        return normalized.contains("<start_function_call>")
+            || normalized.contains("<end_function_call>")
+            || normalized.contains("function_call")
+            || normalized.startsWith("call:")
+            || normalized.startsWith("call ")
+    }
+
+    private fun isUsefulClarification(response: String): Boolean {
+        val value = response.trim()
+        return value.length in 3..MAX_CLARIFICATION_LENGTH
+            && !value.equals("OK", ignoreCase = true)
+            && !value.contains('<')
+            && !value.contains('>')
     }
 
     @Synchronized
@@ -260,8 +321,10 @@ Après un appel d'outil accepté, réponds seulement OK."""
     private class OsmandSearchTools {
         val captured = AtomicReference<CapturedCall?>()
 
+        // These Kotlin identifiers intentionally match the fine-tuning JSON schema.
+        // LiteRT-LM derives tool and parameter names from them through reflection.
         @Tool(description = "Search OsmAnd POIs by one normalized app category or one verbatim establishment name.")
-        fun searchPoi(
+        fun search_poi(
             @ToolParam(description = "Verbatim establishment, chain, or POI name copied from the request; mutually exclusive with category.")
             name: String? = null,
             @ToolParam(description = "Stable semantic OsmAnd category key learned from examples; mutually exclusive with name.")
@@ -271,17 +334,17 @@ Après un appel d'outil accepté, réponds seulement OK."""
             @ToolParam(description = "Verbatim named reference place; only with NAMED_PLACE.")
             place: String? = null,
             @ToolParam(description = "One of ALL, NEAREST, NEXT, LAST.")
-            resultMode: String,
+            result_mode: String,
             @ToolParam(description = "One of ANY, OPEN_NOW, OPEN_24_7, OPEN_AT_ARRIVAL.")
             availability: String,
         ): Map<String, Any> {
-            val call = CapturedCall.Poi(name, category, context, place, resultMode, availability)
+            val call = CapturedCall.Poi(name, category, context, place, result_mode, availability)
             check(captured.compareAndSet(null, call)) { "Only one search call is allowed" }
             return mapOf("accepted" to true)
         }
 
         @Tool(description = "Open or search one global address, coordinate pair, Plus Code, or unique named location in OsmAnd.")
-        fun searchLocation(
+        fun search_location(
             @ToolParam(description = "Verbatim address, coordinates, Plus Code, or unique place text.")
             query: String,
         ): Map<String, Any> {
