@@ -58,6 +58,7 @@ public class MapHudCard extends MapBaseCard {
 		addMapButton(createMapButton(R.layout.my_location_button));
 		addMapButton(createMapButton(R.layout.drawer_menu_button));
 		addMapButton(createMapButton(R.layout.navigation_menu_button));
+		addMapButton(createMapButton(R.layout.stop_navigation_button));
 		addMapButton(createMapButton(R.layout.map_3d_button));
 
 		setupRulerWidget();

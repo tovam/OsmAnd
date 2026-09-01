@@ -23,7 +23,6 @@ import net.osmand.data.RotatedTileBox;
 import net.osmand.plus.OsmandApplication;
 import net.osmand.plus.R;
 import net.osmand.plus.activities.MapActivity;
-import net.osmand.plus.auto.NavigationSession;
 import net.osmand.plus.helpers.AndroidUiHelper;
 import net.osmand.plus.routepreparationmenu.MapRouteInfoMenu;
 import net.osmand.plus.routing.RoutingHelper;
@@ -146,6 +145,7 @@ public class MapControlsLayer extends OsmandMapLayer {
 
 		addMapButton(createMapButton(inflater, R.layout.drawer_menu_button));
 		addMapButton(createMapButton(inflater, R.layout.navigation_menu_button));
+		addMapButton(createMapButton(inflater, R.layout.stop_navigation_button));
 
 		MapButton button = createMapButton(inflater, R.layout.map_3d_button);
 		button.setUseCustomPosition(true);
@@ -359,10 +359,7 @@ public class MapControlsLayer extends OsmandMapLayer {
 		boolean shouldShowRouteCalculationControls = isRoutePlanningMode || ((app.accessibilityEnabled() || isTimeToShowButtons) && isRouteFollowingMode);
 		boolean isRouteDialogOpened = mapRouteInfoMenu.isVisible() || (shouldShowRouteCalculationControls && mapRouteInfoMenu.needShowMenu());
 		touchPrevFolowingMode = isRouteFollowingMode;
-		NavigationSession carNavigationSession = app.getCarNavigationSession();
-		boolean androidAutoAttached = carNavigationSession != null && carNavigationSession.hasStarted();
-		boolean showBottomMenuButtons = visibilityHelper.shouldShowBottomMenuButtons()
-				&& (shouldShowRouteCalculationControls || !isRouteFollowingMode || androidAutoAttached);
+		boolean showBottomMenuButtons = visibilityHelper.shouldShowBottomMenuButtons();
 
 		mapTransparencyHelper.updateTransparencySliderUi();
 
