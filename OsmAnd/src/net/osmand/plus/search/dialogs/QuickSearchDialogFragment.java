@@ -1101,10 +1101,10 @@ public class QuickSearchDialogFragment extends BaseFullScreenDialogFragment impl
 				updateTabBarVisibility(true);
 			}
 		} else if (!processBackAction()) {
-			Dialog dialog = getDialog();
-			if (dialog != null) {
-				dialog.cancel();
-			}
+			// Keep Back consistent with the map toolbar close button: restore the
+			// temporary POI filter before dismissing and refreshing the map.
+			closeSearch();
+			return;
 		}
 		app.getPoiFilters().restoreSelectedPoiFilters();
 	}
