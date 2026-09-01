@@ -13,8 +13,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.osmand.Location
-import net.osmand.plus.OsmAndApplication
 import net.osmand.plus.OsmAndLocationProvider.GPSInfo
+import net.osmand.plus.OsmandApplication
 
 class FlightModeViewModel(application: Application) : AndroidViewModel(application) {
 
