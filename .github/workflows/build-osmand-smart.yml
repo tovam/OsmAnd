@@ -101,9 +101,7 @@ jobs:
           failure_context="$(awk '/FAILURE: Build failed with an exception/{capture=1} capture{print}' "${RUNNER_TEMP}/gradle-build.log" | tail -n 140)"
           details="$(tail -n 160 "${RUNNER_TEMP}/gradle-errors.log")"
           if [ -n "${failure_context}" ]; then
-            details="${details}
-
-${failure_context}"
+            details="$(printf '%s\n\n%s' "${details}" "${failure_context}")"
           fi
           if [ -z "${details}" ]; then
             details="$(tail -n 140 "${RUNNER_TEMP}/gradle-build.log")"
