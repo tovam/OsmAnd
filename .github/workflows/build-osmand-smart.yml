@@ -98,9 +98,15 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
+          failure_context="$(awk '/FAILURE: Build failed with an exception/{capture=1} capture{print}' "${RUNNER_TEMP}/gradle-build.log" | tail -n 140)"
           details="$(tail -n 160 "${RUNNER_TEMP}/gradle-errors.log")"
+          if [ -n "${failure_context}" ]; then
+            details="${details}
+
+${failure_context}"
+          fi
           if [ -z "${details}" ]; then
-            details="$(tail -n 80 "${RUNNER_TEMP}/gradle-build.log")"
+            details="$(tail -n 140 "${RUNNER_TEMP}/gradle-build.log")"
           fi
           details="${details//'%'/'%25'}"
           details="${details//$'\r'/'%0D'}"
