@@ -151,9 +151,14 @@ object FlightTerrainMeshBuilder {
 				val scaledY = (localY.toDouble() / TERRARIUM_TILE_SIZE * tile.height).toInt()
 				return tile.elevation(scaledX, scaledY)
 			}
-			return fallback?.elevation(
-				localX.coerceIn(0, fallback.width - 1),
-				localY.coerceIn(0, fallback.height - 1)
+			if (fallback == null) return null
+			val fallbackStartX = fallback.id.x.toLong() * TERRARIUM_TILE_SIZE
+			val fallbackStartY = fallback.id.y.toLong() * TERRARIUM_TILE_SIZE
+			val fallbackPixelX = (globalX - fallbackStartX).coerceIn(0L, (TERRARIUM_TILE_SIZE - 1).toLong())
+			val fallbackPixelY = (globalY - fallbackStartY).coerceIn(0L, (TERRARIUM_TILE_SIZE - 1).toLong())
+			return fallback.elevation(
+				(fallbackPixelX.toDouble() / TERRARIUM_TILE_SIZE * fallback.width).toInt(),
+				(fallbackPixelY.toDouble() / TERRARIUM_TILE_SIZE * fallback.height).toInt()
 			)
 		}
 

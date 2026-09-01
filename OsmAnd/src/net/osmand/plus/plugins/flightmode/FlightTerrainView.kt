@@ -28,6 +28,7 @@ class FlightTerrainView @JvmOverloads constructor(
 
 	init {
 		setEGLContextClientVersion(2)
+		setZOrderMediaOverlay(true)
 		setPreserveEGLContextOnPause(true)
 		setRenderer(terrainRenderer)
 		renderMode = RENDERMODE_WHEN_DIRTY
@@ -72,6 +73,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var lightLocation = -1
 		private var fogDistanceLocation = -1
 		private var shadingLocation = -1
+		private var skyColorLocation = -1
+		private var daylightLocation = -1
 
 		fun update(
 			scene: FlightTerrainScene?,
@@ -96,6 +99,8 @@ class FlightTerrainView @JvmOverloads constructor(
 				lightLocation = GLES20.glGetUniformLocation(program, "uLightDirection")
 				fogDistanceLocation = GLES20.glGetUniformLocation(program, "uFogDistance")
 				shadingLocation = GLES20.glGetUniformLocation(program, "uShadingEnabled")
+				skyColorLocation = GLES20.glGetUniformLocation(program, "uSkyColor")
+				daylightLocation = GLES20.glGetUniformLocation(program, "uDaylight")
 				GLES20.glEnable(GLES20.GL_DEPTH_TEST)
 				GLES20.glDepthFunc(GLES20.GL_LEQUAL)
 				GLES20.glDisable(GLES20.GL_CULL_FACE)
@@ -113,18 +118,30 @@ class FlightTerrainView @JvmOverloads constructor(
 		}
 
 		override fun onDrawFrame(gl: GL10?) {
+			if (program == 0) {
+				GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+				return
+			}
+			val currentScene = scene
+			val currentSample = sample
+			val latitude = currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
+			val longitude = currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
+			val sun = FlightSunPosition.direction(
+				currentSample?.timestampMillis ?: System.currentTimeMillis(),
+				latitude,
+				longitude
+			)
+			val daylight = ((sun.up + 0.08f) / 0.22f).coerceIn(0f, 1f)
+			val sky = skyColor(daylight)
+			GLES20.glClearColor(sky[0], sky[1], sky[2], 1f)
 			GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-			if (program == 0) return
-			val currentScene = scene ?: return
+			if (currentScene == null) return
 			if (uploadedGeneration != currentScene.generation) {
 				renderMeshes = currentScene.meshes.map(::createRenderMesh)
 				uploadedGeneration = currentScene.generation
 			}
 			if (renderMeshes.isEmpty()) return
 
-			val currentSample = sample
-			val latitude = currentSample?.latitude ?: currentScene.centerLatitude
-			val longitude = currentSample?.longitude ?: currentScene.centerLongitude
 			val ground = currentScene.centerGroundElevationMeters ?: 0f
 			val reportedAltitude = currentSample?.altitudeMeters?.toFloat() ?: DEFAULT_FLIGHT_ALTITUDE_METERS
 			val altitude = max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
@@ -150,14 +167,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUseProgram(program)
 			GLES20.glUniformMatrix4fv(mvpLocation, 1, false, mvp, 0)
 			GLES20.glUniform3f(cameraLocation, camera[0], camera[1], camera[2])
-			val sun = FlightSunPosition.direction(
-				currentSample?.timestampMillis ?: System.currentTimeMillis(),
-				latitude,
-				longitude
-			)
 			GLES20.glUniform3f(lightLocation, sun.east, sun.up, -sun.north)
 			GLES20.glUniform1f(fogDistanceLocation, currentScene.radiusKm * 1_000f * 0.92f)
 			GLES20.glUniform1f(shadingLocation, if (shadingEnabled) 1f else 0f)
+			GLES20.glUniform3f(skyColorLocation, sky[0], sky[1], sky[2])
+			GLES20.glUniform1f(daylightLocation, daylight)
 			for (mesh in renderMeshes) drawMesh(mesh)
 			GLES20.glDisableVertexAttribArray(positionLocation)
 			GLES20.glDisableVertexAttribArray(normalLocation)
@@ -173,8 +187,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			val scale = NEAR_PLANE_METERS / distance
 			val left = (-halfWindowWidth - pose.horizontalMeters) * scale
 			val right = (halfWindowWidth - pose.horizontalMeters) * scale
-			val bottom = (-halfWindowHeight - pose.verticalMeters) * scale
-			val top = (halfWindowHeight - pose.verticalMeters) * scale
+			val bottom = (-halfWindowHeight + pose.verticalMeters) * scale
+			val top = (halfWindowHeight + pose.verticalMeters) * scale
 			val far = max(MINIMUM_FAR_PLANE_METERS, radiusKm * 1_000f * 2.2f)
 			Matrix.frustumM(projection, 0, left, right, bottom, top, NEAR_PLANE_METERS, far)
 			return projection
@@ -194,6 +208,21 @@ class FlightTerrainView @JvmOverloads constructor(
 			mesh.indices.position(0)
 			GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.indexCount, GLES20.GL_UNSIGNED_SHORT, mesh.indices)
 		}
+
+		private fun skyColor(daylight: Float): FloatArray {
+			val twilight = ((daylight - 0.05f) / 0.45f).coerceIn(0f, 1f)
+			val day = ((daylight - 0.35f) / 0.65f).coerceIn(0f, 1f)
+			val red = mix(NIGHT_SKY_RED, TWILIGHT_SKY_RED, twilight)
+			val green = mix(NIGHT_SKY_GREEN, TWILIGHT_SKY_GREEN, twilight)
+			val blue = mix(NIGHT_SKY_BLUE, TWILIGHT_SKY_BLUE, twilight)
+			return floatArrayOf(
+				mix(red, SKY_RED, day),
+				mix(green, SKY_GREEN, day),
+				mix(blue, SKY_BLUE, day)
+			)
+		}
+
+		private fun mix(from: Float, to: Float, amount: Float): Float = from + (to - from) * amount
 
 		private fun createRenderMesh(mesh: FlightTerrainMesh): RenderMesh {
 			val vertexBuffer = ByteBuffer.allocateDirect(mesh.vertices.size * FLOAT_BYTES)
@@ -265,6 +294,12 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SKY_RED = 0.22f
 			private const val SKY_GREEN = 0.48f
 			private const val SKY_BLUE = 0.69f
+			private const val TWILIGHT_SKY_RED = 0.47f
+			private const val TWILIGHT_SKY_GREEN = 0.25f
+			private const val TWILIGHT_SKY_BLUE = 0.30f
+			private const val NIGHT_SKY_RED = 0.015f
+			private const val NIGHT_SKY_GREEN = 0.025f
+			private const val NIGHT_SKY_BLUE = 0.065f
 			private const val VERTEX_SHADER = """
 				uniform mat4 uMvp;
 				uniform vec3 uCameraPosition;
@@ -291,6 +326,8 @@ class FlightTerrainView @JvmOverloads constructor(
 
 			private const val FRAGMENT_SHADER = """
 				precision mediump float;
+				uniform vec3 uSkyColor;
+				uniform float uDaylight;
 				varying float vElevation;
 				varying float vLight;
 				varying float vFog;
@@ -301,15 +338,14 @@ class FlightTerrainView @JvmOverloads constructor(
 					vec3 upland = vec3(0.43, 0.39, 0.25);
 					vec3 rock = vec3(0.46, 0.45, 0.42);
 					vec3 snow = vec3(0.88, 0.90, 0.91);
-					vec3 sky = vec3(0.22, 0.48, 0.69);
 					float highlandAmount = smoothstep(250.0, 1800.0, vElevation);
 					vec3 terrain = mix(lowland, upland, highlandAmount);
 					terrain = mix(terrain, rock, smoothstep(0.18, 0.62, vSlope));
 					terrain = mix(terrain, snow, smoothstep(2400.0, 3400.0, vElevation));
 					vec3 base = mix(water, terrain, step(0.0, vElevation));
-					vec3 lit = base * vLight;
+					vec3 lit = base * vLight * mix(0.08, 1.0, uDaylight);
 					float fogAmount = smoothstep(0.68, 1.0, vFog);
-					gl_FragColor = vec4(mix(lit, sky, fogAmount), 1.0);
+					gl_FragColor = vec4(mix(lit, uSkyColor, fogAmount), 1.0);
 				}
 			"""
 		}

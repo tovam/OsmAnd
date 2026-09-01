@@ -82,19 +82,26 @@ jobs:
           export APK_NUMBER_VERSION=$((6000000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
           export APK_VERSION_SUFFIX="#smart${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           echo "Building update-compatible versionCode ${APK_NUMBER_VERSION}"
-          ./gradlew assembleAndroidFullOpenglArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
+          ./gradlew :OsmAnd:compileAndroidFullOpenglArm64DebugKotlin 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
+          ./gradlew assembleAndroidFullOpenglArm64Debug 2>&1 | tee -a "${RUNNER_TEMP}/gradle-build.log"
 
       - name: Publish Gradle failure details
         if: failure()
         run: |
+          grep -nE '(^e: |error: |FAILURE:|What went wrong|Compilation error|Unresolved reference|Type mismatch|Cannot access|None of the following)' "${RUNNER_TEMP}/gradle-build.log" > "${RUNNER_TEMP}/gradle-errors.log" || true
           {
             echo "### Gradle build failure"
             echo '```text'
-            tail -n 100 "${RUNNER_TEMP}/gradle-build.log"
+            tail -n 160 "${RUNNER_TEMP}/gradle-errors.log"
+            echo
+            tail -n 40 "${RUNNER_TEMP}/gradle-build.log"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          details="$(tail -n 100 "${RUNNER_TEMP}/gradle-build.log")"
+          details="$(tail -n 160 "${RUNNER_TEMP}/gradle-errors.log")"
+          if [ -z "${details}" ]; then
+            details="$(tail -n 80 "${RUNNER_TEMP}/gradle-build.log")"
+          fi
           details="${details//'%'/'%25'}"
           details="${details//$'\r'/'%0D'}"
           details="${details//$'\n'/'%0A'}"
