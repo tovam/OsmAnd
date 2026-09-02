@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -250,7 +249,7 @@ private fun PrepareScreen(
 		LazyColumn(Modifier.weight(1f)) {
 			item { SectionTitle(stringResource(R.string.flight_mode_route)) }
 			itemsIndexed(state.plan.stops) { index, stop ->
-				val submitCity = {
+				val submitCity: () -> Unit = {
 					val suggestion = state.citySuggestions.firstOrNull()
 						.takeIf { state.citySearchStopIndex == index }
 					if (suggestion != null) {
@@ -375,7 +374,7 @@ private fun MapScreen(
 		if (state.sessionMode == FlightSessionMode.LIVE) {
 			Box(
 				Modifier
-					.matchParentSize()
+					.fillMaxSize()
 					.pointerInput(Unit) {
 						awaitPointerEventScope {
 							while (true) {
