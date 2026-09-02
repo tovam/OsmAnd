@@ -45,7 +45,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.awaitDispose
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -1486,7 +1485,6 @@ private fun FlightPhotoPreview(photo: FlightPhotoAttachment) {
 	val preview by produceState(initialValue = PhotoPreviewState(), key1 = photo.localPath) {
 		val loaded = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath)) }
 		value = PhotoPreviewState(loading = false, bitmap = loaded)
-		awaitDispose { loaded?.recycle() }
 	}
 	val bitmap = preview.bitmap
 	Box(
@@ -1705,9 +1703,10 @@ private fun JourneysScreen(
 						CircularProgressIndicator(color = FlightOrange, strokeWidth = 2.dp, modifier = Modifier.size(17.dp))
 						Text(stringResource(R.string.flight_mode_storage_calculating), color = FlightMuted, fontSize = 10.sp)
 					}
-				} else {
-					state.storageUsage?.let(::FlightStorageUsageTable)
-				}
+					} else {
+						val usage = state.storageUsage
+						if (usage != null) FlightStorageUsageTable(usage)
+					}
 			}
 			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, state.savedJourneys.size)) }
 			if (state.savedJourneys.isEmpty()) {
