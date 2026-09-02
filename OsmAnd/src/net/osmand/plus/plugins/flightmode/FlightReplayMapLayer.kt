@@ -13,13 +13,13 @@ import net.osmand.core.jni.MapMarkersCollection
 import net.osmand.core.jni.PointI
 import net.osmand.core.jni.QListFloat
 import net.osmand.core.jni.QVectorPointI
+import net.osmand.core.jni.SwigUtilities
 import net.osmand.core.jni.VectorLine
 import net.osmand.core.jni.VectorLineBuilder
 import net.osmand.core.jni.VectorLinesCollection
 import net.osmand.data.LatLon
 import net.osmand.data.RotatedTileBox
 import net.osmand.plus.utils.NativeUtilities
-import net.osmand.plus.utils.SwigUtilities
 import net.osmand.plus.views.OsmandMapTileView
 import net.osmand.plus.views.layers.base.OsmandMapLayer
 import net.osmand.plus.views.layers.geometry.GeometryWayDrawer
