@@ -20,8 +20,10 @@ import net.osmand.plus.OsmAndLocationProvider.OsmAndLocationListener
 import net.osmand.plus.R
 import net.osmand.plus.base.BaseFullScreenFragment
 import net.osmand.plus.track.SelectTrackTabsFragment
+import net.osmand.plus.track.helpers.SelectedGpxFile
 import net.osmand.plus.utils.AndroidUtils
 import net.osmand.plus.utils.InsetTargetsCollection
+import net.osmand.plus.views.layers.base.OsmandMapLayer
 
 class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
@@ -31,6 +33,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var lastMapRefreshMillis = 0L
 	private var mapInteractionBlockerLayer: FlightMapInteractionBlockerLayer? = null
 	private var replayMapLayer: FlightReplayMapLayer? = null
+	private var previousGpxObjectsDelegate: OsmandMapLayer.CustomMapObjects<SelectedGpxFile>? = null
+	private var gpxLayerSuppressed = false
 	private var environmentRecorder: FlightEnvironmentRecorder? = null
 	private var locationUpdatesRegistered = false
 	private var externalPhotoCaptureInProgress = false
@@ -169,6 +173,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		previousHudVisibility = hud.visibility
 		hud.visibility = View.GONE
 		captureMapState()
+		suppressSurfaceGpxTracks()
 		installMapInteractionGuard()
 		startLocationUpdates()
 		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
@@ -185,6 +190,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		viewModel.saveWindowPlacement()
 		cancelNativeMapGesture()
 		removeMapInteractionGuard()
+		restoreSurfaceGpxTracks()
 		restoreMapState()
 		val activity = requireMapActivity()
 		activity.findViewById<View>(R.id.map_hud_container).visibility = previousHudVisibility
@@ -199,6 +205,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		// layer or an unfinished gesture attached to OsmAnd's shared map view.
 		cancelNativeMapGesture()
 		removeMapInteractionGuard()
+		restoreSurfaceGpxTracks()
 		restoreMapState()
 		super.onDestroyView()
 	}
@@ -262,6 +269,27 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		mapInteractionBlockerLayer = null
 		replayMapLayer?.let(mapView::removeLayer)
 		replayMapLayer = null
+	}
+
+	/** The normal GPX layer is surface-bound; the flight layer replaces it with raised geometry. */
+	private fun suppressSurfaceGpxTracks() {
+		if (gpxLayerSuppressed) return
+		val gpxLayer = app.osmandMap.mapLayers.gpxLayer
+		previousGpxObjectsDelegate = gpxLayer.customObjectsDelegate
+		gpxLayer.customObjectsDelegate = OsmandMapLayer.CustomMapObjects<SelectedGpxFile>().apply {
+			setCustomMapObjects(emptyList())
+		}
+		gpxLayer.setInvalidated(true)
+		gpxLayerSuppressed = true
+	}
+
+	private fun restoreSurfaceGpxTracks() {
+		if (!gpxLayerSuppressed) return
+		val gpxLayer = app.osmandMap.mapLayers.gpxLayer
+		gpxLayer.customObjectsDelegate = previousGpxObjectsDelegate
+		gpxLayer.setInvalidated(true)
+		previousGpxObjectsDelegate = null
+		gpxLayerSuppressed = false
 	}
 
 	private fun cancelNativeMapGesture() {
