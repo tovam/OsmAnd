@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -497,26 +498,38 @@ private fun MapScreen(
 			InstrumentStrip(sample, overlay = true)
 		}
 
-		Column(
+		// Keep this control deliberately small: the map itself explains the active mode.
+		// The outer box preserves a comfortable touch target without enlarging the visual button.
+		Box(
 			modifier = Modifier
-				.align(Alignment.CenterEnd)
-				.padding(10.dp)
-				.background(FlightHudPanel)
-				.border(1.dp, if (state.mapFollowing) FlightGreen else FlightLine)
-				.clickable { onSetMapFollowing(true) }
+				.align(Alignment.TopEnd)
+				.padding(top = 122.dp, end = 2.dp)
+				.size(44.dp)
+				.clickable { onSetMapFollowing(!state.mapFollowing) },
+			contentAlignment = Alignment.Center
 		) {
-			Text(
-				if (state.mapFollowing) stringResource(R.string.flight_mode_map_following) else stringResource(R.string.flight_mode_map_free),
-				color = if (state.mapFollowing) FlightGreen else FlightOrange,
-				fontSize = 10.sp,
-				fontWeight = FontWeight.Bold,
-				modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
-			Text(
-				if (state.mapFollowing) stringResource(R.string.flight_mode_map_drag_hint)
-				else stringResource(R.string.flight_mode_map_recenter),
-				color = FlightMuted,
-				fontSize = 11.sp,
-				modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp))
+			Box(
+				modifier = Modifier
+					.size(32.dp)
+					.background(FlightHudPanel, CircleShape)
+					.border(
+						width = 1.dp,
+						color = if (state.mapFollowing) FlightGreen else FlightOrange,
+						shape = CircleShape
+					),
+				contentAlignment = Alignment.Center
+			) {
+				androidx.compose.material3.Icon(
+					painter = painterResource(R.drawable.ic_action_center_on_track),
+					contentDescription = if (state.mapFollowing) {
+						stringResource(R.string.flight_mode_map_free)
+					} else {
+						stringResource(R.string.flight_mode_map_following)
+					},
+					tint = if (state.mapFollowing) FlightGreen else FlightOrange,
+					modifier = Modifier.size(18.dp)
+				)
+			}
 		}
 
 		Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
