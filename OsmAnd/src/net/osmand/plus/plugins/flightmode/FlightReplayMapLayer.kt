@@ -294,7 +294,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val next = (index + 1..samples.lastIndex).firstOrNull { candidate ->
 			samples[candidate].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[candidate])
 		}
-		if (next != null) return FlightTrackMath.bearingBetween(samples[index], samples[next])
+		if (next != null) {
+			FlightTrackMath.bearingBetween(samples[index], samples[next])?.let { return it }
+		}
 		val previous = (index - 1 downTo 0).firstOrNull { candidate ->
 			samples[candidate].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[candidate])
 		}
