@@ -65,9 +65,9 @@ data class FlightWindowPlacement(
 }
 
 fun FlightWindowPlacement.verticalFieldOfViewDegrees(): Float =
-	(DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / clamped().zoom).coerceIn(
-		MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
-		MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
+	(FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / clamped().zoom).coerceIn(
+		FlightWindowPlacement.MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
+		FlightWindowPlacement.MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
 	)
 
 fun FlightWindowPlacement.horizontalFieldOfViewDegrees(viewAspectRatio: Float): Float {
