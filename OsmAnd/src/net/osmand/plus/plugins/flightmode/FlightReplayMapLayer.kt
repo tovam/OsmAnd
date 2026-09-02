@@ -5,17 +5,17 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
+import android.graphics.RectF
 import net.osmand.core.jni.MapMarker
 import net.osmand.core.jni.MapMarkerBuilder
 import net.osmand.core.jni.MapMarkersCollection
 import net.osmand.core.jni.PointI
 import net.osmand.core.jni.QListFloat
 import net.osmand.core.jni.QVectorPointI
-import net.osmand.core.jni.SwigUtilities
 import net.osmand.core.jni.VectorLine
 import net.osmand.core.jni.VectorLineBuilder
 import net.osmand.core.jni.VectorLinesCollection
+import net.osmand.data.LatLon
 import net.osmand.data.RotatedTileBox
 import net.osmand.plus.utils.NativeUtilities
 import net.osmand.plus.views.OsmandMapTileView
@@ -23,7 +23,9 @@ import net.osmand.plus.views.layers.base.OsmandMapLayer
 import net.osmand.plus.views.layers.geometry.GeometryWayDrawer
 import net.osmand.util.MapUtils
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -38,32 +40,44 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private data class LayerState(
 		val trip: FlightTrip? = null,
 		val sample: FlightSample? = null,
-		val showPoints: Boolean = false
+		val showPoints: Boolean = false,
+		val photos: List<FlightPhotoAttachment> = emptyList()
 	)
 
 	@Volatile
 	private var state = LayerState()
 	private var routeGeometryDirty = true
 	private var pointGeometryDirty = true
+	private var photoGeometryDirty = true
 	private var aircraftDirty = true
 
 	private var nativeTrip: FlightTrip? = null
 	private var nativeHeights = FloatArray(0)
 	private var routeLinesCollection: VectorLinesCollection? = null
 	private var pointMarkersCollection: MapMarkersCollection? = null
-	private var aircraftMarkersCollection: MapMarkersCollection? = null
-	private var aircraftMarker: MapMarker? = null
-	private val aircraftIconKey = SwigUtilities.getOnSurfaceIconKey(AIRCRAFT_ICON_KEY)
+	private var photoMarkersCollection: MapMarkersCollection? = null
+	private var aircraftLinesCollection: VectorLinesCollection? = null
+	private var aircraftVisualLengthMeters = Double.NaN
+	private var aircraftGroundAltitudeMeters = Float.NaN
 
-	fun update(trip: FlightTrip?, sample: FlightSample?, showPoints: Boolean) {
+	fun update(
+		trip: FlightTrip?,
+		sample: FlightSample?,
+		showPoints: Boolean,
+		photos: List<FlightPhotoAttachment>
+	) {
 		val previous = state
-		if (previous.trip === trip && previous.sample == sample && previous.showPoints == showPoints) return
-		state = LayerState(trip, sample, showPoints)
+		if (previous.trip === trip && previous.sample == sample && previous.showPoints == showPoints &&
+			previous.photos == photos
+		) return
+		state = LayerState(trip, sample, showPoints, photos)
 		if (previous.trip !== trip) {
 			routeGeometryDirty = true
 			pointGeometryDirty = true
+			photoGeometryDirty = true
 		}
 		if (previous.showPoints != showPoints) pointGeometryDirty = true
+		if (previous.photos != photos) photoGeometryDirty = true
 		if (previous.sample != sample) aircraftDirty = true
 		view?.refreshMap()
 	}
@@ -84,6 +98,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			clearNativeCollections()
 			routeGeometryDirty = true
 			pointGeometryDirty = true
+			photoGeometryDirty = true
 			aircraftDirty = true
 			mapRendererChanged = false
 		}
@@ -91,11 +106,22 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val current = state
 		if (routeGeometryDirty) rebuildRoute(current.trip)
 		if (pointGeometryDirty) rebuildRecordedPoints(current.trip, current.showPoints)
-		if (aircraftDirty) updateAircraft(current.trip, current.sample)
+		if (photoGeometryDirty) rebuildPhotoMarkers(current.trip, current.photos)
+		val visualLengthMeters = aircraftLengthMeters(tileBox)
+		val groundAltitudeMeters = current.sample?.let { sample ->
+			renderer.getLocationHeightInMeters(point31(sample))
+				.takeIf { it > NativeUtilities.MIN_ALTITUDE_VALUE }
+		} ?: 0f
+		if (aircraftScaleChanged(visualLengthMeters)) aircraftDirty = true
+		if (aircraftGroundChanged(groundAltitudeMeters)) aircraftDirty = true
+		if (aircraftDirty) {
+			updateAircraft(current.trip, current.sample, visualLengthMeters, groundAltitudeMeters)
+		}
 
 		routeLinesCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		pointMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
-		aircraftMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
+		photoMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
+		aircraftLinesCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 	}
 
 	private fun rebuildRoute(trip: FlightTrip?) {
@@ -208,43 +234,163 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		pointGeometryDirty = false
 	}
 
-	private fun updateAircraft(trip: FlightTrip?, sample: FlightSample?) {
-		if (sample == null) {
-			aircraftMarker?.setIsHidden(true)
-			aircraftDirty = false
+	private fun rebuildPhotoMarkers(trip: FlightTrip?, photos: List<FlightPhotoAttachment>) {
+		clearPhotoCollection()
+		val samples = trip?.samples.orEmpty()
+		if (samples.isEmpty() || photos.isEmpty()) {
+			photoGeometryDirty = false
 			return
 		}
-		val position = point31(sample)
-		val altitude = visualHeightForSample(trip, sample)
-		val direction = sample.bearingDegrees ?: estimateBearing(trip, sample) ?: 0f
-		val marker = aircraftMarker
-		if (marker != null) {
-			marker.setPosition(position)
-			marker.setHeight(altitude)
-			marker.setElevationScaleFactor(1f)
-			marker.setOnMapSurfaceIconDirection(aircraftIconKey, direction)
-			marker.setIsHidden(false)
+		if (nativeTrip !== trip || nativeHeights.size != samples.size) {
+			nativeTrip = trip
+			nativeHeights = resolveVisualHeights(samples)
+		}
+		val sampleByIndex = samples.associateBy(FlightSample::index)
+		val icon = NativeUtilities.createSkImageFromBitmap(createPhotoBitmap())
+		val collection = MapMarkersCollection()
+		var markerId = PHOTO_MARKER_ID_START
+		photos.forEach { photo ->
+			val sample = photo.matchedSampleIndex?.let(sampleByIndex::get) ?: return@forEach
+			MapMarkerBuilder()
+				.setMarkerId(markerId++)
+				.setBaseOrder(pointsOrder - 2)
+				.setPosition(point31(sample))
+				.setHeight(visualHeightForSample(trip, sample) + PHOTO_MARKER_CLEARANCE_METERS)
+				.setElevationScaleFactor(1f)
+				.setIsHidden(false)
+				.setIsAccuracyCircleSupported(false)
+				.setPinIconHorisontalAlignment(MapMarker.PinIconHorisontalAlignment.CenterHorizontal)
+				.setPinIconVerticalAlignment(MapMarker.PinIconVerticalAlignment.CenterVertical)
+				.setPinIcon(icon)
+				.buildAndAddToCollection(collection)
+		}
+		if (markerId > PHOTO_MARKER_ID_START) photoMarkersCollection = collection
+		photoGeometryDirty = false
+	}
+
+	private fun updateAircraft(
+		trip: FlightTrip?,
+		sample: FlightSample?,
+		visualLengthMeters: Double,
+		groundAltitudeMeters: Float
+	) {
+		// MapMarker deliberately ignores height for Model3DMapSymbol in OsmAnd-core. Building the
+		// aircraft from elevated native vectors keeps its centre at the real geographic position
+		// instead of drawing a ground model that only appears displaced when the camera is tilted.
+		clearAircraftCollection()
+		aircraftVisualLengthMeters = visualLengthMeters
+		aircraftGroundAltitudeMeters = groundAltitudeMeters
+		if (sample == null || visualLengthMeters <= 0.0) {
 			aircraftDirty = false
 			return
 		}
 
-		val collection = MapMarkersCollection()
-		val built = MapMarkerBuilder()
-			.setMarkerId(AIRCRAFT_MARKER_ID)
-			.setBaseOrder(pointsOrder - 1)
-			.setPosition(position)
-			.setHeight(altitude)
-			.setElevationScaleFactor(1f)
-			.setIsHidden(false)
-			.setIsAccuracyCircleSupported(false)
-			.addOnMapSurfaceIcon(aircraftIconKey, NativeUtilities.createSkImageFromBitmap(createAircraftBitmap()))
-			.setUpdateAfterCreated(true)
-			.buildAndAddToCollection(collection)
-		built.setOnMapSurfaceIconDirection(aircraftIconKey, direction)
-		aircraftMarkersCollection = collection
-		aircraftMarker = built
+		val altitude = visualHeightForSample(trip, sample)
+		val direction = (sample.bearingDegrees ?: estimateBearing(trip, sample) ?: 0f).toDouble()
+		val center = LatLon(sample.latitude, sample.longitude)
+		val nose = destination(center, visualLengthMeters * 0.54, direction)
+		val tail = destination(center, visualLengthMeters * 0.46, direction + 180.0)
+		val wingRoot = destination(center, visualLengthMeters * 0.05, direction)
+		val leftWing = destination(wingRoot, visualLengthMeters * 0.41, direction - 90.0)
+		val rightWing = destination(wingRoot, visualLengthMeters * 0.41, direction + 90.0)
+		val tailRoot = destination(center, visualLengthMeters * 0.31, direction + 180.0)
+		val leftTail = destination(tailRoot, visualLengthMeters * 0.18, direction - 90.0)
+		val rightTail = destination(tailRoot, visualLengthMeters * 0.18, direction + 90.0)
+		val finTop = destination(tailRoot, visualLengthMeters * 0.055, direction)
+		val finHeightMeters = (visualLengthMeters * AIRCRAFT_FIN_HEIGHT_RATIO)
+			.coerceAtMost(AIRCRAFT_MAXIMUM_FIN_HEIGHT_METERS)
+			.toFloat()
+
+		val collection = VectorLinesCollection(true)
+		val lineScale = GeometryWayDrawer.getVectorLineScale(application).toDouble()
+		var lineId = AIRCRAFT_LINE_ID_START
+		lineId = buildAircraftPart(
+			collection, lineId, lineScale, listOf(tail, center, nose),
+			listOf(altitude, altitude, altitude), AIRCRAFT_BODY_WIDTH_DP, AIRCRAFT_COLOR
+		)
+		lineId = buildAircraftPart(
+			collection, lineId, lineScale, listOf(leftWing, wingRoot, rightWing),
+			listOf(altitude, altitude, altitude), AIRCRAFT_WING_WIDTH_DP, AIRCRAFT_WING_COLOR
+		)
+		lineId = buildAircraftPart(
+			collection, lineId, lineScale, listOf(leftTail, tailRoot, rightTail),
+			listOf(altitude, altitude, altitude), AIRCRAFT_TAIL_WIDTH_DP, AIRCRAFT_WING_COLOR
+		)
+		lineId = buildAircraftPart(
+			collection, lineId, lineScale, listOf(tailRoot, finTop),
+			listOf(altitude, altitude + finHeightMeters),
+			AIRCRAFT_FIN_WIDTH_DP, AIRCRAFT_COLOR
+		)
+
+		if (altitude > groundAltitudeMeters + MINIMUM_TETHER_HEIGHT_METERS) {
+			// A sub-metre horizontal separation keeps the native line non-degenerate. In world
+			// coordinates this still reads as a vertical from the exact aircraft position.
+			val ground = destination(center, TETHER_HORIZONTAL_OFFSET_METERS, direction + 90.0)
+			buildAircraftPart(
+				collection, lineId, lineScale, listOf(ground, center),
+				listOf(groundAltitudeMeters + TETHER_GROUND_CLEARANCE_METERS, altitude),
+				TETHER_WIDTH_DP, TETHER_COLOR, TETHER_SLEEVE_COLOR
+			)
+		}
+		if (collection.getLinesCount() > 0) aircraftLinesCollection = collection
 		aircraftDirty = false
 	}
+
+	private fun buildAircraftPart(
+		collection: VectorLinesCollection,
+		lineId: Int,
+		lineScale: Double,
+		locations: List<LatLon>,
+		heightsMeters: List<Float>,
+		widthDp: Double,
+		color: Int,
+		sleeveColor: Int = AIRCRAFT_SLEEVE_COLOR
+	): Int {
+		val points = QVectorPointI()
+		val heights = QListFloat()
+		locations.forEachIndexed { index, location ->
+			points.add(point31(location))
+			heights.add(heightsMeters[index])
+		}
+		buildTubeStroke(
+			collection, lineId, pointsOrder - 3,
+			(widthDp + AIRCRAFT_SLEEVE_EXTRA_WIDTH_DP) * lineScale,
+			sleeveColor, points, heights
+		)
+		buildTubeStroke(
+			collection, lineId + 1, pointsOrder - 4,
+			widthDp * lineScale, color, points, heights
+		)
+		return lineId + 2
+	}
+
+	private fun aircraftLengthMeters(tileBox: RotatedTileBox): Double {
+		val width = tileBox.pixWidth
+		val height = tileBox.pixHeight
+		if (width <= 1 || height <= 1) return AIRCRAFT_MINIMUM_LENGTH_METERS
+		val sampleWidth = width.coerceAtMost(AIRCRAFT_SCALE_SAMPLE_PIXELS)
+		val centerX = width / 2
+		val centerY = height / 2
+		val left = centerX - sampleWidth / 2
+		val right = centerX + sampleWidth / 2
+		val metersPerPixel = tileBox.getDistance(left, centerY, right, centerY) / sampleWidth
+		return (metersPerPixel * AIRCRAFT_LENGTH_DP * context.resources.displayMetrics.density)
+			.coerceIn(AIRCRAFT_MINIMUM_LENGTH_METERS, AIRCRAFT_MAXIMUM_LENGTH_METERS)
+	}
+
+	private fun aircraftScaleChanged(newLengthMeters: Double): Boolean {
+		val previous = aircraftVisualLengthMeters
+		if (!previous.isFinite() || previous <= 0.0) return true
+		return abs(newLengthMeters / previous - 1.0) >= AIRCRAFT_SCALE_REBUILD_RATIO
+	}
+
+	private fun aircraftGroundChanged(newGroundAltitudeMeters: Float): Boolean {
+		val previous = aircraftGroundAltitudeMeters
+		return !previous.isFinite() || abs(newGroundAltitudeMeters - previous) >= GROUND_REBUILD_DELTA_METERS
+	}
+
+	private fun destination(origin: LatLon, distanceMeters: Double, bearingDegrees: Double): LatLon =
+		MapUtils.rhumbDestinationPoint(origin, distanceMeters, bearingDegrees)
 
 	private fun resolveVisualHeights(samples: List<FlightSample>): FloatArray {
 		val heights = FloatArray(samples.size) { Float.NaN }
@@ -317,6 +463,11 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		MapUtils.get31TileNumberY(sample.latitude)
 	)
 
+	private fun point31(location: LatLon): PointI = PointI(
+		MapUtils.get31TileNumberX(location.longitude),
+		MapUtils.get31TileNumberY(location.latitude)
+	)
+
 	private fun createPointBitmap(): Bitmap {
 		val scale = context.resources.displayMetrics.density.coerceAtLeast(1f)
 		val size = (POINT_BITMAP_DP * scale).toInt().coerceAtLeast(10)
@@ -330,43 +481,22 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		}
 	}
 
-	private fun createAircraftBitmap(): Bitmap {
+	private fun createPhotoBitmap(): Bitmap {
 		val scale = context.resources.displayMetrics.density.coerceAtLeast(1f)
-		val size = (AIRCRAFT_BITMAP_DP * scale).toInt().coerceAtLeast(48)
+		val size = (PHOTO_BITMAP_DP * scale).roundToInt().coerceAtLeast(24)
 		return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
 			val canvas = Canvas(bitmap)
 			val center = size / 2f
-			val shapeScale = size / 44f
-			val path = Path().apply {
-				moveTo(center, center - 19f * shapeScale)
-				lineTo(center + 3.6f * shapeScale, center - 5f * shapeScale)
-				lineTo(center + 16f * shapeScale, center + 2f * shapeScale)
-				lineTo(center + 16f * shapeScale, center + 5f * shapeScale)
-				lineTo(center + 3.5f * shapeScale, center + 2.8f * shapeScale)
-				lineTo(center + 4f * shapeScale, center + 13f * shapeScale)
-				lineTo(center + 8f * shapeScale, center + 16f * shapeScale)
-				lineTo(center + 8f * shapeScale, center + 18f * shapeScale)
-				lineTo(center, center + 15f * shapeScale)
-				lineTo(center - 8f * shapeScale, center + 18f * shapeScale)
-				lineTo(center - 8f * shapeScale, center + 16f * shapeScale)
-				lineTo(center - 4f * shapeScale, center + 13f * shapeScale)
-				lineTo(center - 3.5f * shapeScale, center + 2.8f * shapeScale)
-				lineTo(center - 16f * shapeScale, center + 5f * shapeScale)
-				lineTo(center - 16f * shapeScale, center + 2f * shapeScale)
-				lineTo(center - 3.6f * shapeScale, center - 5f * shapeScale)
-				close()
-			}
-			val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(185, 4, 10, 14) }
-			val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = AIRCRAFT_COLOR }
-			val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-				color = Color.WHITE
-				style = Paint.Style.STROKE
-				strokeJoin = Paint.Join.ROUND
-				strokeWidth = 1.25f * scale
-			}
-			canvas.drawCircle(center, center, size * 0.48f, halo)
-			canvas.drawPath(path, fill)
-			canvas.drawPath(path, outline)
+			val background = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(238, 8, 16, 21) }
+			val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = PHOTO_COLOR }
+			val lens = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+			canvas.drawCircle(center, center, size * 0.48f, background)
+			canvas.drawCircle(center, center, size * 0.41f, accent)
+			val body = RectF(size * 0.21f, size * 0.32f, size * 0.79f, size * 0.72f)
+			canvas.drawRoundRect(body, size * 0.07f, size * 0.07f, background)
+			canvas.drawRect(size * 0.32f, size * 0.25f, size * 0.52f, size * 0.36f, background)
+			canvas.drawCircle(center, size * 0.52f, size * 0.13f, lens)
+			canvas.drawCircle(center, size * 0.52f, size * 0.075f, background)
 		}
 	}
 
@@ -423,19 +553,27 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		pointMarkersCollection = null
 	}
 
+	private fun clearPhotoCollection() {
+		val renderer = mapRenderer
+		photoMarkersCollection?.let { renderer?.removeSymbolsProvider(it) }
+		photoMarkersCollection = null
+	}
+
 	private fun clearAircraftCollection() {
 		val renderer = mapRenderer
-		aircraftMarkersCollection?.let { renderer?.removeSymbolsProvider(it) }
-		aircraftMarkersCollection = null
-		aircraftMarker = null
+		aircraftLinesCollection?.let { renderer?.removeSymbolsProvider(it) }
+		aircraftLinesCollection = null
 	}
 
 	private fun clearNativeCollections() {
 		clearRouteCollection()
 		clearPointCollection()
+		clearPhotoCollection()
 		clearAircraftCollection()
 		nativeTrip = null
 		nativeHeights = FloatArray(0)
+		aircraftVisualLengthMeters = Double.NaN
+		aircraftGroundAltitudeMeters = Float.NaN
 	}
 
 	override fun cleanupResources() {
@@ -452,7 +590,25 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val TUBE_SLEEVE_WIDTH_DP = 10.5
 		private const val TUBE_CORE_WIDTH_DP = 5.5
 		private const val POINT_BITMAP_DP = 10f
-		private const val AIRCRAFT_BITMAP_DP = 48f
+		private const val PHOTO_BITMAP_DP = 26f
+		private const val PHOTO_MARKER_CLEARANCE_METERS = 36f
+		private const val AIRCRAFT_LENGTH_DP = 34.0
+		private const val AIRCRAFT_BODY_WIDTH_DP = 3.8
+		private const val AIRCRAFT_WING_WIDTH_DP = 2.6
+		private const val AIRCRAFT_TAIL_WIDTH_DP = 2.2
+		private const val AIRCRAFT_FIN_WIDTH_DP = 2.0
+		private const val AIRCRAFT_SLEEVE_EXTRA_WIDTH_DP = 1.8
+		private const val AIRCRAFT_FIN_HEIGHT_RATIO = 0.11
+		private const val AIRCRAFT_MAXIMUM_FIN_HEIGHT_METERS = 1_200.0
+		private const val AIRCRAFT_SCALE_REBUILD_RATIO = 0.08
+		private const val AIRCRAFT_SCALE_SAMPLE_PIXELS = 160
+		private const val AIRCRAFT_MINIMUM_LENGTH_METERS = 45.0
+		private const val AIRCRAFT_MAXIMUM_LENGTH_METERS = 60_000.0
+		private const val TETHER_WIDTH_DP = 1.7
+		private const val TETHER_HORIZONTAL_OFFSET_METERS = 0.10
+		private const val TETHER_GROUND_CLEARANCE_METERS = 1.5f
+		private const val MINIMUM_TETHER_HEIGHT_METERS = 8f
+		private const val GROUND_REBUILD_DELTA_METERS = 1f
 		private const val VISUAL_CLEARANCE_METERS = 12f
 		private const val DEFAULT_UNKNOWN_ALTITUDE_METERS = 1_000f
 		private const val UNKNOWN_ENDPOINT_ALTITUDE_METERS = 250f
@@ -460,11 +616,16 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val MIN_ALTITUDE_METERS = -500.0
 		private const val MAX_ALTITUDE_METERS = 30_000.0
 		private const val REPLAY_POINTS_Z_ORDER = 998.5f
-		private const val AIRCRAFT_ICON_KEY = 1
-		private const val AIRCRAFT_MARKER_ID = 2_000_000_000
+		private const val AIRCRAFT_LINE_ID_START = 2_000_000_000
+		private const val PHOTO_MARKER_ID_START = 1_900_000_000
 		private val TUBE_SLEEVE_COLOR = Color.argb(230, 6, 15, 20)
 		private val TUBE_CORE_COLOR = Color.rgb(255, 145, 58)
 		private val POINT_COLOR = Color.rgb(93, 216, 255)
+		private val PHOTO_COLOR = Color.rgb(255, 204, 102)
+		private val AIRCRAFT_SLEEVE_COLOR = Color.argb(238, 6, 15, 20)
 		private val AIRCRAFT_COLOR = Color.rgb(255, 139, 56)
+		private val AIRCRAFT_WING_COLOR = Color.rgb(231, 238, 242)
+		private val TETHER_COLOR = Color.rgb(255, 58, 58)
+		private val TETHER_SLEEVE_COLOR = Color.argb(220, 72, 0, 0)
 	}
 }

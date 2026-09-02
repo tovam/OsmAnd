@@ -27,6 +27,12 @@ enum class FlightCabinSide {
 	RIGHT
 }
 
+enum class FlightSatelliteQuality(val zoomDelta: Int) {
+	STANDARD(0),
+	HIGH(1),
+	ULTRA(2)
+}
+
 data class FlightWindowPlacement(
 	val side: FlightCabinSide = FlightCabinSide.LEFT,
 	val forwardOffsetMeters: Float = 0f,
@@ -134,6 +140,7 @@ data class FlightPlan(
 	val stops: List<FlightStop>,
 	val terrainCorridorKm: Int = 300,
 	val detailedSatelliteRadiusKm: Int = 300,
+	val satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
 	val shadowsEnabled: Boolean = true,
 	val resumeAfterRestart: Boolean = true
 ) {
@@ -321,6 +328,7 @@ data class FlightUiState(
 	val replaySpeed: Float = 1f,
 	val loadingTrip: Boolean = false,
 	val tripLoadError: String? = null,
+	val duplicateJourneyWarning: FlightJourneySummary? = null,
 	val terrainStatus: FlightTerrainStatus = FlightTerrainStatus(),
 	val terrainScene: FlightTerrainScene? = null,
 	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
@@ -342,8 +350,29 @@ data class FlightUiState(
 	val pendingPhotos: List<FlightPhotoAttachment> = emptyList(),
 	val selectedPhotoId: String? = null,
 	val journeyMessage: String? = null,
+	val storageUsage: FlightStorageUsage? = null,
+	val storageUsageLoading: Boolean = false,
 	val photoMainCamera: Boolean = true,
 	val photoSelfie: Boolean = false,
 	val photoMap: Boolean = true,
 	val photoScene3d: Boolean = true
 )
+
+data class FlightStorageUsage(
+	val currentJournalBytes: Long = 0L,
+	val currentPhotosBytes: Long = 0L,
+	val allJournalBytes: Long = 0L,
+	val allPhotosBytes: Long = 0L,
+	val terrainBytes: Long = 0L,
+	val satelliteSourceBytes: Long = 0L,
+	val satelliteRenderBytes: Long = 0L,
+	val graphicsBytes: Long = 0L,
+	val otherBytes: Long = 0L
+) {
+	val currentJourneyBytes: Long
+		get() = currentJournalBytes + currentPhotosBytes
+
+	val totalBytes: Long
+		get() = allJournalBytes + allPhotosBytes + terrainBytes + satelliteSourceBytes +
+			satelliteRenderBytes + graphicsBytes + otherBytes
+}

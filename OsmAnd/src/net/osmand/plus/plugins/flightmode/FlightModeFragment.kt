@@ -24,6 +24,7 @@ import net.osmand.plus.track.helpers.SelectedGpxFile
 import net.osmand.plus.utils.AndroidUtils
 import net.osmand.plus.utils.InsetTargetsCollection
 import net.osmand.plus.views.layers.base.OsmandMapLayer
+import net.osmand.plus.views.corenative.NativeCoreContext
 
 class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
@@ -38,6 +39,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var environmentRecorder: FlightEnvironmentRecorder? = null
 	private var locationUpdatesRegistered = false
 	private var externalPhotoCaptureInProgress = false
+	private var previous3DMapsEnabled: Boolean? = null
+	private var flightMapViewInitialized = false
 	private val microphonePermissionLauncher = registerForActivityResult(
 		ActivityResultContracts.RequestPermission()
 	) { granted ->
@@ -63,6 +66,10 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	private val backPressedCallback = object : OnBackPressedCallback(true) {
 		override fun handleOnBackPressed() {
+			if (viewModel.uiState.duplicateJourneyWarning != null) {
+				viewModel.dismissDuplicateImport()
+				return
+			}
 			when (viewModel.uiState.page) {
 				FlightPage.WINDOW_SETUP -> {
 					viewModel.saveWindowPlacement()
@@ -140,6 +147,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onRemoveFlightSpan = viewModel::removeFlightSpan,
 					onSetSatelliteOpacity = viewModel::setSatelliteOpacity,
 					onSetTerrainOpacity = viewModel::setTerrainOpacity,
+					onSetSatelliteQuality = viewModel::setSatelliteQuality,
 					onSetRecordingPolicy = viewModel::setRecordingPolicy,
 					onSetPhotoSources = viewModel::setPhotoSources,
 					onPhotoAction = ::handlePhotoAction,
@@ -149,7 +157,10 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onUpdateJourneyName = viewModel::updateJourneyName,
 					onSaveJourney = viewModel::saveJourney,
 					onExportJourney = { exportJourneyLauncher.launch(viewModel.suggestedExportName()) },
-					onOpenJourney = viewModel::openJourney
+					onOpenJourney = viewModel::openJourney,
+					onOpenDuplicateJourney = viewModel::openDuplicateJourney,
+					onContinueDuplicateImport = viewModel::continueDuplicateImport,
+					onDismissDuplicateImport = viewModel::dismissDuplicateImport
 				)
 			}
 		}
@@ -173,6 +184,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		previousHudVisibility = hud.visibility
 		hud.visibility = View.GONE
 		captureMapState()
+		enableNativeFlightRelief()
 		suppressSurfaceGpxTracks()
 		installMapInteractionGuard()
 		startLocationUpdates()
@@ -192,6 +204,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		removeMapInteractionGuard()
 		restoreSurfaceGpxTracks()
 		restoreMapState()
+		restoreNativeReliefSetting()
 		val activity = requireMapActivity()
 		activity.findViewById<View>(R.id.map_hud_container).visibility = previousHudVisibility
 		activity.enableDrawer()
@@ -207,6 +220,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		removeMapInteractionGuard()
 		restoreSurfaceGpxTracks()
 		restoreMapState()
+		restoreNativeReliefSetting()
 		super.onDestroyView()
 	}
 
@@ -224,13 +238,21 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	override fun getInsetTargets(): InsetTargetsCollection = InsetTargetsCollection()
 
-	private fun showReplayStateOnMap(trip: FlightTrip?, sample: FlightSample?, showPoints: Boolean) {
+	private fun showReplayStateOnMap(
+		trip: FlightTrip?,
+		sample: FlightSample?,
+		showPoints: Boolean,
+		photos: List<FlightPhotoAttachment>
+	) {
 		if (viewModel.uiState.sessionMode != FlightSessionMode.LIVE) environmentRecorder?.stop()
-		replayMapLayer?.update(trip, sample, showPoints)
+		replayMapLayer?.update(trip, sample, showPoints, photos)
 		if (sample == null || viewModel.uiState.page != FlightPage.MAP || !viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
 		mapView.setLatLon(sample.latitude, sample.longitude)
-		mapView.setElevationAngle(55f)
+		if (!flightMapViewInitialized) {
+			mapView.setElevationAngle(55f)
+			flightMapViewInitialized = true
+		}
 		val now = System.currentTimeMillis()
 		if (now - lastMapRefreshMillis >= MAP_REFRESH_INTERVAL_MILLIS) {
 			lastMapRefreshMillis = now
@@ -258,7 +280,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 				mapView.addLayer(layer, REPLAY_MAP_LAYER_Z_ORDER)
 				replayMapLayer = layer
 				val state = viewModel.uiState
-				layer.update(state.trip, state.snapshot?.sample, state.showTrackPoints)
+				layer.update(state.trip, state.snapshot?.sample, state.showTrackPoints, state.photos)
 			}
 		}
 	}
@@ -323,6 +345,26 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		mapView.setRotate(state.rotation, true)
 		mapView.setElevationAngle(state.elevationAngle)
 		previousMapState = null
+	}
+
+	/**
+	 * Reuse OsmAnd's native heightmap provider in the regular Map tab when the
+	 * device already has OsmAnd elevation packages. The preference is restored on
+	 * exit; our Terrarium PNG cache remains the source for Hublot/Satellite.
+	 */
+	private fun enableNativeFlightRelief() {
+		if (previous3DMapsEnabled != null) return
+		previous3DMapsEnabled = app.settings.ENABLE_3D_MAPS.get()
+		if (previous3DMapsEnabled != true) app.settings.ENABLE_3D_MAPS.set(true)
+		NativeCoreContext.getMapRendererContext()?.recreateHeightmapProvider()
+	}
+
+	private fun restoreNativeReliefSetting() {
+		val previous = previous3DMapsEnabled ?: return
+		if (app.settings.ENABLE_3D_MAPS.get() != previous) app.settings.ENABLE_3D_MAPS.set(previous)
+		NativeCoreContext.getMapRendererContext()?.recreateHeightmapProvider()
+		previous3DMapsEnabled = null
+		flightMapViewInitialized = false
 	}
 
 	private fun close() {

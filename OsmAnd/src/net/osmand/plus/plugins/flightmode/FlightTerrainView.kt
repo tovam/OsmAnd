@@ -122,6 +122,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var shadowSunEast = Float.NaN
 		private var shadowSunNorth = Float.NaN
 		private var shadowSunUp = Float.NaN
+		private var shadowFocusX = Float.NaN
+		private var shadowFocusZ = Float.NaN
 		private var shadowLightMvp = FloatArray(16)
 
 		fun update(
@@ -213,29 +215,13 @@ class FlightTerrainView @JvmOverloads constructor(
 				return
 			}
 			if (uploadedGeneration != currentScene.generation) {
-				releaseRenderMeshes()
-				renderMeshes = currentScene.meshes.map(::createRenderMesh)
+				replaceRenderMeshes(currentScene.meshes)
 				uploadedGeneration = currentScene.generation
 			}
 			if (renderMeshes.isEmpty()) {
 				clearDefaultFrameBuffer(sky)
 				return
 			}
-
-			val lightMvp = createLightMvp(currentScene, sun)
-			val shadowStrength = if (shadingEnabled && shadowAvailable) {
-				((sun.up - MINIMUM_SHADOW_SUN_UP) / SHADOW_FADE_SUN_RANGE).coerceIn(0f, 1f)
-			} else 0f
-			val shadowsActive = shadowStrength > 0f
-			if (shadowsActive && shouldUpdateShadowMap(currentScene, sun)) {
-				renderShadowMap(lightMvp)
-				lightMvp.copyInto(shadowLightMvp)
-				shadowSceneGeneration = currentScene.generation
-				shadowSunEast = sun.east
-				shadowSunNorth = sun.north
-				shadowSunUp = sun.up
-			}
-			clearDefaultFrameBuffer(sky)
 
 			val ground = currentScene.centerGroundElevationMeters ?: 0f
 			val reportedAltitude = altitudeOverrideMeters
@@ -244,6 +230,26 @@ class FlightTerrainView @JvmOverloads constructor(
 			val altitude = max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
 			val coordinates = FlightTerrainCoordinates(currentScene.centerLatitude, currentScene.centerLongitude)
 			val camera = coordinates.toLocal(latitude, longitude, altitude.toDouble())
+
+			// Cast shadows are intentionally local to the aircraft. A single shadow map
+			// stretched over the whole 300 km scene had too little precision and exposed
+			// its moving projection boundary as a false east/west "night" line.
+			val lightMvp = createLightMvp(currentScene, sun, camera[0], camera[2])
+			val shadowStrength = if (shadingEnabled && shadowAvailable) {
+				((sun.up - MINIMUM_SHADOW_SUN_UP) / SHADOW_FADE_SUN_RANGE).coerceIn(0f, 1f)
+			} else 0f
+			val shadowsActive = shadowStrength > 0f
+			if (shadowsActive && shouldUpdateShadowMap(currentScene, sun, camera[0], camera[2])) {
+				renderShadowMap(lightMvp)
+				lightMvp.copyInto(shadowLightMvp)
+				shadowSceneGeneration = currentScene.generation
+				shadowSunEast = sun.east
+				shadowSunNorth = sun.north
+				shadowSunUp = sun.up
+				shadowFocusX = camera[0]
+				shadowFocusZ = camera[2]
+			}
+			clearDefaultFrameBuffer(sky)
 			val bearing = currentSample?.bearingDegrees ?: DEFAULT_BEARING_DEGREES
 			val geometry = currentWindowPlacement.geometry()
 			val viewAzimuth = Math.toRadians(
@@ -343,8 +349,14 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 		}
 
-		private fun createLightMvp(scene: FlightTerrainScene, sun: FlightSunVector): FloatArray {
-			val extent = max(MINIMUM_SHADOW_EXTENT_METERS, scene.radiusKm * 1_000f * SHADOW_EXTENT_MULTIPLIER)
+		private fun createLightMvp(
+			scene: FlightTerrainScene,
+			sun: FlightSunVector,
+			focusX: Float,
+			focusZ: Float
+		): FloatArray {
+			val extent = (scene.radiusKm * 1_000f * SHADOW_EXTENT_MULTIPLIER)
+				.coerceIn(MINIMUM_SHADOW_EXTENT_METERS, MAXIMUM_SHADOW_EXTENT_METERS)
 			val distance = extent * SHADOW_LIGHT_DISTANCE_MULTIPLIER
 			val lightX = sun.east
 			val lightY = sun.up
@@ -354,12 +366,12 @@ class FlightTerrainView @JvmOverloads constructor(
 			Matrix.setLookAtM(
 				view,
 				0,
-				lightX * distance,
+				focusX + lightX * distance,
 				lightY * distance,
-				lightZ * distance,
+				focusZ + lightZ * distance,
+				focusX,
 				0f,
-				0f,
-				0f,
+				focusZ,
 				0f,
 				if (useAlternateUp) 0f else 1f,
 				if (useAlternateUp) 1f else 0f
@@ -406,8 +418,18 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
 		}
 
-		private fun shouldUpdateShadowMap(scene: FlightTerrainScene, sun: FlightSunVector): Boolean {
+		private fun shouldUpdateShadowMap(
+			scene: FlightTerrainScene,
+			sun: FlightSunVector,
+			focusX: Float,
+			focusZ: Float
+		): Boolean {
 			if (shadowSceneGeneration != scene.generation || shadowSunEast.isNaN()) return true
+			val focusDeltaX = focusX - shadowFocusX
+			val focusDeltaZ = focusZ - shadowFocusZ
+			if (focusDeltaX * focusDeltaX + focusDeltaZ * focusDeltaZ > SHADOW_FOCUS_UPDATE_DISTANCE_SQUARED) {
+				return true
+			}
 			val eastDelta = sun.east - shadowSunEast
 			val northDelta = sun.north - shadowSunNorth
 			val upDelta = sun.up - shadowSunUp
@@ -543,7 +565,28 @@ class FlightTerrainView @JvmOverloads constructor(
 			renderMeshes = emptyList()
 		}
 
-		private fun createRenderMesh(mesh: FlightTerrainMesh): RenderMesh {
+		private fun replaceRenderMeshes(meshes: List<FlightTerrainMesh>) {
+			val reusableTextures = renderMeshes.mapNotNull { mesh ->
+				val path = mesh.satelliteTexturePath
+				if (path != null && mesh.satelliteTextureId != 0) path to mesh.satelliteTextureId else null
+			}.toMap()
+			val reusedTextureIds = mutableSetOf<Int>()
+			val replacement = meshes.map { mesh ->
+				val reusableId = mesh.satelliteTexturePath?.let(reusableTextures::get)
+				if (reusableId != null) reusedTextureIds += reusableId
+				createRenderMesh(mesh, reusableId ?: 0)
+			}
+			val obsoleteTextures = renderMeshes.map { it.satelliteTextureId }
+				.filter { it != 0 && it !in reusedTextureIds }
+				.distinct()
+				.toIntArray()
+			if (obsoleteTextures.isNotEmpty()) {
+				GLES20.glDeleteTextures(obsoleteTextures.size, obsoleteTextures, 0)
+			}
+			renderMeshes = replacement
+		}
+
+		private fun createRenderMesh(mesh: FlightTerrainMesh, reusableTextureId: Int = 0): RenderMesh {
 			val vertexBuffer = ByteBuffer.allocateDirect(mesh.vertices.size * FLOAT_BYTES)
 				.order(ByteOrder.nativeOrder())
 				.asFloatBuffer()
@@ -562,7 +605,9 @@ class FlightTerrainView @JvmOverloads constructor(
 				vertices = vertexBuffer,
 				indices = indexBuffer,
 				indexCount = mesh.indices.size,
-				satelliteTextureId = createSatelliteTexture(mesh.satelliteTexturePath)
+				satelliteTexturePath = mesh.satelliteTexturePath,
+				satelliteTextureId = reusableTextureId.takeIf { it != 0 }
+					?: createSatelliteTexture(mesh.satelliteTexturePath)
 			)
 		}
 
@@ -603,6 +648,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			val vertices: FloatBuffer,
 			val indices: ShortBuffer,
 			val indexCount: Int,
+			val satelliteTexturePath: String?,
 			val satelliteTextureId: Int
 		)
 
@@ -614,7 +660,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val PREFERRED_SHADOW_MAP_SIZE = 2_048
 			private const val MINIMUM_SHADOW_MAP_SIZE = 512
 			private const val MINIMUM_SHADOW_EXTENT_METERS = 20_000f
-			private const val SHADOW_EXTENT_MULTIPLIER = 2.0f
+			private const val MAXIMUM_SHADOW_EXTENT_METERS = 140_000f
+			private const val SHADOW_EXTENT_MULTIPLIER = 0.55f
 			private const val SHADOW_LIGHT_DISTANCE_MULTIPLIER = 2.6f
 			private const val SHADOW_DEPTH_MULTIPLIER = 2.2f
 			private const val SHADOW_POLYGON_OFFSET_FACTOR = 2f
@@ -622,6 +669,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val MINIMUM_SHADOW_SUN_UP = 0.015f
 			private const val SHADOW_FADE_SUN_RANGE = 0.10f
 			private const val SHADOW_DIRECTION_EPSILON_SQUARED = 1e-7f
+			private const val SHADOW_FOCUS_UPDATE_DISTANCE_SQUARED = 4_000f * 4_000f
 			private const val DEFAULT_FLIGHT_ALTITUDE_METERS = 10_000f
 			private const val MINIMUM_GROUND_CLEARANCE_METERS = 60f
 			private const val DEFAULT_BEARING_DEGREES = 0f
@@ -694,13 +742,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				varying vec4 vShadowPosition;
 
 				float unpackDepth(vec4 encodedDepth) {
-					const vec4 bitShift = vec4(
-						1.0 / 16777216.0,
-						1.0 / 65536.0,
-						1.0 / 256.0,
-						1.0
-					);
-					return dot(encodedDepth, bitShift);
+					return encodedDepth.r + encodedDepth.g / 255.0;
 				}
 
 				float shadowVisibility() {
@@ -728,7 +770,9 @@ class FlightTerrainView @JvmOverloads constructor(
 						),
 						min(projected.z, 1.0 - projected.z)
 					);
-					float edgeBlend = smoothstep(0.015, 0.065, edgeDistance);
+					// Fade a wide band around the local map instead of exposing a hard
+					// projection edge across the landscape.
+					float edgeBlend = smoothstep(0.08, 0.22, edgeDistance);
 					return mix(1.0, mix(1.0, realShadow, edgeBlend), clamp(uShadowsEnabled, 0.0, 1.0));
 				}
 
@@ -770,11 +814,11 @@ class FlightTerrainView @JvmOverloads constructor(
 				precision mediump float;
 				#endif
 				vec4 packDepth(float depth) {
-					const vec4 bitShift = vec4(16777216.0, 65536.0, 256.0, 1.0);
-					const vec4 bitMask = vec4(0.0, 1.0 / 256.0, 1.0 / 256.0, 1.0 / 256.0);
-					vec4 encodedDepth = fract(min(depth, 0.999999) * bitShift);
-					encodedDepth -= encodedDepth.xxyz * bitMask;
-					return encodedDepth;
+					// Two-channel 16-bit packing matches the depth buffer and stays safe
+					// on mobile GPUs whose fragment highp silently falls back to mediump.
+					vec2 encodedDepth = fract(vec2(1.0, 255.0) * min(depth, 0.99999));
+					encodedDepth.x -= encodedDepth.y / 255.0;
+					return vec4(encodedDepth, 0.0, 1.0);
 				}
 				void main() {
 					gl_FragColor = packDepth(gl_FragCoord.z);

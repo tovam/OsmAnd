@@ -49,6 +49,29 @@ object FlightTerrainTilePlanner {
 			val longitude = stop.longitude ?: return@mapNotNull null
 			latitude to longitude
 		}
+		return corridorPlanForCoordinates(coordinates, radiusKm, maxTiles)
+	}
+
+	fun trackCorridorPlan(
+		samples: List<FlightSample>,
+		radiusKm: Int,
+		maxTiles: Int = DEFAULT_MAX_CORRIDOR_TILES
+	): TerrainTilePlan? {
+		if (samples.size < 2) return null
+		val stride = ceil(samples.size / MAXIMUM_TRACK_PLANNER_POINTS.toDouble()).toInt().coerceAtLeast(1)
+		val coordinates = buildList {
+			samples.forEachIndexed { index, sample ->
+				if (index % stride == 0 || index == samples.lastIndex) add(sample.latitude to sample.longitude)
+			}
+		}
+		return corridorPlanForCoordinates(coordinates, radiusKm, maxTiles)
+	}
+
+	private fun corridorPlanForCoordinates(
+		coordinates: List<Pair<Double, Double>>,
+		radiusKm: Int,
+		maxTiles: Int
+	): TerrainTilePlan? {
 		if (coordinates.size < 2) return null
 		val safeRadius = radiusKm.coerceIn(5, 1_000)
 		val representativeLatitude = coordinates.map { it.first }.average()
@@ -173,4 +196,5 @@ object FlightTerrainTilePlanner {
 	private val tileComparator = compareBy<TerrainTileId>({ it.zoom }, { it.y }, { it.x })
 
 	private const val WEB_MERCATOR_MAX_LATITUDE = 85.05112878
+	private const val MAXIMUM_TRACK_PLANNER_POINTS = 512
 }

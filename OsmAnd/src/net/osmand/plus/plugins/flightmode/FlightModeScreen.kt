@@ -1,8 +1,10 @@
 package net.osmand.plus.plugins.flightmode
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.net.Uri
-import android.widget.ImageView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,6 +14,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,13 +45,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.awaitDispose
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -62,10 +68,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
@@ -82,7 +90,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import net.osmand.plus.R
+import net.osmand.plus.media.MediaMetadataUtils
 import net.osmand.plus.views.OsmandMapTileView
 import java.text.SimpleDateFormat
 import java.io.File
@@ -91,7 +102,10 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.atan
 import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.log10
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.tan
@@ -107,6 +121,9 @@ private val FlightOrange = Color(0xFFFF8B38)
 private val FlightBlue = Color(0xFF5DD8FF)
 private val FlightGreen = Color(0xFF7BE0A3)
 private val FlightWarning = Color(0xFFFFCC66)
+private const val MAXIMUM_PHOTO_PREVIEW_PIXELS = 1_600
+
+private data class PhotoPreviewState(val loading: Boolean = true, val bitmap: Bitmap? = null)
 
 private enum class WindowPanel { FLIGHT, VIEW }
 
@@ -131,7 +148,7 @@ fun FlightModeScreen(
 	onSeekReplay: (Float) -> Unit,
 	onToggleReplay: () -> Unit,
 	onAdvanceReplay: (Long) -> Unit,
-	onMapState: (FlightTrip?, FlightSample?, Boolean) -> Unit,
+	onMapState: (FlightTrip?, FlightSample?, Boolean, List<FlightPhotoAttachment>) -> Unit,
 	onSetWindowAltitudeOverride: (Float?) -> Unit,
 	onMoveWindow: (Float, Float) -> Unit,
 	onSaveWindowPlacement: () -> Unit,
@@ -152,6 +169,7 @@ fun FlightModeScreen(
 	onRemoveFlightSpan: (Int) -> Unit,
 	onSetSatelliteOpacity: (Float) -> Unit,
 	onSetTerrainOpacity: (Float) -> Unit,
+	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
 	onSetRecordingPolicy: (FlightRecordingPolicy) -> Unit,
 	onSetPhotoSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit,
 	onPhotoAction: () -> Unit,
@@ -161,7 +179,10 @@ fun FlightModeScreen(
 	onUpdateJourneyName: (String) -> Unit,
 	onSaveJourney: () -> Unit,
 	onExportJourney: () -> Unit,
-	onOpenJourney: (String) -> Unit
+	onOpenJourney: (String) -> Unit,
+	onOpenDuplicateJourney: () -> Unit,
+	onContinueDuplicateImport: () -> Unit,
+	onDismissDuplicateImport: () -> Unit
 ) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
@@ -181,8 +202,8 @@ fun FlightModeScreen(
 			}
 		}
 		val mapSample = state.snapshot?.sample
-		LaunchedEffect(state.trip, mapSample, state.showTrackPoints, state.page, state.mapFollowing) {
-			onMapState(state.trip, mapSample, state.showTrackPoints)
+		LaunchedEffect(state.trip, mapSample, state.showTrackPoints, state.photos, state.page, state.mapFollowing) {
+			onMapState(state.trip, mapSample, state.showTrackPoints, state.photos)
 		}
 		LaunchedEffect(state.page, state.terrainScene, state.terrainStatus.phase) {
 			if ((state.page == FlightPage.WINDOW || state.page == FlightPage.SATELLITE) && state.terrainScene == null &&
@@ -227,7 +248,8 @@ fun FlightModeScreen(
 					onAddStop = onAddStop,
 					onRemoveStop = onRemoveStop,
 					onUpdatePlan = onUpdatePlan,
-					onPreloadTerrain = onPreloadTerrain
+					onPreloadTerrain = onPreloadTerrain,
+					onOpenJourney = onOpenJourney
 				)
 				FlightPage.MAP -> MapScreen(
 					state = state,
@@ -275,6 +297,8 @@ fun FlightModeScreen(
 					onChangeZoom = onChangeWindowZoom,
 					onSetSatelliteOpacity = onSetSatelliteOpacity,
 					onSetTerrainOpacity = onSetTerrainOpacity,
+					onSetSatelliteQuality = onSetSatelliteQuality,
+					onPreloadTerrain = onPreloadTerrain,
 					onRetryTerrain = onRetryTerrain,
 					onTerrainRendererError = onTerrainRendererError
 				)
@@ -320,6 +344,86 @@ fun FlightModeScreen(
 					}
 				}
 			}
+
+			state.duplicateJourneyWarning?.let { journey ->
+				DuplicateJourneyWarning(
+					journey = journey,
+					onOpenExisting = onOpenDuplicateJourney,
+					onContinueImport = onContinueDuplicateImport,
+					onCancel = onDismissDuplicateImport
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun DuplicateJourneyWarning(
+	journey: FlightJourneySummary,
+	onOpenExisting: () -> Unit,
+	onContinueImport: () -> Unit,
+	onCancel: () -> Unit
+) {
+	Box(
+		modifier = Modifier.fillMaxSize()
+			.background(Color(0xF20A0F13))
+			.clickable(onClick = {}),
+		contentAlignment = Alignment.Center
+	) {
+		Column(
+			modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp)
+				.background(FlightPanelStrong)
+				.border(2.dp, Color(0xFFFF5A52))
+		) {
+			Text(
+				text = stringResource(R.string.flight_mode_duplicate_gpx_title),
+				color = Color.White,
+				fontSize = 18.sp,
+				fontWeight = FontWeight.Black,
+				modifier = Modifier.fillMaxWidth().background(Color(0xFFB4231C)).padding(14.dp)
+			)
+			Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+				Text(
+					text = stringResource(R.string.flight_mode_duplicate_gpx_message),
+					color = FlightText,
+					fontSize = 13.sp,
+					fontWeight = FontWeight.SemiBold
+				)
+				Spacer(Modifier.height(9.dp))
+				Text(journey.name, color = FlightOrange, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+				Text(
+					text = stringResource(
+						R.string.flight_mode_duplicate_gpx_details,
+						journey.sampleCount,
+						journey.photoCount,
+						formatDateTime(journey.updatedAtMillis)
+					),
+					color = FlightMuted,
+					fontSize = 10.sp
+				)
+				Spacer(Modifier.height(12.dp))
+				FlatButton(
+					text = stringResource(R.string.flight_mode_duplicate_open_existing),
+					modifier = Modifier.fillMaxWidth(),
+					accent = true,
+					onClick = onOpenExisting
+				)
+				Spacer(Modifier.height(7.dp))
+				Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+					FlatButton(
+						text = stringResource(R.string.flight_mode_cancel),
+						modifier = Modifier.weight(1f),
+						accent = false,
+						onClick = onCancel
+					)
+					FlatButton(
+						text = stringResource(R.string.flight_mode_duplicate_import_anyway),
+						modifier = Modifier.weight(1f),
+						accent = false,
+						onClick = onContinueImport
+					)
+				}
+			}
 		}
 	}
 }
@@ -337,7 +441,8 @@ private fun PrepareScreen(
 	onAddStop: () -> Unit,
 	onRemoveStop: (Int) -> Unit,
 	onUpdatePlan: (FlightPlan) -> Unit,
-	onPreloadTerrain: () -> Unit
+	onPreloadTerrain: () -> Unit,
+	onOpenJourney: (String) -> Unit
 ) {
 	val focusManager = LocalFocusManager.current
 	val focusRequesters = remember(state.plan.stops.size) {
@@ -346,6 +451,13 @@ private fun PrepareScreen(
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_prepare), FlightSessionMode.PREPARE, onClose)
 		LazyColumn(Modifier.weight(1f)) {
+			if (state.savedJourneys.isNotEmpty()) {
+				item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, state.savedJourneys.size)) }
+				itemsIndexed(state.savedJourneys) { _, journey ->
+					SavedJourneyRow(journey = journey, onOpen = onOpenJourney)
+				}
+				item { Spacer(Modifier.height(8.dp)) }
+			}
 			item { SectionTitle(stringResource(R.string.flight_mode_route)) }
 			itemsIndexed(state.plan.stops) { index, stop ->
 				val submitCity: () -> Unit = {
@@ -481,6 +593,28 @@ private fun MapScreen(
 	onRemoveFlightSpan: (Int) -> Unit
 ) {
 	val sample = state.snapshot?.sample
+	val density = LocalDensity.current
+	val targetScalePixels = with(density) { 96.dp.toPx() }
+	var mapScale by remember(mapView) { mutableStateOf<FlightMapScale?>(null) }
+	var mapRotation by remember(mapView) { mutableStateOf(mapView?.rotate ?: 0f) }
+	LaunchedEffect(mapView, targetScalePixels) {
+		while (true) {
+			mapView?.let { view ->
+				val tileBox = view.currentRotatedTileBox
+				val centerX = tileBox.pixWidth / 2
+				val centerY = tileBox.pixHeight / 2
+				val rawMeters = tileBox.getDistance(
+					centerX,
+					centerY,
+					centerX + targetScalePixels.roundToInt(),
+					centerY
+				)
+				mapScale = calculateFlightMapScale(rawMeters)
+				mapRotation = view.rotate
+			}
+			delay(250)
+		}
+	}
 	Box(Modifier.fillMaxSize()) {
 		if (mapView != null) {
 			AndroidView(
@@ -498,38 +632,38 @@ private fun MapScreen(
 			InstrumentStrip(sample, overlay = true)
 		}
 
-		// Keep this control deliberately small: the map itself explains the active mode.
-		// The outer box preserves a comfortable touch target without enlarging the visual button.
-		Box(
+		Row(
 			modifier = Modifier
 				.align(Alignment.TopEnd)
 				.padding(top = 122.dp, end = 2.dp)
-				.size(44.dp)
-				.clickable { onSetMapFollowing(!state.mapFollowing) },
-			contentAlignment = Alignment.Center
+				.height(44.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(2.dp)
 		) {
-			Box(
-				modifier = Modifier
-					.size(32.dp)
-					.background(FlightHudPanel, CircleShape)
-					.border(
-						width = 1.dp,
-						color = if (state.mapFollowing) FlightGreen else FlightOrange,
-						shape = CircleShape
-					),
-				contentAlignment = Alignment.Center
-			) {
-				androidx.compose.material3.Icon(
-					painter = painterResource(R.drawable.ic_action_center_on_track),
-					contentDescription = if (state.mapFollowing) {
-						stringResource(R.string.flight_mode_map_free)
-					} else {
-						stringResource(R.string.flight_mode_map_following)
-					},
-					tint = if (state.mapFollowing) FlightGreen else FlightOrange,
-					modifier = Modifier.size(18.dp)
-				)
-			}
+			FlightMapRoundButton(
+				icon = R.drawable.ic_action_compass_north,
+				tint = if (abs(mapRotation) < 0.5f) FlightMuted else FlightBlue,
+				contentDescription = stringResource(R.string.flight_mode_north_up),
+				label = "%03d°".format(Math.floorMod(mapRotation.roundToInt(), 360)),
+				onClick = { mapView?.resetRotation() }
+			)
+			FlightMapRoundButton(
+				icon = R.drawable.ic_action_center_on_track,
+				tint = if (state.mapFollowing) FlightGreen else FlightOrange,
+				contentDescription = if (state.mapFollowing) {
+					stringResource(R.string.flight_mode_map_free)
+				} else {
+					stringResource(R.string.flight_mode_map_following)
+				},
+				onClick = { onSetMapFollowing(!state.mapFollowing) }
+			)
+		}
+
+		mapScale?.let { scale ->
+			FlightMapScaleBar(
+				scale = scale,
+				modifier = Modifier.align(Alignment.TopStart).padding(top = 128.dp, start = 11.dp)
+			)
 		}
 
 		Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
@@ -560,6 +694,82 @@ private fun MapScreen(
 				ReplayBar(state, onSeekReplay, onToggleReplay)
 			}
 			FlightBottomNavigation(FlightPage.MAP, onPageChange, overlay = true)
+		}
+	}
+}
+
+private data class FlightMapScale(val meters: Double, val widthFraction: Float)
+
+private fun calculateFlightMapScale(rawMeters: Double): FlightMapScale? {
+	if (!rawMeters.isFinite() || rawMeters <= 0.0) return null
+	val power = 10.0.pow(floor(log10(rawMeters)))
+	val normalized = rawMeters / power
+	val step = when {
+		normalized >= 5.0 -> 5.0
+		normalized >= 2.0 -> 2.0
+		else -> 1.0
+	}
+	val meters = step * power
+	return FlightMapScale(meters, (meters / rawMeters).toFloat().coerceIn(0.15f, 1f))
+}
+
+@Composable
+private fun FlightMapScaleBar(scale: FlightMapScale, modifier: Modifier = Modifier) {
+	Column(
+		modifier.background(FlightHudPanel, RoundedCornerShape(3.dp)).padding(horizontal = 6.dp, vertical = 4.dp),
+		horizontalAlignment = Alignment.Start
+	) {
+		Text(
+			text = if (scale.meters >= 1_000.0) {
+				if (scale.meters >= 10_000.0) "%.0f km".format(Locale.ROOT, scale.meters / 1_000.0)
+				else "%.1f km".format(Locale.ROOT, scale.meters / 1_000.0)
+			} else "%.0f m".format(Locale.ROOT, scale.meters),
+			color = FlightText,
+			fontSize = 9.sp,
+			fontFamily = FontFamily.Monospace
+		)
+		Canvas(Modifier.width(96.dp).height(7.dp)) {
+			val barWidth = size.width * scale.widthFraction
+			val y = size.height - 1.dp.toPx()
+			drawLine(FlightText, Offset(0f, y), Offset(barWidth, y), 1.5.dp.toPx())
+			drawLine(FlightText, Offset(0f, y - 5.dp.toPx()), Offset(0f, y), 1.5.dp.toPx())
+			drawLine(FlightText, Offset(barWidth, y - 5.dp.toPx()), Offset(barWidth, y), 1.5.dp.toPx())
+		}
+	}
+}
+
+@Composable
+private fun FlightMapRoundButton(
+	icon: Int,
+	tint: Color,
+	contentDescription: String,
+	label: String? = null,
+	onClick: () -> Unit
+) {
+	Box(Modifier.size(44.dp).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+		Box(
+			Modifier.size(34.dp).background(FlightHudPanel, CircleShape).border(1.dp, tint, CircleShape),
+			contentAlignment = Alignment.Center
+		) {
+			androidx.compose.material3.Icon(
+				painter = painterResource(icon),
+				contentDescription = contentDescription,
+				tint = tint,
+				modifier = if (label == null) {
+					Modifier.size(20.dp)
+				} else {
+					Modifier.align(Alignment.TopCenter).padding(top = 4.dp).size(15.dp)
+				}
+			)
+			if (label != null) {
+				Text(
+					label,
+					color = tint,
+					fontSize = 6.sp,
+					fontFamily = FontFamily.Monospace,
+					modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp)
+				)
+			}
 		}
 	}
 }
@@ -648,6 +858,7 @@ private fun WindowScreen(
 			FlightWindowScene(
 				placement = state.windowPlacement,
 				look = state.windowLook,
+				trip = state.trip,
 				sample = state.snapshot?.sample,
 				scene = state.terrainScene,
 				terrainStatus = state.terrainStatus,
@@ -801,12 +1012,14 @@ private fun SatelliteScreen(
 	onChangeZoom: (Float) -> Unit,
 	onSetSatelliteOpacity: (Float) -> Unit,
 	onSetTerrainOpacity: (Float) -> Unit,
+	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
+	onPreloadTerrain: () -> Unit,
 	onRetryTerrain: () -> Unit,
 	onTerrainRendererError: (String) -> Unit
 ) {
 	var cacheInfo by remember { mutableStateOf(FlightSatelliteCacheInfo()) }
 	var panel by remember { mutableStateOf(SatellitePanel.THREE_D) }
-	val refreshKey = "${state.terrainStatus.phase}:${state.terrainStatus.satelliteTiles}:${state.terrainStatus.availableTiles}"
+	val refreshKey = "${state.plan.satelliteQuality}:${state.terrainScene?.generation}:${state.terrainStatus.phase}"
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_satellite_3d), state.sessionMode, onClose)
 		SatellitePanelSelector(panel = panel, onSelect = { panel = it })
@@ -827,6 +1040,7 @@ private fun SatelliteScreen(
 						factory = { context -> FlightSatelliteCacheView(context) },
 						update = { view ->
 							view.onCacheInfoChanged = { cacheInfo = it }
+							view.setQuality(state.plan.satelliteQuality)
 							view.setRefreshKey(refreshKey)
 						}
 					)
@@ -861,11 +1075,31 @@ private fun SatelliteScreen(
 			)
 		}
 		SatelliteBlendControls(
+			quality = state.plan.satelliteQuality,
 			satelliteOpacity = state.satelliteOpacity,
 			terrainOpacity = state.terrainOpacity,
+			onSetQuality = onSetSatelliteQuality,
 			onSetSatelliteOpacity = onSetSatelliteOpacity,
 			onSetTerrainOpacity = onSetTerrainOpacity
 		)
+		Row(
+			Modifier.fillMaxWidth().height(34.dp).background(FlightPanelStrong).padding(horizontal = 9.dp),
+			verticalAlignment = Alignment.CenterVertically
+		) {
+			Text(
+				terrainStatusText(state.terrainStatus),
+				color = if (state.terrainStatus.phase == FlightTerrainPhase.ERROR) FlightWarning else FlightMuted,
+				fontSize = 8.sp,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+				modifier = Modifier.weight(1f)
+			)
+			CompactAction(
+				text = stringResource(R.string.flight_mode_preload_current_track).uppercase(),
+				color = FlightOrange,
+				onClick = onPreloadTerrain
+			)
+		}
 		FlightBottomNavigation(FlightPage.SATELLITE, onPageChange)
 	}
 }
@@ -943,14 +1177,58 @@ private fun FlightTerrainExplorer(
 
 @Composable
 private fun SatelliteBlendControls(
+	quality: FlightSatelliteQuality,
 	satelliteOpacity: Float,
 	terrainOpacity: Float,
+	onSetQuality: (FlightSatelliteQuality) -> Unit,
 	onSetSatelliteOpacity: (Float) -> Unit,
 	onSetTerrainOpacity: (Float) -> Unit
 ) {
 	Column(Modifier.fillMaxWidth().background(FlightPanelStrong).border(1.dp, FlightLine)) {
+		SatelliteQualitySelector(quality, onSetQuality)
 		CompactBlendSlider(stringResource(R.string.flight_mode_satellite).uppercase(), satelliteOpacity, FlightBlue, onSetSatelliteOpacity)
 		CompactBlendSlider(stringResource(R.string.flight_mode_relief).uppercase(), terrainOpacity, FlightOrange, onSetTerrainOpacity)
+	}
+}
+
+@Composable
+private fun SatelliteQualitySelector(
+	quality: FlightSatelliteQuality,
+	onSetQuality: (FlightSatelliteQuality) -> Unit
+) {
+	Row(
+		Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 9.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(4.dp)
+	) {
+		Text(
+			stringResource(R.string.flight_mode_satellite_quality).uppercase(),
+			color = FlightMuted,
+			fontSize = 8.sp,
+			fontWeight = FontWeight.Bold,
+			modifier = Modifier.width(61.dp)
+		)
+		FlightSatelliteQuality.values().forEach { item ->
+			val selected = item == quality
+			Box(
+				Modifier.weight(1f).height(25.dp)
+					.background(if (selected) FlightBlue.copy(alpha = 0.16f) else Color.Transparent)
+					.border(1.dp, if (selected) FlightBlue else FlightLine)
+					.clickable { onSetQuality(item) },
+				contentAlignment = Alignment.Center
+			) {
+				Text(
+					when (item) {
+						FlightSatelliteQuality.STANDARD -> stringResource(R.string.flight_mode_satellite_quality_standard)
+						FlightSatelliteQuality.HIGH -> stringResource(R.string.flight_mode_satellite_quality_high)
+						FlightSatelliteQuality.ULTRA -> stringResource(R.string.flight_mode_satellite_quality_ultra)
+					},
+					color = if (selected) FlightBlue else FlightText,
+					fontSize = 8.sp,
+					fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+				)
+			}
+		}
 	}
 }
 
@@ -1065,7 +1343,6 @@ private fun PhotoScreen(
 	onDiscardPhotos: () -> Unit,
 	onSelectPhoto: (String) -> Unit
 ) {
-	val selectedPhoto = (state.photos + state.pendingPhotos).firstOrNull { it.id == state.selectedPhotoId }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
 		LazyColumn(Modifier.weight(1f)) {
@@ -1109,7 +1386,14 @@ private fun PhotoScreen(
 			if (state.pendingPhotos.isNotEmpty()) {
 				item { SectionTitle(stringResource(R.string.flight_mode_photos_to_confirm, state.pendingPhotos.size)) }
 				itemsIndexed(state.pendingPhotos) { _, photo ->
-					FlightPhotoRow(photo, photo.id == state.selectedPhotoId, onSelectPhoto)
+					FlightPhotoEntry(
+						photo = photo,
+						selected = photo.id == state.selectedPhotoId,
+						trip = state.trip,
+						sessionMode = state.sessionMode,
+						onSelect = onSelectPhoto,
+						onOpenWindow = { onPageChange(FlightPage.WINDOW) }
+					)
 				}
 				item {
 					Row(
@@ -1124,23 +1408,14 @@ private fun PhotoScreen(
 			if (state.photos.isNotEmpty()) {
 				item { SectionTitle(stringResource(R.string.flight_mode_attached_photos, state.photos.size)) }
 				itemsIndexed(state.photos) { _, photo ->
-					FlightPhotoRow(photo, photo.id == state.selectedPhotoId, onSelectPhoto)
-				}
-			}
-			selectedPhoto?.let { photo ->
-				item {
-					FlightPhotoPreview(photo)
-					if (photo.matchedSampleIndex != null && state.sessionMode == FlightSessionMode.REPLAY) {
-						FlatButton(
-							text = stringResource(R.string.flight_mode_open_photo_window),
-							modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-							accent = false,
-							onClick = {
-								onSelectPhoto(photo.id)
-								onPageChange(FlightPage.WINDOW)
-							}
-						)
-					}
+					FlightPhotoEntry(
+						photo = photo,
+						selected = photo.id == state.selectedPhotoId,
+						trip = state.trip,
+						sessionMode = state.sessionMode,
+						onSelect = onSelectPhoto,
+						onOpenWindow = { onPageChange(FlightPage.WINDOW) }
+					)
 				}
 			}
 			state.journeyMessage?.let { message ->
@@ -1148,6 +1423,38 @@ private fun PhotoScreen(
 			}
 		}
 		FlightBottomNavigation(FlightPage.PHOTO, onPageChange)
+	}
+}
+
+@Composable
+private fun FlightPhotoEntry(
+	photo: FlightPhotoAttachment,
+	selected: Boolean,
+	trip: FlightTrip?,
+	sessionMode: FlightSessionMode,
+	onSelect: (String) -> Unit,
+	onOpenWindow: () -> Unit
+) {
+	Column {
+		FlightPhotoRow(photo, selected, onSelect)
+		if (selected) {
+			val sample = photo.matchedSampleIndex?.let { sampleIndex ->
+				trip?.samples?.firstOrNull { it.index == sampleIndex }
+			}
+			FlightPhotoPreview(photo)
+			FlightPhotoMetadata(photo, sample, trip)
+			if (sample != null && sessionMode == FlightSessionMode.REPLAY) {
+				FlatButton(
+					text = stringResource(R.string.flight_mode_open_photo_window),
+					modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+					accent = false,
+					onClick = {
+						onSelect(photo.id)
+						onOpenWindow()
+					}
+				)
+			}
+		}
 	}
 }
 
@@ -1176,11 +1483,143 @@ private fun FlightPhotoRow(photo: FlightPhotoAttachment, selected: Boolean, onSe
 
 @Composable
 private fun FlightPhotoPreview(photo: FlightPhotoAttachment) {
-	AndroidView(
-		modifier = Modifier.fillMaxWidth().height(220.dp).padding(horizontal = 12.dp).border(1.dp, FlightLine),
-		factory = { context -> ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP } },
-		update = { image -> image.setImageURI(Uri.fromFile(File(photo.localPath))) }
-	)
+	val preview by produceState(initialValue = PhotoPreviewState(), key1 = photo.localPath) {
+		val loaded = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath)) }
+		value = PhotoPreviewState(loading = false, bitmap = loaded)
+		awaitDispose { loaded?.recycle() }
+	}
+	val bitmap = preview.bitmap
+	Box(
+		modifier = Modifier.fillMaxWidth().height(176.dp).padding(horizontal = 10.dp, vertical = 7.dp)
+			.clip(RoundedCornerShape(4.dp)).background(Color.Black).border(1.dp, FlightLine),
+		contentAlignment = Alignment.Center
+	) {
+		if (bitmap != null) {
+			Image(
+				bitmap = bitmap.asImageBitmap(),
+				contentDescription = photo.fileName,
+				contentScale = ContentScale.Fit,
+				modifier = Modifier.fillMaxSize()
+			)
+		} else {
+			Text(
+				stringResource(
+					if (preview.loading) R.string.flight_mode_photo_preview_loading
+					else R.string.flight_mode_photo_preview_unavailable
+				),
+				color = if (preview.loading) FlightMuted else FlightWarning,
+				fontSize = 10.sp
+			)
+		}
+	}
+}
+
+@Composable
+private fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSample?, trip: FlightTrip?) {
+	val fileSize = remember(photo.localPath) { runCatching { File(photo.localPath).length() }.getOrDefault(0L) }
+	Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp)) {
+		Text(
+			stringResource(R.string.flight_mode_photo_details).uppercase(),
+			color = FlightBlue,
+			fontSize = 8.sp,
+			fontWeight = FontWeight.Bold,
+			modifier = Modifier.padding(vertical = 4.dp)
+		)
+		PhotoMetadataLine(stringResource(R.string.flight_mode_photo_file), photo.fileName)
+		PhotoMetadataLine(
+			stringResource(R.string.flight_mode_photo_date),
+			photo.timestampMillis?.let(::formatDateTime) ?: stringResource(R.string.flight_mode_photo_without_date)
+		)
+		PhotoMetadataLine(stringResource(R.string.flight_mode_photo_file_size), formatStorageBytes(fileSize))
+		if (sample == null) {
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_photo_position),
+				stringResource(R.string.flight_mode_photo_not_matched),
+				warning = true
+			)
+		} else {
+			val progress = trip?.progressFor(sample)?.times(100f)?.roundToInt() ?: 0
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_photo_timeline),
+				stringResource(R.string.flight_mode_photo_timeline_value, sample.index + 1, progress)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_photo_position),
+				String.format(Locale.US, "%.6f, %.6f", sample.latitude, sample.longitude)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_altitude),
+				sample.altitudeMeters?.let { "%.0f m".format(it) } ?: stringResource(R.string.flight_mode_missing)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_speed),
+				sample.speedMetersPerSecond?.let { "%.0f km/h".format(it * 3.6f) } ?: stringResource(R.string.flight_mode_missing)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_heading),
+				sample.bearingDegrees?.let { "%03.0f°".format(it) } ?: stringResource(R.string.flight_mode_missing)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_accuracy),
+				sample.horizontalAccuracyMeters?.let { "±%.0f m".format(it) } ?: stringResource(R.string.flight_mode_missing)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_satellites),
+				if (sample.satellitesUsed != null) "${sample.satellitesUsed}/${sample.satellitesFound ?: 0}"
+				else stringResource(R.string.flight_mode_missing)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_sound),
+				sample.soundDb?.let { "%.1f dB".format(it) } ?: stringResource(R.string.flight_mode_missing)
+			)
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_vibration),
+				sample.vibrationHz?.let { "%.1f Hz".format(it) } ?: stringResource(R.string.flight_mode_missing)
+			)
+		}
+	}
+}
+
+@Composable
+private fun PhotoMetadataLine(label: String, value: String, warning: Boolean = false) {
+	Row(
+		Modifier.fillMaxWidth().height(27.dp),
+		verticalAlignment = Alignment.CenterVertically
+	) {
+		Text(label.uppercase(), color = FlightMuted, fontSize = 8.sp, modifier = Modifier.width(92.dp), maxLines = 1)
+		Text(
+			value,
+			color = if (warning) FlightWarning else FlightText,
+			fontSize = 9.sp,
+			fontFamily = FontFamily.Monospace,
+			maxLines = 1,
+			overflow = TextOverflow.Ellipsis,
+			modifier = Modifier.weight(1f)
+		)
+	}
+	Box(Modifier.fillMaxWidth().height(1.dp).background(FlightLine.copy(alpha = 0.55f)))
+}
+
+private fun decodePhotoPreview(file: File): Bitmap? {
+	val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+	BitmapFactory.decodeFile(file.absolutePath, bounds)
+	if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+	var sampleSize = 1
+	while (max(bounds.outWidth, bounds.outHeight) / sampleSize > MAXIMUM_PHOTO_PREVIEW_PIXELS) sampleSize *= 2
+	val decoded = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sampleSize })
+		?: return null
+	val rotation = when (MediaMetadataUtils.getExifOrientation(file)) {
+		3 -> 180f
+		6 -> 90f
+		8 -> 270f
+		else -> 0f
+	}
+	if (rotation == 0f) return decoded
+	return runCatching {
+		Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, Matrix().apply { postRotate(rotation) }, true)
+	}.getOrNull()?.also { rotated ->
+		if (rotated !== decoded) decoded.recycle()
+	} ?: decoded
 }
 
 @Composable
@@ -1255,26 +1694,113 @@ private fun JourneysScreen(
 			state.journeyMessage?.let { message ->
 				item { Text(message, color = FlightGreen, fontSize = 11.sp, modifier = Modifier.padding(12.dp)) }
 			}
+			item { SectionTitle(stringResource(R.string.flight_mode_storage)) }
+			item {
+				if (state.storageUsageLoading && state.storageUsage == null) {
+					Row(
+						Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(9.dp)
+					) {
+						CircularProgressIndicator(color = FlightOrange, strokeWidth = 2.dp, modifier = Modifier.size(17.dp))
+						Text(stringResource(R.string.flight_mode_storage_calculating), color = FlightMuted, fontSize = 10.sp)
+					}
+				} else {
+					state.storageUsage?.let(::FlightStorageUsageTable)
+				}
+			}
 			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, state.savedJourneys.size)) }
 			if (state.savedJourneys.isEmpty()) {
 				item { Text(stringResource(R.string.flight_mode_no_saved_journey), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
 			} else {
 				itemsIndexed(state.savedJourneys) { _, journey ->
-					Row(
-						Modifier.fillMaxWidth().height(58.dp).clickable { onOpen(journey.id) }.padding(horizontal = 12.dp),
-						verticalAlignment = Alignment.CenterVertically
-					) {
-						Column(Modifier.weight(1f)) {
-							Text(journey.name, color = FlightText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-							Text(formatDateTime(journey.updatedAtMillis), color = FlightMuted, fontSize = 9.sp)
-						}
-						Text("${journey.sampleCount} pts · ${journey.photoCount} photos", color = FlightBlue, fontSize = 9.sp)
-					}
-					Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 12.dp).background(FlightLine))
+					SavedJourneyRow(journey = journey, onOpen = onOpen)
 				}
 			}
 		}
 		FlightBottomNavigation(FlightPage.JOURNEYS, onPageChange)
+	}
+}
+
+@Composable
+private fun FlightStorageUsageTable(usage: FlightStorageUsage) {
+	Column(Modifier.fillMaxWidth().background(FlightPanelStrong).border(1.dp, FlightLine)) {
+		StorageHeader(stringResource(R.string.flight_mode_storage_current), formatStorageBytes(usage.currentJourneyBytes))
+		StorageRow(stringResource(R.string.flight_mode_storage_track_data), usage.currentJournalBytes)
+		StorageRow(stringResource(R.string.flight_mode_storage_current_photos), usage.currentPhotosBytes)
+		StorageHeader(stringResource(R.string.flight_mode_storage_shared), formatStorageBytes(usage.totalBytes))
+		StorageRow(stringResource(R.string.flight_mode_storage_all_journals), usage.allJournalBytes)
+		StorageRow(stringResource(R.string.flight_mode_storage_all_photos), usage.allPhotosBytes)
+		StorageRow(stringResource(R.string.flight_mode_storage_terrain), usage.terrainBytes)
+		StorageRow(stringResource(R.string.flight_mode_storage_satellite_sources), usage.satelliteSourceBytes)
+		StorageRow(stringResource(R.string.flight_mode_storage_satellite_render), usage.satelliteRenderBytes)
+		StorageRow(stringResource(R.string.flight_mode_storage_graphics), usage.graphicsBytes)
+		if (usage.otherBytes > 0L) StorageRow(stringResource(R.string.flight_mode_storage_other), usage.otherBytes)
+		Row(
+			Modifier.fillMaxWidth().height(34.dp).background(Color(0xFF152029)).padding(horizontal = 12.dp),
+			verticalAlignment = Alignment.CenterVertically
+		) {
+			Text(stringResource(R.string.flight_mode_storage_total).uppercase(), color = FlightText, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+			Text(formatStorageBytes(usage.totalBytes), color = FlightGreen, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+		}
+	}
+}
+
+@Composable
+private fun StorageHeader(label: String, value: String) {
+	Row(
+		Modifier.fillMaxWidth().height(29.dp).background(Color(0xFF0D1419)).padding(horizontal = 12.dp),
+		verticalAlignment = Alignment.CenterVertically
+	) {
+		Text(label.uppercase(), color = FlightOrange, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+		Text(value, color = FlightText, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+	}
+}
+
+@Composable
+private fun StorageRow(label: String, bytes: Long) {
+	Row(
+		Modifier.fillMaxWidth().height(27.dp).padding(horizontal = 12.dp),
+		verticalAlignment = Alignment.CenterVertically
+	) {
+		Text(label, color = FlightMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+		Text(formatStorageBytes(bytes), color = FlightText, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+	}
+}
+
+private fun formatStorageBytes(bytes: Long): String {
+	if (bytes < 1_024L) return "$bytes o"
+	val kib = bytes / 1_024.0
+	if (kib < 1_024.0) return "%.1f Ko".format(Locale.ROOT, kib)
+	val mib = kib / 1_024.0
+	if (mib < 1_024.0) return "%.1f Mo".format(Locale.ROOT, mib)
+	return "%.2f Go".format(Locale.ROOT, mib / 1_024.0)
+}
+
+@Composable
+private fun SavedJourneyRow(journey: FlightJourneySummary, onOpen: (String) -> Unit) {
+	Column(Modifier.fillMaxWidth().clickable { onOpen(journey.id) }) {
+		Row(
+			Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 12.dp),
+			verticalAlignment = Alignment.CenterVertically
+		) {
+			Column(Modifier.weight(1f)) {
+				Text(
+					journey.name,
+					color = FlightText,
+					fontSize = 13.sp,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis
+				)
+				Text(formatDateTime(journey.updatedAtMillis), color = FlightMuted, fontSize = 9.sp)
+			}
+			Text(
+				"${journey.sampleCount} pts · ${journey.photoCount} photos",
+				color = FlightBlue,
+				fontSize = 9.sp
+			)
+		}
+		Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 12.dp).background(FlightLine))
 	}
 }
 
@@ -1731,6 +2257,7 @@ private fun FlightProfileView(
 private fun FlightWindowScene(
 	placement: FlightWindowPlacement,
 	look: FlightWindowLook,
+	trip: FlightTrip?,
 	sample: FlightSample?,
 	scene: FlightTerrainScene?,
 	terrainStatus: FlightTerrainStatus,
@@ -1788,6 +2315,25 @@ private fun FlightWindowScene(
 			onRecenter = onRecenterLook,
 			modifier = Modifier.align(Alignment.TopCenter).padding(top = 7.dp)
 		)
+		if (sample != null) {
+			AndroidView(
+				modifier = Modifier
+					.align(Alignment.TopEnd)
+					.padding(top = 48.dp, end = 7.dp)
+					.fillMaxWidth(0.22f)
+					.aspectRatio(1f),
+				factory = { context -> FlightWindowOverviewView(context) },
+				update = { overview ->
+					overview.update(
+						trip = trip,
+						sample = sample,
+						viewAzimuthDegrees = placement.viewAzimuthDegrees(sample.bearingDegrees ?: 0f, look),
+						quality = scene?.satelliteQuality ?: FlightSatelliteQuality.HIGH,
+						cacheKey = "${scene?.satelliteQuality}:${scene?.generation}:${terrainStatus.satelliteTiles}"
+					)
+				}
+			)
+		}
 		TerrainStatusOverlay(
 			status = terrainStatus,
 			scene = scene,
@@ -2476,14 +3022,15 @@ private fun FlightModePreview(state: FlightUiState) {
 		onClose = {}, onPageChange = {}, onImportTrip = {}, onSelectInternalTrack = {}, onStartLive = {},
 		onUpdateStop = { _, _ -> }, onSelectCity = { _, _ -> }, onDismissCitySuggestions = {},
 		onAddStop = {}, onRemoveStop = {}, onUpdatePlan = {}, onPreloadTerrain = {},
-		onSeekReplay = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapState = { _, _, _ -> },
+		onSeekReplay = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapState = { _, _, _, _ -> },
 		onSetWindowAltitudeOverride = {}, onMoveWindow = { _, _ -> }, onSaveWindowPlacement = {}, onSetWindowSide = {},
 		onMoveWindowLook = { _, _ -> }, onRecenterWindowLook = {}, onSetWindowZoom = {}, onChangeWindowZoom = {}, onSetCabinTransparent = {}, onSetCabinHidden = {},
 		onRetryTerrain = {}, onTerrainRendererError = {}, onSetMapFollowing = {}, onShowTrackPoints = {},
 		onMarkFlightStart = {}, onMarkFlightEnd = {}, onCancelFlightStart = {}, onRemoveFlightSpan = {},
-		onSetSatelliteOpacity = {}, onSetTerrainOpacity = {},
+		onSetSatelliteOpacity = {}, onSetTerrainOpacity = {}, onSetSatelliteQuality = {},
 		onSetRecordingPolicy = {}, onSetPhotoSources = { _, _, _, _ -> },
 		onPhotoAction = {}, onValidatePhotos = {}, onDiscardPhotos = {}, onSelectPhoto = {},
-		onUpdateJourneyName = {}, onSaveJourney = {}, onExportJourney = {}, onOpenJourney = {}
+		onUpdateJourneyName = {}, onSaveJourney = {}, onExportJourney = {}, onOpenJourney = {},
+		onOpenDuplicateJourney = {}, onContinueDuplicateImport = {}, onDismissDuplicateImport = {}
 	)
 }

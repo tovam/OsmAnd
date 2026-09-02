@@ -73,10 +73,15 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 	private var offsetY = 0f
 	private var loading = true
 	private var refreshKey: String? = null
+	private var quality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH
 	private var scanGeneration = 0
 	private var detached = false
 
 	var onCacheInfoChanged: ((FlightSatelliteCacheInfo) -> Unit)? = null
+
+	fun setQuality(quality: FlightSatelliteQuality) {
+		this.quality = quality
+	}
 
 	private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
 		override fun onDown(event: MotionEvent): Boolean = true
@@ -137,8 +142,8 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 				if (detached || generation != scanGeneration) return@post
 				loading = false
 				tiles = snapshot
-				bitmapCache.evictAll()
-				queuedKeys.clear()
+				// Keep decoded tiles that are still useful. Evicting the whole LRU on
+				// every scene refresh was the source of the grey/image flashing.
 				failedKeys.clear()
 				updateBounds()
 				fitContent()
@@ -155,7 +160,7 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 	}
 
 	private fun scanCache(): List<CachedTile> {
-		val root = File(context.applicationContext.filesDir, FlightSatelliteSource.CACHE_DIRECTORY)
+		val root = File(context.applicationContext.filesDir, FlightSatelliteSource.renderDirectory(quality))
 		val byZoom = root.listFiles().orEmpty()
 			.filter { it.isDirectory }
 			.mapNotNull { zoomDirectory ->

@@ -16,6 +16,7 @@ object FlightTerrainMeshBuilder {
 		radiusKm: Int,
 		plan: TerrainTilePlan,
 		tiles: Map<TerrainTileId, TerrariumTile>,
+		satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
 		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap()
 	): FlightTerrainScene {
 		val projection = FlightTerrainCoordinates(centerLatitude, centerLongitude)
@@ -34,6 +35,7 @@ object FlightTerrainMeshBuilder {
 			centerLongitude = centerLongitude,
 			radiusKm = radiusKm,
 			zoom = plan.zoom,
+			satelliteQuality = satelliteQuality,
 			meshes = meshes,
 			loadedTiles = tiles.size,
 			missingTiles = (plan.tiles.size - tiles.size).coerceAtLeast(0),

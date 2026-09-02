@@ -30,6 +30,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private val journeyStore = FlightJourneyStore(application)
 	private var replayEngine: FlightReplayEngine? = null
 	private var terrainJob: Job? = null
+	private var storageJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var requestedTerrainCenter: Pair<Double, Double>? = null
 	private val liveSamples = mutableListOf<FlightSample>()
@@ -37,6 +38,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var liveSequence = 0
 	private var pendingCaptureFile: File? = null
 	private var pendingCaptureTimestampMillis: Long = 0L
+	private var pendingDuplicateTrip: FlightTrip? = null
 	private var latestEnvironmentReading = FlightEnvironmentReading()
 
 	var uiState by mutableStateOf(
@@ -47,8 +49,24 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	)
 		private set
 
+	init {
+		refreshStorageUsage()
+	}
+
 	fun showPage(page: FlightPage) {
 		uiState = uiState.copy(page = page)
+		if (page == FlightPage.JOURNEYS) refreshStorageUsage()
+	}
+
+	fun refreshStorageUsage() {
+		storageJob?.cancel()
+		val journeyId = uiState.journeyId
+		val photos = uiState.photos
+		uiState = uiState.copy(storageUsageLoading = true)
+		storageJob = viewModelScope.launch {
+			val usage = withContext(Dispatchers.IO) { journeyStore.storageUsage(journeyId, photos) }
+			uiState = uiState.copy(storageUsage = usage, storageUsageLoading = false)
+		}
 	}
 
 	fun updateStop(index: Int, name: String) {
@@ -151,6 +169,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun startLive() {
+		pendingDuplicateTrip = null
 		replayEngine = null
 		liveSamples.clear()
 		liveDistanceMeters = 0.0
@@ -166,6 +185,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			replayPlaying = false,
 			replayProgress = 0f,
 			tripLoadError = null,
+			duplicateJourneyWarning = null,
 			flightSpans = emptyList(),
 			pendingFlightStartProgress = null,
 			journeyId = null,
@@ -180,7 +200,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun loadSource(uri: Uri) {
-		uiState = uiState.copy(loadingTrip = true, tripLoadError = null, journeyMessage = null)
+		pendingDuplicateTrip = null
+		uiState = uiState.copy(
+			loadingTrip = true,
+			tripLoadError = null,
+			journeyMessage = null,
+			duplicateJourneyWarning = null
+		)
 		viewModelScope.launch {
 			val result = runCatching {
 				withContext(Dispatchers.IO) {
@@ -191,12 +217,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					}
 				}
 			}
-			result.onSuccess { source ->
-				when (source) {
-					is LoadedSource.Journey -> applyJourney(source.journey)
-					is LoadedSource.Trip -> applyImportedTrip(source.trip)
-				}
-			}.onFailure(::showTripLoadFailure)
+			val source = result.getOrElse { error ->
+				showTripLoadFailure(error)
+				return@launch
+			}
+			when (source) {
+				is LoadedSource.Journey -> applyJourney(source.journey)
+				is LoadedSource.Trip -> checkImportedTrip(source.trip)
+			}
 		}
 	}
 
@@ -207,18 +235,60 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun loadTrip(loader: () -> FlightTrip) {
-		uiState = uiState.copy(loadingTrip = true, tripLoadError = null)
+		pendingDuplicateTrip = null
+		uiState = uiState.copy(
+			loadingTrip = true,
+			tripLoadError = null,
+			journeyMessage = null,
+			duplicateJourneyWarning = null
+		)
 		viewModelScope.launch {
 			val result = runCatching {
 				withContext(Dispatchers.IO) { loader() }
 			}
-			result.onSuccess { trip ->
-				applyImportedTrip(trip)
-			}.onFailure(::showTripLoadFailure)
+			val trip = result.getOrElse { error ->
+				showTripLoadFailure(error)
+				return@launch
+			}
+			checkImportedTrip(trip)
 		}
 	}
 
+	private suspend fun checkImportedTrip(trip: FlightTrip) {
+		val matchingJourney = withContext(Dispatchers.IO) { journeyStore.findMatchingJourney(trip) }
+		if (matchingJourney == null) {
+			applyImportedTrip(trip)
+			return
+		}
+		pendingDuplicateTrip = trip
+		uiState = uiState.copy(
+			loadingTrip = false,
+			duplicateJourneyWarning = matchingJourney,
+			tripLoadError = null
+		)
+	}
+
+	fun openDuplicateJourney() {
+		val journey = uiState.duplicateJourneyWarning ?: return
+		pendingDuplicateTrip = null
+		uiState = uiState.copy(duplicateJourneyWarning = null)
+		openJourney(journey.id)
+	}
+
+	fun continueDuplicateImport() {
+		val trip = pendingDuplicateTrip ?: return
+		pendingDuplicateTrip = null
+		uiState = uiState.copy(duplicateJourneyWarning = null)
+		applyImportedTrip(trip)
+	}
+
+	fun dismissDuplicateImport() {
+		pendingDuplicateTrip = null
+		uiState = uiState.copy(duplicateJourneyWarning = null)
+	}
+
 	private fun applyImportedTrip(trip: FlightTrip) {
+		pendingDuplicateTrip = null
 		applyReplayTrip(
 			trip = trip,
 			journeyId = null,
@@ -232,6 +302,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun applyJourney(journey: FlightJourney) {
+		pendingDuplicateTrip = null
 		uiState = uiState.copy(plan = journey.plan)
 		applyReplayTrip(
 			trip = journey.trip,
@@ -282,6 +353,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyMessage = message,
 			loadingTrip = false,
 			tripLoadError = null,
+			duplicateJourneyWarning = null,
 			savedJourneys = journeyStore.list()
 		)
 		firstSnapshot?.sample?.let(::requestTerrain)
@@ -434,7 +506,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		terrainJob?.cancel()
 		terrainJob = viewModelScope.launch {
 			try {
-				val finalStatus = terrainRepository.preloadCorridor(uiState.plan) { status ->
+				val finalStatus = terrainRepository.preloadCorridor(uiState.plan, uiState.trip) { status ->
 					uiState = uiState.copy(terrainStatus = status)
 				}
 				uiState = uiState.copy(terrainStatus = finalStatus)
@@ -468,7 +540,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	private fun requestTerrain(sample: FlightSample, force: Boolean = false) {
 		val scene = uiState.terrainScene
-		if (!force && scene != null && scene.radiusKm == uiState.plan.terrainCorridorKm) {
+		if (!force && scene != null && scene.radiusKm == uiState.plan.terrainCorridorKm &&
+			scene.satelliteQuality == uiState.plan.satelliteQuality
+		) {
 			val distance = FlightTerrainTilePlanner.distanceKm(
 				scene.centerLatitude,
 				scene.centerLongitude,
@@ -496,7 +570,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				val terrainScene = terrainRepository.loadScene(
 					latitude = sample.latitude,
 					longitude = sample.longitude,
-					radiusKm = uiState.plan.terrainCorridorKm
+					radiusKm = uiState.plan.terrainCorridorKm,
+					satelliteQuality = uiState.plan.satelliteQuality
 				) { status ->
 					uiState = uiState.copy(terrainStatus = status)
 				}
@@ -656,6 +731,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(satelliteOpacity = opacity.coerceIn(0f, 1f))
 	}
 
+	fun setSatelliteQuality(quality: FlightSatelliteQuality) {
+		if (uiState.plan.satelliteQuality == quality) return
+		updatePlan(uiState.plan.copy(satelliteQuality = quality))
+		requestedTerrainCenter = null
+		(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
+	}
+
 	fun setTerrainOpacity(opacity: Float) {
 		uiState = uiState.copy(terrainOpacity = opacity.coerceIn(0f, 1f))
 	}
@@ -699,6 +781,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					savedJourneys = journeyStore.list(),
 					journeyMessage = "Journal de vol enregistré"
 				)
+				refreshStorageUsage()
 			}.onFailure { error ->
 				uiState = uiState.copy(journeyMessage = error.message ?: "Enregistrement impossible")
 			}
@@ -706,7 +789,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun openJourney(id: String) {
-		uiState = uiState.copy(loadingTrip = true, journeyMessage = null)
+		pendingDuplicateTrip = null
+		uiState = uiState.copy(
+			loadingTrip = true,
+			journeyMessage = null,
+			duplicateJourneyWarning = null
+		)
 		viewModelScope.launch {
 			val result = runCatching { withContext(Dispatchers.IO) { journeyStore.load(id) } }
 			result.onSuccess(::applyJourney).onFailure(::showTripLoadFailure)
@@ -757,6 +845,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			val photos = withContext(Dispatchers.IO) { journeyStore.importPhotos(uris, uiState.trip) }
 			uiState = uiState.copy(
 				pendingPhotos = uiState.pendingPhotos + photos,
+				selectedPhotoId = photos.firstOrNull()?.id ?: uiState.selectedPhotoId,
 				journeyMessage = if (photos.isEmpty()) "Aucune photo lisible" else "${photos.size} photo(s) à valider"
 			)
 		}
@@ -772,6 +861,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyDirty = true,
 			journeyMessage = "Photos associées par leur heure"
 		)
+		refreshStorageUsage()
 	}
 
 	fun discardPendingPhotos() {
@@ -844,6 +934,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	override fun onCleared() {
 		terrainJob?.cancel()
+		storageJob?.cancel()
 		citySearchJob?.cancel()
 		super.onCleared()
 	}

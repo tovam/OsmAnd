@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import net.osmand.IndexConstants
+import net.osmand.plus.OsmandApplication
 import net.osmand.plus.media.MediaMetadataUtils
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,22 +28,115 @@ class FlightJourneyStore(private val context: Context) {
 	private val journeysDirectory = File(context.filesDir, JOURNEYS_DIRECTORY).also { it.mkdirs() }
 	private val mediaDirectory = File(context.filesDir, MEDIA_DIRECTORY).also { it.mkdirs() }
 
-	fun list(): List<FlightJourneySummary> = journeysDirectory.listFiles()
-		.orEmpty()
-		.filter { it.isFile && it.extension == JOURNEY_FILE_EXTENSION }
-		.mapNotNull { file ->
+	fun storageUsage(
+		currentJourneyId: String?,
+		currentPhotos: List<FlightPhotoAttachment>
+	): FlightStorageUsage {
+		val currentJournalBytes = currentJourneyId?.let { id ->
 			runCatching {
-				val root = JSONObject(file.readText())
-				FlightJourneySummary(
-					id = root.getString("id"),
-					name = root.optString("name").ifBlank { "Journal de vol" },
-					updatedAtMillis = root.optLong("updatedAtMillis", file.lastModified()),
-					sampleCount = root.optJSONObject("trip")?.optJSONArray("samples")?.length() ?: 0,
-					photoCount = root.optJSONArray("photos")?.length() ?: 0
-				)
-			}.getOrNull()
+				File(journeysDirectory, "${validatedId(id)}.$JOURNEY_FILE_EXTENSION")
+					.takeIf(File::isFile)?.length() ?: 0L
+			}.getOrDefault(0L)
+		} ?: 0L
+		val mediaRoot = runCatching { mediaDirectory.canonicalFile }.getOrNull()
+		val currentPhotosBytes = currentPhotos.mapNotNull { photo ->
+			runCatching { File(photo.localPath).canonicalFile }.getOrNull()
+		}.filter { file ->
+			file.isFile && mediaRoot != null && file.parentFile == mediaRoot
+		}.distinctBy(File::getAbsolutePath).sumOf(File::length)
+
+		val terrainRoot = File(context.filesDir, FLIGHT_TERRAIN_DIRECTORY)
+		val terrainBytes = treeSize(File(context.filesDir, TERRARIUM_DIRECTORY))
+		val satelliteSourceBytes = treeSize(File(context.filesDir, FlightSatelliteSource.CACHE_DIRECTORY))
+		val satelliteRenderBytes = treeSize(File(context.filesDir, FlightSatelliteSource.RENDER_CACHE_DIRECTORY))
+		val categorizedTerrainBytes = terrainBytes + satelliteSourceBytes + satelliteRenderBytes
+		val otherTerrainBytes = (treeSize(terrainRoot) - categorizedTerrainBytes).coerceAtLeast(0L)
+		val allJournalBytes = treeSize(journeysDirectory)
+		val allPhotosBytes = treeSize(mediaDirectory)
+		val allFlightFilesBytes = context.filesDir.listFiles().orEmpty()
+			.filter { it.name.startsWith("flight-") }
+			.sumOf(::treeSize)
+		val knownPrivateBytes = allJournalBytes + allPhotosBytes + treeSize(terrainRoot)
+
+		val installedGraphicsBytes = (context.applicationContext as? OsmandApplication)?.let { app ->
+			treeSize(File(app.getAppPath(IndexConstants.MODEL_3D_DIR), FLIGHT_AIRCRAFT_MODEL_DIRECTORY))
+		} ?: 0L
+		return FlightStorageUsage(
+			currentJournalBytes = currentJournalBytes,
+			currentPhotosBytes = currentPhotosBytes,
+			allJournalBytes = allJournalBytes,
+			allPhotosBytes = allPhotosBytes,
+			terrainBytes = terrainBytes,
+			satelliteSourceBytes = satelliteSourceBytes,
+			satelliteRenderBytes = satelliteRenderBytes,
+			graphicsBytes = assetTreeSize(FLIGHT_GRAPHICS_ASSET_DIRECTORY) + installedGraphicsBytes,
+			otherBytes = otherTerrainBytes + (allFlightFilesBytes - knownPrivateBytes).coerceAtLeast(0L)
+		)
+	}
+
+	private fun treeSize(root: File): Long {
+		if (!root.exists()) return 0L
+		val pending = java.util.ArrayDeque<File>()
+		pending.add(root)
+		var bytes = 0L
+		while (pending.isNotEmpty()) {
+			val file = pending.removeLast()
+			when {
+				file.isFile -> bytes += file.length()
+				file.isDirectory -> file.listFiles().orEmpty().forEach(pending::add)
+			}
+		}
+		return bytes
+	}
+
+	private fun assetTreeSize(path: String): Long {
+		val children = context.assets.list(path).orEmpty()
+		if (children.isEmpty()) {
+			return runCatching { context.assets.open(path).use { input ->
+				var total = 0L
+				val buffer = ByteArray(16 * 1_024)
+				while (true) {
+					val count = input.read(buffer)
+					if (count < 0) break
+					total += count
+				}
+				total
+			} }.getOrDefault(0L)
+		}
+		return children.sumOf { child -> assetTreeSize("$path/$child") }
+	}
+
+	fun list(): List<FlightJourneySummary> = journeyFiles()
+		.mapNotNull { file ->
+			runCatching { summaryFromJson(JSONObject(file.readText()), file) }.getOrNull()
 		}
 		.sortedByDescending { it.updatedAtMillis }
+
+	/** Returns the newest journal containing the exact same ordered GPX trace, if one exists. */
+	fun findMatchingJourney(trip: FlightTrip): FlightJourneySummary? {
+		val expectedFingerprint = FlightTripFingerprint.create(trip)
+		return journeyFiles().mapNotNull { file ->
+			runCatching {
+				val root = JSONObject(file.readText())
+				val storedFingerprint = root.optString("tripFingerprint").ifBlank {
+					FlightTripFingerprint.create(tripFromJson(root.getJSONObject("trip")))
+				}
+				if (storedFingerprint == expectedFingerprint) summaryFromJson(root, file) else null
+			}.getOrNull()
+		}.maxByOrNull { it.updatedAtMillis }
+	}
+
+	private fun journeyFiles(): List<File> = journeysDirectory.listFiles()
+		.orEmpty()
+		.filter { it.isFile && it.extension == JOURNEY_FILE_EXTENSION }
+
+	private fun summaryFromJson(root: JSONObject, file: File): FlightJourneySummary = FlightJourneySummary(
+		id = root.getString("id"),
+		name = root.optString("name").ifBlank { "Journal de vol" },
+		updatedAtMillis = root.optLong("updatedAtMillis", file.lastModified()),
+		sampleCount = root.optJSONObject("trip")?.optJSONArray("samples")?.length() ?: 0,
+		photoCount = root.optJSONArray("photos")?.length() ?: 0
+	)
 
 	fun save(journey: FlightJourney): FlightJourney {
 		val safeId = validatedId(journey.id)
@@ -199,6 +294,7 @@ class FlightJourneyStore(private val context: Context) {
 		put("name", journey.name)
 		put("createdAtMillis", journey.createdAtMillis)
 		put("updatedAtMillis", journey.updatedAtMillis)
+		put("tripFingerprint", FlightTripFingerprint.create(journey.trip))
 		put("plan", planToJson(journey.plan))
 		put("trip", tripToJson(journey.trip))
 		put("flightSpans", JSONArray().apply {
@@ -264,6 +360,7 @@ class FlightJourneyStore(private val context: Context) {
 	private fun planToJson(plan: FlightPlan): JSONObject = JSONObject().apply {
 		put("terrainCorridorKm", plan.terrainCorridorKm)
 		put("detailedSatelliteRadiusKm", plan.detailedSatelliteRadiusKm)
+		put("satelliteQuality", plan.satelliteQuality.name)
 		put("shadowsEnabled", plan.shadowsEnabled)
 		put("resumeAfterRestart", plan.resumeAfterRestart)
 		put("stops", JSONArray().apply {
@@ -289,6 +386,9 @@ class FlightJourneyStore(private val context: Context) {
 			stops = stops,
 			terrainCorridorKm = json.optInt("terrainCorridorKm", 300),
 			detailedSatelliteRadiusKm = json.optInt("detailedSatelliteRadiusKm", 300),
+			satelliteQuality = runCatching {
+				FlightSatelliteQuality.valueOf(json.optString("satelliteQuality", FlightSatelliteQuality.HIGH.name))
+			}.getOrDefault(FlightSatelliteQuality.HIGH),
 			shadowsEnabled = json.optBoolean("shadowsEnabled", true),
 			resumeAfterRestart = json.optBoolean("resumeAfterRestart", true)
 		)
@@ -524,6 +624,10 @@ class FlightJourneyStore(private val context: Context) {
 		private const val SCHEMA_VERSION = 1
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
+		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"
+		private const val TERRARIUM_DIRECTORY = "flight-terrain/terrarium"
+		private const val FLIGHT_GRAPHICS_ASSET_DIRECTORY = "flightmode"
+		private const val FLIGHT_AIRCRAFT_MODEL_DIRECTORY = "flight_aircraft_v1"
 		private const val JOURNEY_FILE_EXTENSION = "json"
 		private const val JOURNEY_JSON_ENTRY = "journey.json"
 		private const val TRACK_GPX_ENTRY = "track.gpx"

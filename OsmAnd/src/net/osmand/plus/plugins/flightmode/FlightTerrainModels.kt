@@ -61,6 +61,7 @@ data class FlightTerrainScene(
 	val centerLongitude: Double,
 	val radiusKm: Int,
 	val zoom: Int,
+	val satelliteQuality: FlightSatelliteQuality,
 	val meshes: List<FlightTerrainMesh>,
 	val loadedTiles: Int,
 	val missingTiles: Int,

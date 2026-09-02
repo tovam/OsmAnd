@@ -8,6 +8,7 @@ import net.osmand.plus.plugins.flightmode.FlightRecordingPolicy
 import net.osmand.plus.plugins.flightmode.FlightReplayEngine
 import net.osmand.plus.plugins.flightmode.FlightSample
 import net.osmand.plus.plugins.flightmode.FlightSatelliteSource
+import net.osmand.plus.plugins.flightmode.FlightSatelliteQuality
 import net.osmand.plus.plugins.flightmode.FlightStop
 import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
@@ -15,6 +16,7 @@ import net.osmand.plus.plugins.flightmode.FlightTerrainMeshBuilder
 import net.osmand.plus.plugins.flightmode.FlightTerrainTilePlanner
 import net.osmand.plus.plugins.flightmode.FlightTrackMath
 import net.osmand.plus.plugins.flightmode.FlightTrip
+import net.osmand.plus.plugins.flightmode.FlightTripFingerprint
 import net.osmand.plus.plugins.flightmode.FlightWindowLook
 import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
 import net.osmand.plus.plugins.flightmode.geometry
@@ -29,6 +31,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FlightModeLogicTest {
+
+	@Test
+	fun satelliteQualityDefaultsToOneLevelAboveSourceTiles() {
+		assertEquals(
+			FlightSatelliteQuality.HIGH,
+			FlightPlan(listOf(FlightStop("A"), FlightStop("B"))).satelliteQuality
+		)
+	}
+
+	@Test
+	fun loadedTrackCanDriveOfflineCorridorPlanning() {
+		val samples = listOf(
+			FlightSample(0, 0, 0L, 48.8566, 2.3522, null, null, null, null),
+			FlightSample(1, 0, 1L, 48.2082, 16.3738, null, null, null, null)
+		)
+		val plan = FlightTerrainTilePlanner.trackCorridorPlan(samples, radiusKm = 300)
+		assertTrue(plan != null && plan.tiles.isNotEmpty())
+	}
 
 	@Test
 	fun everyStopoverDescendsBeforeNextClimb() {
@@ -258,6 +278,33 @@ class FlightModeLogicTest {
 	fun equatorialNoonSunPointsMostlyUp() {
 		val vector = FlightSunPosition.direction(1710936000000L, 0.0, 0.0)
 		assertTrue(vector.up > 0.9f)
+	}
+
+	@Test
+	fun tripFingerprintRecognizesTheSameGpxAfterDerivedFieldsChange() {
+		val samples = listOf(
+			sample(0, 1_000L, 48.8566, 2.3522),
+			sample(1, 2_000L, 48.8570, 2.3530)
+		)
+		val original = FlightTrip(
+			"original.gpx",
+			samples,
+			listOf(FlightLeg(0, "segment", 0, 1, 50.0, 1_000L, 2_000L)),
+			true,
+			50.0,
+			"original.gpx"
+		)
+		val reopened = original.copy(
+			name = "nom modifié",
+			sourceDescription = "archive",
+			samples = samples.map { it.copy(bearingDegrees = null, speedMetersPerSecond = null) }
+		)
+
+		assertEquals(FlightTripFingerprint.create(original), FlightTripFingerprint.create(reopened))
+		assertFalse(
+			FlightTripFingerprint.create(original) ==
+				FlightTripFingerprint.create(reopened.copy(samples = reopened.samples.dropLast(1)))
+		)
 	}
 
 	private fun sample(index: Int, time: Long, lat: Double, lon: Double) = FlightSample(
