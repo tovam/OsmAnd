@@ -57,11 +57,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun showPage(page: FlightPage) {
 		uiState = uiState.copy(page = page)
 		if (page == FlightPage.JOURNEYS) refreshStorageUsage()
-		if (page == FlightPage.SATELLITE && uiState.nativeMapOpacity > 0f &&
-			uiState.terrainScene?.nativeMapRequested == false
-		) {
-			(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
-		}
 	}
 
 	fun refreshStorageUsage() {
@@ -196,6 +191,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			replayProgress = 0f,
 			tripLoadError = null,
 			duplicateJourneyWarning = null,
+			windowPhotoOverlay = FlightWindowPhotoOverlay(),
 			flightSpans = emptyList(),
 			pendingFlightStartProgress = null,
 			journeyId = null,
@@ -355,6 +351,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			trip = resolvedTrip,
 			profile = FlightProfilePlanner.fromTrip(resolvedTrip),
 			snapshot = firstSnapshot,
+			windowPhotoOverlay = FlightWindowPhotoOverlay(),
 			replayProgress = 0f,
 			replayPlaying = false,
 			flightSpans = flightSpans,
@@ -526,13 +523,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		return difference
 	}
 
-	fun preloadTerrain() {
-		offlinePreloadJob?.cancel()
-		offlinePreloadJob = viewModelScope.launch {
-			runOfflinePreload()
-		}
-	}
-
 	private fun scheduleAutomaticOfflinePreload() {
 		offlinePreloadJob?.cancel()
 		val sceneJob = terrainJob
@@ -594,7 +584,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun requestTerrain(sample: FlightSample, force: Boolean = false) {
-		val includeNativeMap = uiState.page == FlightPage.SATELLITE && uiState.nativeMapOpacity > 0f
+		// The dedicated cache page is now a stable offline tile viewer. The live 3D
+		// renderer belongs to Hublot, so it never needs a second native-map render pass.
+		val includeNativeMap = false
 		val scene = uiState.terrainScene
 		if (!force && scene != null && scene.radiusKm == uiState.plan.terrainCorridorKm &&
 			scene.satelliteQuality == uiState.plan.satelliteQuality &&
@@ -629,7 +621,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					longitude = sample.longitude,
 					radiusKm = uiState.plan.terrainCorridorKm,
 					satelliteQuality = uiState.plan.satelliteQuality,
-					includeNativeMap = includeNativeMap
+					includeNativeMap = includeNativeMap,
+					onScene = { partialScene ->
+						// Publish center-first chunks as soon as they are ready. OpenGL reuses
+						// existing textures, so the view stays interactive while detail grows.
+						uiState = uiState.copy(terrainScene = partialScene)
+					}
 				) { status ->
 					uiState = uiState.copy(terrainStatus = status)
 				}
@@ -792,29 +789,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 	}
 
-	fun setSatelliteOpacity(opacity: Float) {
-		uiState = uiState.copy(satelliteOpacity = opacity.coerceIn(0f, 1f))
-	}
-
 	fun setSatelliteQuality(quality: FlightSatelliteQuality) {
 		if (uiState.plan.satelliteQuality == quality) return
 		updatePlan(uiState.plan.copy(satelliteQuality = quality))
 		requestedTerrainCenter = null
 		(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
-	}
-
-	fun setTerrainOpacity(opacity: Float) {
-		uiState = uiState.copy(terrainOpacity = opacity.coerceIn(0f, 1f))
-	}
-
-	fun setNativeMapOpacity(opacity: Float) {
-		val clamped = opacity.coerceIn(0f, 1f)
-		uiState = uiState.copy(nativeMapOpacity = clamped)
-		if (clamped > 0f && uiState.page == FlightPage.SATELLITE &&
-			uiState.terrainScene?.nativeMapRequested == false
-		) {
-			(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
-		}
 	}
 
 	fun setRecordingPolicy(policy: FlightRecordingPolicy) {
@@ -988,27 +967,60 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (sample != null) seekReplay(uiState.trip?.progressFor(sample) ?: return)
 	}
 
+	fun togglePhotoSelection(id: String) {
+		if (uiState.selectedPhotoId == id) {
+			uiState = uiState.copy(selectedPhotoId = null)
+		} else {
+			selectPhoto(id)
+		}
+	}
+
 	fun associatePhotoAutomatically(id: String) {
-		val photo = findPhoto(id) ?: return
-		val timestamp = photo.timestampMillis
-		val trip = uiState.trip
-		val sample = if (timestamp != null) {
-			trip?.samples?.filter { it.timestampMillis > 0L }
-				?.minByOrNull { abs(it.timestampMillis - timestamp) }
-		} else null
-		if (sample == null) {
-			uiState = uiState.copy(
-				selectedPhotoId = id,
-				journeyMessage = if (timestamp == null) {
-					"Aucune heure détectable (EXIF, nom ou fichier) · place le curseur puis choisis Associer ici"
+		val originalPhoto = findPhoto(id) ?: return
+		val originalTrip = uiState.trip
+		viewModelScope.launch {
+			val redetectedPhoto = if (originalPhoto.timestampMillis == null) {
+				withContext(Dispatchers.IO) {
+					journeyStore.redetectMissingPhotoTimestamp(originalPhoto, originalTrip)
+				}
+			} else originalPhoto
+			val currentPhoto = findPhoto(id) ?: return@launch
+			val photo = if (currentPhoto.timestampMillis == null && redetectedPhoto.timestampMillis != null) {
+				currentPhoto.copy(
+					timestampMillis = redetectedPhoto.timestampMillis,
+					timestampSource = redetectedPhoto.timestampSource
+				)
+			} else currentPhoto
+			val trip = uiState.trip
+			val timestamp = photo.timestampMillis
+			val sample = journeyStore.matchPhotoSample(trip, timestamp)
+			if (sample == null) {
+				val message = when {
+					timestamp == null ->
+						"Aucune heure trouvée dans l’EXIF, le nom « ${photo.fileName} » ou les dates du fichier · place le curseur puis choisis Associer ici"
+					trip?.hasUsableTimestamps != true ->
+						"La trace n’a pas d’heure exploitable · place le curseur puis choisis Associer ici"
+					else ->
+						"La date détectée est hors de ce trajet · place le curseur puis choisis Associer ici"
+				}
+				if (photo != currentPhoto) {
+					replacePhoto(photo, message)
 				} else {
-					"La trace n’a pas d’heure exploitable · place le curseur puis choisis Associer ici"
+					uiState = uiState.copy(selectedPhotoId = id, journeyMessage = message)
+				}
+				return@launch
+			}
+			val dateRecovered = currentPhoto.timestampMillis == null && photo.timestampMillis != null
+			replacePhoto(
+				photo.copy(matchedSampleIndex = sample.index),
+				if (dateRecovered) {
+					"Date retrouvée dans la photo · réassociation au point GPS le plus proche"
+				} else {
+					"Photo réassociée au point GPS le plus proche dans le temps"
 				}
 			)
-			return
+			seekReplay(trip?.progressFor(sample) ?: return@launch)
 		}
-		replacePhoto(photo.copy(matchedSampleIndex = sample.index), "Photo associée au point GPS le plus proche dans le temps")
-		seekReplay(trip?.progressFor(sample) ?: return)
 	}
 
 	fun associatePhotoAtCurrentReplay(id: String) {
@@ -1026,6 +1038,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		replacePhoto(photo.copy(matchedSampleIndex = null), "Association de la photo supprimée")
 	}
 
+	fun rotatePhoto(id: String, quarterTurns: Int) {
+		val photo = findPhoto(id) ?: return
+		val rotation = Math.floorMod(photo.rotationDegrees + quarterTurns * 90, 360)
+		replacePhoto(photo.copy(rotationDegrees = rotation), "Rotation de la photo enregistrée")
+	}
+
 	fun openPhotoOnMap(id: String) {
 		selectPhoto(id)
 		if (findPhoto(id)?.matchedSampleIndex != null) {
@@ -1035,7 +1053,51 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun openPhotoInWindow(id: String) {
 		selectPhoto(id)
-		if (findPhoto(id)?.matchedSampleIndex != null) uiState = uiState.copy(page = FlightPage.WINDOW)
+		if (findPhoto(id)?.matchedSampleIndex != null) {
+			uiState = uiState.copy(
+				page = FlightPage.WINDOW,
+				windowPhotoOverlay = FlightWindowPhotoOverlay(
+					photoId = id,
+					gestureTarget = FlightWindowGestureTarget.PHOTO
+				)
+			)
+		}
+	}
+
+	fun setWindowPhotoOpacity(opacity: Float) {
+		uiState = uiState.copy(
+			windowPhotoOverlay = uiState.windowPhotoOverlay.copy(opacity = opacity).clamped()
+		)
+	}
+
+	fun setWindowGestureTarget(target: FlightWindowGestureTarget) {
+		if (target == FlightWindowGestureTarget.PHOTO && uiState.windowPhotoOverlay.photoId == null) return
+		uiState = uiState.copy(
+			windowPhotoOverlay = uiState.windowPhotoOverlay.copy(gestureTarget = target)
+		)
+	}
+
+	fun transformWindowPhoto(panXFraction: Float, panYFraction: Float, zoomFactor: Float) {
+		val current = uiState.windowPhotoOverlay
+		if (current.photoId == null) return
+		uiState = uiState.copy(
+			windowPhotoOverlay = current.copy(
+				scale = current.scale * zoomFactor.coerceIn(0.70f, 1.45f),
+				offsetXFraction = current.offsetXFraction + panXFraction,
+				offsetYFraction = current.offsetYFraction + panYFraction
+			).clamped()
+		)
+	}
+
+	fun resetWindowPhotoTransform() {
+		val current = uiState.windowPhotoOverlay
+		uiState = uiState.copy(
+			windowPhotoOverlay = current.copy(scale = 1f, offsetXFraction = 0f, offsetYFraction = 0f)
+		)
+	}
+
+	fun clearWindowPhotoOverlay() {
+		uiState = uiState.copy(windowPhotoOverlay = FlightWindowPhotoOverlay())
 	}
 
 	private fun findPhoto(id: String): FlightPhotoAttachment? =

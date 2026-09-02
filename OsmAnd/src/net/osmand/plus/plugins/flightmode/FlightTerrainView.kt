@@ -45,6 +45,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		windowLook: FlightWindowLook,
 		altitudeOverrideMeters: Float?,
 		shadingEnabled: Boolean,
+		shadowIntensity: Float,
 		satelliteOpacity: Float,
 		terrainOpacity: Float,
 		nativeMapOpacity: Float,
@@ -58,6 +59,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			windowLook,
 			altitudeOverrideMeters,
 			shadingEnabled,
+			shadowIntensity,
 			satelliteOpacity,
 			terrainOpacity,
 			nativeMapOpacity
@@ -81,6 +83,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var altitudeOverrideMeters: Float? = null
 		@Volatile
 		private var shadingEnabled: Boolean = true
+		@Volatile
+		private var shadowIntensity: Float = 0.85f
 		@Volatile
 		private var satelliteOpacity: Float = 0.92f
 		@Volatile
@@ -140,6 +144,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			windowLook: FlightWindowLook,
 			altitudeOverrideMeters: Float?,
 			shadingEnabled: Boolean,
+			shadowIntensity: Float,
 			satelliteOpacity: Float,
 			terrainOpacity: Float,
 			nativeMapOpacity: Float
@@ -150,6 +155,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			this.windowLook = windowLook.clamped()
 			this.altitudeOverrideMeters = altitudeOverrideMeters
 			this.shadingEnabled = shadingEnabled
+			this.shadowIntensity = shadowIntensity.coerceIn(0f, 1f)
 			this.satelliteOpacity = satelliteOpacity.coerceIn(0f, 1f)
 			this.terrainOpacity = terrainOpacity.coerceIn(0f, 1f)
 			this.nativeMapOpacity = nativeMapOpacity.coerceIn(0f, 1f)
@@ -248,7 +254,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			// its moving projection boundary as a false east/west "night" line.
 			val lightMvp = createLightMvp(currentScene, sun, camera[0], camera[2])
 			val shadowStrength = if (shadingEnabled && shadowAvailable) {
-				((sun.up - MINIMUM_SHADOW_SUN_UP) / SHADOW_FADE_SUN_RANGE).coerceIn(0f, 1f)
+				((sun.up - MINIMUM_SHADOW_SUN_UP) / SHADOW_FADE_SUN_RANGE).coerceIn(0f, 1f) *
+					shadowIntensity
 			} else 0f
 			val shadowsActive = shadowStrength > 0f
 			if (shadowsActive && shouldUpdateShadowMap(currentScene, sun, camera[0], camera[2])) {
@@ -298,7 +305,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUniform3f(cameraLocation, camera[0], camera[1], camera[2])
 			GLES20.glUniform3f(lightLocation, sun.east, sun.up, -sun.north)
 			GLES20.glUniform1f(fogDistanceLocation, currentScene.radiusKm * 1_000f * 0.92f)
-			GLES20.glUniform1f(shadingLocation, if (shadingEnabled) 1f else 0f)
+			GLES20.glUniform1f(shadingLocation, if (shadingEnabled) shadowIntensity else 0f)
 			GLES20.glUniform3f(skyColorLocation, sky[0], sky[1], sky[2])
 			GLES20.glUniform1f(daylightLocation, daylight)
 			GLES20.glUniform1f(satelliteOpacityLocation, satelliteOpacity)
@@ -801,7 +808,7 @@ class FlightTerrainView @JvmOverloads constructor(
 							visible += step(currentDepth, storedDepth);
 						}
 					}
-					float realShadow = mix(0.38, 1.0, visible / 9.0);
+					float realShadow = mix(0.26, 1.0, visible / 9.0);
 					float edgeDistance = min(
 						min(
 							min(projected.x, 1.0 - projected.x),

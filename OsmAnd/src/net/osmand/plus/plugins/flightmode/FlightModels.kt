@@ -159,6 +159,7 @@ data class FlightPlan(
 	val detailedSatelliteRadiusKm: Int = 300,
 	val satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
 	val shadowsEnabled: Boolean = true,
+	val shadowIntensity: Float = 0.85f,
 	val resumeAfterRestart: Boolean = true
 ) {
 	companion object {
@@ -292,11 +293,39 @@ data class FlightPhotoAttachment(
 	val timestampMillis: Long?,
 	val matchedSampleIndex: Int?,
 	val timestampSource: FlightPhotoTimestampSource? = null,
+	val rotationDegrees: Int = 0,
 	val includeMainCamera: Boolean = true,
 	val includeSelfie: Boolean = false,
 	val includeMap: Boolean = true,
 	val includeScene3d: Boolean = true
 )
+
+enum class FlightWindowGestureTarget {
+	VIEW,
+	PHOTO
+}
+
+data class FlightWindowPhotoOverlay(
+	val photoId: String? = null,
+	val opacity: Float = 0.55f,
+	val scale: Float = 1f,
+	val offsetXFraction: Float = 0f,
+	val offsetYFraction: Float = 0f,
+	val gestureTarget: FlightWindowGestureTarget = FlightWindowGestureTarget.VIEW
+) {
+	fun clamped(): FlightWindowPhotoOverlay = copy(
+		opacity = opacity.coerceIn(0f, 1f),
+		scale = scale.coerceIn(MIN_SCALE, MAX_SCALE),
+		offsetXFraction = offsetXFraction.coerceIn(-MAX_OFFSET_FRACTION, MAX_OFFSET_FRACTION),
+		offsetYFraction = offsetYFraction.coerceIn(-MAX_OFFSET_FRACTION, MAX_OFFSET_FRACTION)
+	)
+
+	companion object {
+		const val MIN_SCALE = 0.25f
+		const val MAX_SCALE = 8f
+		const val MAX_OFFSET_FRACTION = 2f
+	}
+}
 
 data class FlightOfflineAssets(
 	val terrainTiles: List<TerrainTileId> = emptyList(),
@@ -373,10 +402,9 @@ data class FlightUiState(
 	val terrainScene: FlightTerrainScene? = null,
 	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
 	val windowLook: FlightWindowLook = FlightWindowLook(),
+	val windowPhotoOverlay: FlightWindowPhotoOverlay = FlightWindowPhotoOverlay(),
 	val windowAltitudeOverrideMeters: Float? = null,
 	val satelliteOpacity: Float = 0.92f,
-	val terrainOpacity: Float = 0.70f,
-	val nativeMapOpacity: Float = 0.58f,
 	val mapFollowing: Boolean = true,
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),
 	val showTrackPoints: Boolean = false,

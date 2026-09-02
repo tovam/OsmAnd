@@ -341,6 +341,37 @@ class FlightJourneyStore(private val context: Context) {
 		}.getOrNull()
 	}
 
+	/**
+	 * Re-runs the metadata checks for legacy attachments saved before date recovery was added.
+	 * The copied file modification time is a weak fallback (it can be the import time), so it is
+	 * accepted only when it overlaps the recorded trip.
+	 */
+	fun redetectMissingPhotoTimestamp(
+		photo: FlightPhotoAttachment,
+		trip: FlightTrip?
+	): FlightPhotoAttachment {
+		if (photo.timestampMillis != null) return photo
+		val file = File(photo.localPath)
+		if (!file.isFile) return photo
+		val detectedTimestamp = storedPhotoTimestamp(file, photo.fileName, trip) ?: return photo
+		return photo.copy(
+			timestampMillis = detectedTimestamp.timestampMillis,
+			timestampSource = detectedTimestamp.source
+		)
+	}
+
+	fun matchPhotoSample(trip: FlightTrip?, timestamp: Long?): FlightSample? {
+		if (trip == null || timestamp == null || !trip.hasUsableTimestamps) return null
+		val timedSamples = trip.samples.filter { it.timestampMillis > 0L }
+		if (timedSamples.isEmpty()) return null
+		val firstTime = timedSamples.minOf { it.timestampMillis }
+		val lastTime = timedSamples.maxOf { it.timestampMillis }
+		if (timestamp < firstTime - PHOTO_MATCH_TOLERANCE_MILLIS ||
+			timestamp > lastTime + PHOTO_MATCH_TOLERANCE_MILLIS
+		) return null
+		return timedSamples.minByOrNull { abs(it.timestampMillis - timestamp) }
+	}
+
 	fun createCaptureFile(): File = File(mediaDirectory, "${UUID.randomUUID()}.jpg")
 
 	fun capturedPhoto(
@@ -408,6 +439,7 @@ class FlightJourneyStore(private val context: Context) {
 					putOptional("timestampMillis", photo.timestampMillis)
 					putOptional("timestampSource", photo.timestampSource?.name)
 					putOptional("matchedSampleIndex", photo.matchedSampleIndex)
+					put("rotationDegrees", normalizePhotoRotation(photo.rotationDegrees))
 					put("includeMainCamera", photo.includeMainCamera)
 					put("includeSelfie", photo.includeSelfie)
 					put("includeMap", photo.includeMap)
@@ -433,6 +465,7 @@ class FlightJourneyStore(private val context: Context) {
 					timestampSource = json.optString("timestampSource").takeIf(String::isNotBlank)?.let { value ->
 						runCatching { FlightPhotoTimestampSource.valueOf(value) }.getOrNull()
 					},
+					rotationDegrees = normalizePhotoRotation(json.optInt("rotationDegrees", 0)),
 					includeMainCamera = json.optBoolean("includeMainCamera", true),
 					includeSelfie = json.optBoolean("includeSelfie", false),
 					includeMap = json.optBoolean("includeMap", true),
@@ -492,6 +525,7 @@ class FlightJourneyStore(private val context: Context) {
 		put("detailedSatelliteRadiusKm", plan.detailedSatelliteRadiusKm)
 		put("satelliteQuality", plan.satelliteQuality.name)
 		put("shadowsEnabled", plan.shadowsEnabled)
+		put("shadowIntensity", plan.shadowIntensity.coerceIn(0f, 1f).toDouble())
 		put("resumeAfterRestart", plan.resumeAfterRestart)
 		put("stops", JSONArray().apply {
 			plan.stops.forEach { stop ->
@@ -520,6 +554,7 @@ class FlightJourneyStore(private val context: Context) {
 				FlightSatelliteQuality.valueOf(json.optString("satelliteQuality", FlightSatelliteQuality.HIGH.name))
 			}.getOrDefault(FlightSatelliteQuality.HIGH),
 			shadowsEnabled = json.optBoolean("shadowsEnabled", true),
+			shadowIntensity = json.optDouble("shadowIntensity", 0.85).toFloat().coerceIn(0f, 1f),
 			resumeAfterRestart = json.optBoolean("resumeAfterRestart", true)
 		)
 	}
@@ -659,21 +694,24 @@ class FlightJourneyStore(private val context: Context) {
 			.append(xmlEscape(value.toString())).append("</osmandflight:").append(name).append(">\n")
 	}
 
-	private fun matchSampleIndex(trip: FlightTrip?, timestamp: Long?): Int? {
-		if (trip == null || timestamp == null || !trip.hasUsableTimestamps) return null
-		val firstTime = trip.samples.first().timestampMillis
-		val lastTime = trip.samples.last().timestampMillis
-		if (timestamp < firstTime - PHOTO_MATCH_TOLERANCE_MILLIS ||
-			timestamp > lastTime + PHOTO_MATCH_TOLERANCE_MILLIS
-		) return null
-		return trip.samples.minByOrNull { abs(it.timestampMillis - timestamp) }?.index
-	}
+	private fun matchSampleIndex(trip: FlightTrip?, timestamp: Long?): Int? =
+		matchPhotoSample(trip, timestamp)?.index
 
-	private fun displayName(uri: Uri): String? = context.contentResolver.query(
-		uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
-	)?.use { cursor ->
-		val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-		if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+	private fun displayName(uri: Uri): String? {
+		val providerName = runCatching {
+			context.contentResolver.query(
+				uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+			)?.use { cursor ->
+				val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+				if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+			}
+		}.getOrNull()?.takeIf(String::isNotBlank)
+		if (providerName != null) return providerName
+		return uri.lastPathSegment
+			?.let(Uri::decode)
+			?.substringAfterLast('/')
+			?.substringAfterLast(':')
+			?.takeIf(String::isNotBlank)
 	}
 
 	private fun photoTimestamp(uri: Uri, copiedFile: File, originalName: String): DetectedPhotoTimestamp? {
@@ -706,7 +744,7 @@ class FlightJourneyStore(private val context: Context) {
 		mediaDates?.first?.takeIf { it > 0L }?.let {
 			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.MEDIA_CAPTURE)
 		}
-		photoTimestampFromFileName(originalName)?.let {
+		FlightPhotoTimestampParser.parse(originalName)?.let {
 			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_NAME)
 		}
 		val documentModified = runCatching {
@@ -729,19 +767,22 @@ class FlightJourneyStore(private val context: Context) {
 		}
 	}
 
-	private fun photoTimestampFromFileName(fileName: String): Long? {
-		val compact = Regex("(?:^|[^0-9])(\\d{4})(\\d{2})(\\d{2})[_-]?(\\d{2})(\\d{2})(\\d{2})(?:\\d{3})?(?:[^0-9]|$)")
-			.find(fileName)
-			?.groupValues
-			?.drop(1)
-			?.joinToString("")
-		val separated = Regex(
-			"(?:^|[^0-9])(\\d{4})[-_.](\\d{2})[-_.](\\d{2})[ T_-](\\d{2})[-_.:](\\d{2})[-_.:](\\d{2})(?:[^0-9]|$)"
-		).find(fileName)?.groupValues?.drop(1)?.joinToString("")
-		val encoded = compact ?: separated ?: return null
-		return runCatching {
-			SimpleDateFormat("yyyyMMddHHmmss", Locale.US).apply { isLenient = false }.parse(encoded)?.time
-		}.getOrNull()
+	private fun storedPhotoTimestamp(
+		file: File,
+		originalName: String,
+		trip: FlightTrip?
+	): DetectedPhotoTimestamp? {
+		runCatching { MediaMetadataUtils.getPhotoCreationTime(file) }
+			.getOrNull()?.takeIf { it > 0L }?.let {
+				return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.EXIF)
+			}
+		FlightPhotoTimestampParser.parse(originalName)?.let {
+			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_NAME)
+		}
+		val modified = file.lastModified().takeIf { it > 0L } ?: return null
+		return if (matchPhotoSample(trip, modified) != null) {
+			DetectedPhotoTimestamp(modified, FlightPhotoTimestampSource.FILE_MODIFIED)
+		} else null
 	}
 
 	private fun validatedId(value: String): String {
@@ -864,6 +905,8 @@ class FlightJourneyStore(private val context: Context) {
 	private fun JSONObject.optNullableInt(key: String): Int? =
 		if (has(key) && !isNull(key)) optInt(key) else null
 
+	private fun normalizePhotoRotation(value: Int): Int = Math.floorMod(value, 360) / 90 * 90
+
 	private fun xmlEscape(value: String): String = value
 		.replace("&", "&amp;")
 		.replace("<", "&lt;")
@@ -873,7 +916,7 @@ class FlightJourneyStore(private val context: Context) {
 
 	companion object {
 		const val ARCHIVE_EXTENSION = "osmandflight"
-		private const val SCHEMA_VERSION = 2
+		private const val SCHEMA_VERSION = 3
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"

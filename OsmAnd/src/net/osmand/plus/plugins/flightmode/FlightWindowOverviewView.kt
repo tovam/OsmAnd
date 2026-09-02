@@ -33,6 +33,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		val x: Int,
 		val y: Int,
 		val file: File,
+		val fallbackFile: File? = null,
 		val detailLayer: Int
 	)
 
@@ -83,9 +84,11 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	private var viewAzimuthDegrees = 0f
 	private var viewConeDegrees = FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES
 	private var quality = FlightSatelliteQuality.HIGH
+	private var baseZoom: Int? = null
 	private var cacheKey: String? = null
 	private var tiles: List<CachedTile> = emptyList()
 	private var scanGeneration = 0
+	private var scanRunning = false
 	private var detached = false
 
 	init {
@@ -98,6 +101,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		viewAzimuthDegrees: Float,
 		viewConeDegrees: Float,
 		quality: FlightSatelliteQuality,
+		baseZoom: Int?,
 		cacheKey: String
 	) {
 		this.trip = trip
@@ -105,6 +109,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		this.viewAzimuthDegrees = viewAzimuthDegrees
 		this.viewConeDegrees = viewConeDegrees.coerceIn(8f, 170f)
 		this.quality = quality
+		this.baseZoom = baseZoom
 		if (this.cacheKey != cacheKey) {
 			this.cacheKey = cacheKey
 			reloadTiles()
@@ -115,24 +120,66 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 
 	private fun reloadTiles() {
 		if (detached) return
-		val generation = ++scanGeneration
+		scanGeneration++
+		if (!scanRunning) launchTileScan()
+	}
+
+	private fun launchTileScan() {
+		if (detached) return
+		scanRunning = true
+		val generation = scanGeneration
+		val requestedQuality = quality
+		val requestedBaseZoom = baseZoom
 		worker.execute {
 			val standard = scan(
 				File(context.applicationContext.filesDir, FlightSatelliteSource.CACHE_DIRECTORY),
 				detailLayer = 0
 			)
-			val detailed = if (quality == FlightSatelliteQuality.STANDARD) emptyList() else scan(
-				File(context.applicationContext.filesDir, FlightSatelliteSource.renderDirectory(quality)),
-				detailLayer = 1
-			)
-			val scanned = (standard + detailed).sortedWith(
-				compareBy<CachedTile>({ it.zoom }, { it.detailLayer }, { it.y }, { it.x })
-			)
+			val detailQualities = when (requestedQuality) {
+				FlightSatelliteQuality.STANDARD -> emptyList()
+				FlightSatelliteQuality.HIGH -> listOf(FlightSatelliteQuality.HIGH)
+				FlightSatelliteQuality.ULTRA -> listOf(
+					FlightSatelliteQuality.HIGH,
+					FlightSatelliteQuality.ULTRA
+				)
+				FlightSatelliteQuality.ULTRA_PLUS -> listOf(
+					FlightSatelliteQuality.HIGH,
+					FlightSatelliteQuality.ULTRA,
+					FlightSatelliteQuality.ULTRA_PLUS
+				)
+			}
+			val detailed = detailQualities.flatMapIndexed { index, detailQuality ->
+				scan(
+					File(context.applicationContext.filesDir, FlightSatelliteSource.renderDirectory(detailQuality)),
+					detailLayer = index + 1
+				)
+			}
+			val selectedZoom = requestedBaseZoom ?: (standard + detailed).groupingBy { it.zoom }.eachCount()
+				.maxWithOrNull(compareBy<Map.Entry<Int, Int>> { it.value }.thenBy { it.key })?.key
+			val scanned = (standard + detailed).filter { it.zoom == selectedZoom }
+				.groupBy { TerrainTileId(it.zoom, it.x, it.y) }
+				.map { (id, candidates) ->
+					val orderedCandidates = candidates.sortedByDescending { it.detailLayer }
+					val primary = orderedCandidates.first()
+					CachedTile(
+						zoom = id.zoom,
+						x = id.x,
+						y = id.y,
+						file = primary.file,
+						fallbackFile = orderedCandidates.getOrNull(1)?.file,
+						detailLayer = primary.detailLayer
+					)
+				}.sortedWith(compareBy({ it.y }, { it.x }))
 			post {
-				if (detached || generation != scanGeneration) return@post
-				tiles = scanned
-				failed.clear()
-				invalidate()
+				scanRunning = false
+				if (detached) return@post
+				if (generation == scanGeneration) {
+					if (scanned.isNotEmpty()) tiles = scanned
+					invalidate()
+				} else {
+					// Coalesce every intermediate cache notification into one fresh scan.
+					launchTileScan()
+				}
 			}
 		}
 	}
@@ -145,14 +192,13 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 				xDirectory.listFiles().orEmpty().mapNotNull { file ->
 					val y = file.nameWithoutExtension.toIntOrNull()
 					if (y != null && file.isFile && file.length() > 0L) {
-						CachedTile(zoom, x, y, file, detailLayer)
+						CachedTile(zoom = zoom, x = x, y = y, file = file, detailLayer = detailLayer)
 					} else null
 				}
 			}
 		}.filter { it.second.isNotEmpty() }
-		// Keep every cached level and paint coarse-to-fine. A lower-resolution tile remains under a
-		// missing or still-decoding detailed tile, so replay movement can no longer swap an entire
-		// zoom level for grey squares.
+		// Callers choose one scene zoom. Within that zoom, the highest durable detail layer wins and
+		// Standard remains its fallback until decoding finishes, which prevents texture oscillation.
 		return groups.flatMap { it.second }
 	}
 
@@ -187,8 +233,10 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 			)
 			if (!RectF.intersects(destination, RectF(0f, 0f, width.toFloat(), height.toFloat()))) return@forEach
 			val bitmap = bitmaps.get(tile.file.absolutePath)
+				?: tile.fallbackFile?.let { bitmaps.get(it.absolutePath) }
 			if (bitmap != null) canvas.drawBitmap(bitmap, null, destination, satellitePaint)
-			else queueBitmap(tile.file)
+			tile.fallbackFile?.let(::queueBitmap)
+			queueBitmap(tile.file)
 		}
 
 		currentTrip?.samples?.takeIf { it.size > 1 }?.let { samples ->

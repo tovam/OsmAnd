@@ -19,14 +19,17 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 data class FlightSatelliteCacheInfo(
 	val loading: Boolean = true,
 	val tileCount: Int = 0,
+	val satelliteTileCount: Int = 0,
+	val terrainTileCount: Int = 0,
 	val zoom: Int? = null
 )
 
-/** Displays the JPEG XYZ tiles already stored by [FlightTerrainRepository]. */
+/** Displays the durable Standard satellite and Terrarium tiles stored with flight journals. */
 class FlightSatelliteCacheView @JvmOverloads constructor(
 	context: Context,
 	attributes: AttributeSet? = null
@@ -36,9 +39,16 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 		val zoom: Int,
 		val x: Int,
 		val y: Int,
-		val file: File,
-		var displayX: Int = x
-	)
+		val satelliteFile: File?,
+		val terrainFile: File?,
+		var displayX: Int = x,
+		var fallbackSourceKey: String? = null
+	) {
+		val sourceKey: String
+			get() = listOfNotNull(satelliteFile, terrainFile).joinToString("|") { file ->
+				"${file.absolutePath}:${file.length()}:${file.lastModified()}"
+			}
+	}
 
 	private val worker: ExecutorService = Executors.newSingleThreadExecutor()
 	private val bitmapCache = object : LruCache<String, Bitmap>(BITMAP_CACHE_KIB) {
@@ -73,15 +83,11 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 	private var offsetY = 0f
 	private var loading = true
 	private var refreshKey: String? = null
-	private var quality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH
 	private var scanGeneration = 0
+	private var scanRunning = false
 	private var detached = false
 
 	var onCacheInfoChanged: ((FlightSatelliteCacheInfo) -> Unit)? = null
-
-	fun setQuality(quality: FlightSatelliteQuality) {
-		this.quality = quality
-	}
 
 	private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
 		override fun onDown(event: MotionEvent): Boolean = true
@@ -132,25 +138,63 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 
 	private fun reload() {
 		if (detached) return
-		val generation = ++scanGeneration
-		loading = true
-		onCacheInfoChanged?.invoke(FlightSatelliteCacheInfo())
+		scanGeneration++
+		// Keep the previous immutable snapshot visible during rescans. Replacing it
+		// with a loading frame on every downloaded tile caused the visible flashing.
+		loading = tiles.isEmpty()
+		if (loading) onCacheInfoChanged?.invoke(FlightSatelliteCacheInfo())
 		invalidate()
+		if (!scanRunning) launchCacheScan()
+	}
+
+	private fun launchCacheScan() {
+		if (detached) return
+		scanRunning = true
+		val generation = scanGeneration
 		worker.execute {
 			val snapshot = scanCache()
 			post {
-				if (detached || generation != scanGeneration) return@post
+				scanRunning = false
+				if (detached) return@post
+				if (generation != scanGeneration) {
+					launchCacheScan()
+					return@post
+				}
+				val firstSnapshot = tiles.isEmpty()
+				val previousMinX = minDisplayX
+				val previousMinY = minY
 				loading = false
-				tiles = snapshot
+				if (snapshot.isNotEmpty() || firstSnapshot) {
+					val previousById = tiles.associateBy { TerrainTileId(it.zoom, it.x, it.y) }
+					snapshot.forEach { current ->
+						val previous = previousById[TerrainTileId(current.zoom, current.x, current.y)]
+						if (previous != null) {
+							current.fallbackSourceKey = if (previous.sourceKey == current.sourceKey) {
+								previous.fallbackSourceKey
+							} else if (hasCachedBitmap(previous.sourceKey)) {
+								previous.sourceKey
+							} else {
+								previous.fallbackSourceKey
+							}
+						}
+					}
+					tiles = snapshot
+				}
 				// Keep decoded tiles that are still useful. Evicting the whole LRU on
 				// every scene refresh was the source of the grey/image flashing.
-				failedKeys.clear()
 				updateBounds()
-				fitContent()
+				if (firstSnapshot) {
+					fitContent()
+				} else {
+					offsetX += (minDisplayX - previousMinX) * TILE_SIZE * contentScale
+					offsetY += (minY - previousMinY) * TILE_SIZE * contentScale
+				}
 				onCacheInfoChanged?.invoke(
 					FlightSatelliteCacheInfo(
 						loading = false,
 						tileCount = tiles.size,
+						satelliteTileCount = tiles.count { it.satelliteFile != null },
+						terrainTileCount = tiles.count { it.terrainFile != null },
 						zoom = tiles.firstOrNull()?.zoom
 					)
 				)
@@ -160,32 +204,44 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 	}
 
 	private fun scanCache(): List<CachedTile> {
-		val root = File(context.applicationContext.filesDir, FlightSatelliteSource.renderDirectory(quality))
-		val byZoom = root.listFiles().orEmpty()
-			.filter { it.isDirectory }
-			.mapNotNull { zoomDirectory ->
-				val zoom = zoomDirectory.name.toIntOrNull() ?: return@mapNotNull null
-				val found = zoomDirectory.listFiles().orEmpty()
-					.filter { it.isDirectory }
-					.flatMap { xDirectory ->
-						val x = xDirectory.name.toIntOrNull() ?: return@flatMap emptyList()
-						xDirectory.listFiles().orEmpty().mapNotNull { file ->
-							val y = file.nameWithoutExtension.toIntOrNull()
-							if (y != null && file.isFile && file.length() > 0L && file.extension.equals("jpg", true)) {
-								CachedTile(zoom, x, y, file)
-							} else {
-								null
-							}
-						}
-					}
-				zoom to found
-			}
-			.filter { it.second.isNotEmpty() }
-			.toMap()
-		val selectedZoom = byZoom.entries.maxWithOrNull(
-			compareBy<Map.Entry<Int, List<CachedTile>>> { it.value.size }.thenBy { it.key }
+		val satellite = scanTileFiles(
+			File(context.applicationContext.filesDir, FlightSatelliteSource.CACHE_DIRECTORY),
+			"jpg"
+		)
+		val terrain = scanTileFiles(
+			File(context.applicationContext.filesDir, FlightTerrainRepository.TERRAIN_DIRECTORY),
+			"png"
+		)
+		val preferredKeys = terrain.keys.takeIf { it.isNotEmpty() } ?: satellite.keys
+		val selectedZoom = preferredKeys.groupingBy { it.zoom }.eachCount().maxWithOrNull(
+			compareBy<Map.Entry<Int, Int>> { it.value }.thenBy { it.key }
 		)?.key ?: return emptyList()
-		return normalizeWrappedTileX(byZoom.getValue(selectedZoom), selectedZoom)
+		val keys = satellite.keys + terrain.keys
+		val combined = keys.asSequence().filter { it.zoom == selectedZoom }.distinct().map { id ->
+			CachedTile(
+				zoom = id.zoom,
+				x = id.x,
+				y = id.y,
+				satelliteFile = satellite[id],
+				terrainFile = terrain[id]
+			)
+		}.toList()
+		return normalizeWrappedTileX(combined, selectedZoom)
+	}
+
+	private fun scanTileFiles(root: File, extension: String): Map<TerrainTileId, File> = buildMap {
+		root.listFiles().orEmpty().filter(File::isDirectory).forEach zoomLoop@ { zoomDirectory ->
+			val zoom = zoomDirectory.name.toIntOrNull() ?: return@zoomLoop
+			zoomDirectory.listFiles().orEmpty().filter(File::isDirectory).forEach xLoop@ { xDirectory ->
+				val x = xDirectory.name.toIntOrNull() ?: return@xLoop
+				xDirectory.listFiles().orEmpty().forEach { file ->
+					val y = file.nameWithoutExtension.toIntOrNull()
+					if (y != null && file.isFile && file.length() > 0L && file.extension.equals(extension, true)) {
+						put(TerrainTileId(zoom, x, y), file)
+					}
+				}
+			}
+		}
 	}
 
 	private fun normalizeWrappedTileX(source: List<CachedTile>, zoom: Int): List<CachedTile> {
@@ -247,14 +303,15 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 			val top = offsetY + (tile.y - minY) * scaledTileSize
 			val destination = RectF(left, top, left + scaledTileSize, top + scaledTileSize)
 			if (!RectF.intersects(destination, RectF(0f, 0f, width.toFloat(), height.toFloat()))) return@forEach
-			val path = tile.file.absolutePath
-			val bitmap = cachedBitmap(path, desiredSampleSize)
+			val key = tile.sourceKey
+			val bitmap = cachedBitmap(key, desiredSampleSize)
+				?: tile.fallbackSourceKey?.let { cachedBitmap(it, desiredSampleSize) }
 			if (bitmap != null) {
 				canvas.drawBitmap(bitmap, null, destination, tilePaint)
 			} else {
 				canvas.drawRect(destination, placeholderPaint)
 			}
-			queueBitmap(path, desiredSampleSize)
+			queueBitmap(tile, desiredSampleSize)
 			canvas.drawRect(destination, gridPaint)
 		}
 	}
@@ -271,14 +328,14 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 		else -> 16
 	}
 
-	private fun cacheKey(path: String, sampleSize: Int): String = "$path#$sampleSize"
+	private fun cacheKey(sourceKey: String, sampleSize: Int): String = "$sourceKey#$sampleSize"
 
-	private fun cachedBitmap(path: String, desiredSampleSize: Int): Bitmap? {
-		bitmapCache.get(cacheKey(path, desiredSampleSize))?.let { return it }
+	private fun cachedBitmap(sourceKey: String, desiredSampleSize: Int): Bitmap? {
+		bitmapCache.get(cacheKey(sourceKey, desiredSampleSize))?.let { return it }
 		var closest: Bitmap? = null
 		var closestDistance = Int.MAX_VALUE
 		for (sampleSize in SAMPLE_SIZES) {
-			val candidate = bitmapCache.get(cacheKey(path, sampleSize)) ?: continue
+			val candidate = bitmapCache.get(cacheKey(sourceKey, sampleSize)) ?: continue
 			val distance = kotlin.math.abs(sampleSize - desiredSampleSize)
 			if (distance < closestDistance) {
 				closest = candidate
@@ -288,20 +345,17 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 		return closest
 	}
 
-	private fun queueBitmap(path: String, sampleSize: Int) {
-		val key = cacheKey(path, sampleSize)
+	private fun hasCachedBitmap(sourceKey: String): Boolean =
+		SAMPLE_SIZES.any { sampleSize -> bitmapCache.get(cacheKey(sourceKey, sampleSize)) != null }
+
+	private fun queueBitmap(tile: CachedTile, sampleSize: Int) {
+		val key = cacheKey(tile.sourceKey, sampleSize)
 		if (bitmapCache.get(key) != null || key in failedKeys || key in queuedKeys ||
 			queuedKeys.size >= MAXIMUM_QUEUED_BITMAPS
 		) return
 		queuedKeys += key
 		worker.execute {
-			val bitmap = BitmapFactory.decodeFile(
-				path,
-				BitmapFactory.Options().apply {
-					inSampleSize = sampleSize
-					inPreferredConfig = Bitmap.Config.RGB_565
-				}
-			)
+			val bitmap = decodeCombinedTile(tile, sampleSize)
 			post {
 				queuedKeys -= key
 				if (detached) return@post
@@ -309,6 +363,69 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 				invalidate()
 			}
 		}
+	}
+
+	private fun decodeCombinedTile(tile: CachedTile, sampleSize: Int): Bitmap? {
+		val options = BitmapFactory.Options().apply {
+			inSampleSize = sampleSize
+			inPreferredConfig = Bitmap.Config.ARGB_8888
+		}
+		val satellite = tile.satelliteFile?.let { BitmapFactory.decodeFile(it.absolutePath, options) }
+		val terrain = tile.terrainFile?.let {
+			BitmapFactory.decodeFile(
+				it.absolutePath,
+				BitmapFactory.Options().apply {
+					inSampleSize = sampleSize
+					inPreferredConfig = Bitmap.Config.ARGB_8888
+				}
+			)
+		}
+		if (terrain == null) return satellite
+		val width = satellite?.width ?: terrain.width
+		val height = satellite?.height ?: terrain.height
+		if (width <= 0 || height <= 0) {
+			satellite?.recycle()
+			terrain.recycle()
+			return null
+		}
+		val satellitePixels = satellite?.let { bitmap ->
+			IntArray(width * height).also { bitmap.getPixels(it, 0, width, 0, 0, width, height) }
+		}
+		val terrainPixels = IntArray(terrain.width * terrain.height).also { pixels ->
+			terrain.getPixels(pixels, 0, terrain.width, 0, 0, terrain.width, terrain.height)
+		}
+		fun elevationAt(x: Int, y: Int): Float {
+			val safeX = x.coerceIn(0, width - 1) * terrain.width / width
+			val safeY = y.coerceIn(0, height - 1) * terrain.height / height
+			return TerrariumCodec.decodeArgb(terrainPixels[safeY * terrain.width + safeX])
+		}
+		val composedPixels = IntArray(width * height)
+		for (y in 0 until height) {
+			for (x in 0 until width) {
+				val elevation = elevationAt(x, y)
+				val base = satellitePixels?.get(y * width + x) ?: terrainColor(elevation)
+				val gradient = (elevationAt(x - 1, y) - elevationAt(x + 1, y)) * 0.0015f +
+					(elevationAt(x, y - 1) - elevationAt(x, y + 1)) * 0.0011f
+				val brightness = (0.91f + gradient).coerceIn(0.56f, 1.22f)
+				composedPixels[y * width + x] = Color.rgb(
+					(Color.red(base) * brightness).roundToInt().coerceIn(0, 255),
+					(Color.green(base) * brightness).roundToInt().coerceIn(0, 255),
+					(Color.blue(base) * brightness).roundToInt().coerceIn(0, 255)
+				)
+			}
+		}
+		return Bitmap.createBitmap(composedPixels, width, height, Bitmap.Config.RGB_565).also {
+			satellite?.recycle()
+			terrain.recycle()
+		}
+	}
+
+	private fun terrainColor(elevationMeters: Float): Int = when {
+		elevationMeters < 0f -> Color.rgb(30, 88, 120)
+		elevationMeters < 400f -> Color.rgb(78, 112, 65)
+		elevationMeters < 1_500f -> Color.rgb(126, 112, 76)
+		elevationMeters < 2_700f -> Color.rgb(132, 130, 123)
+		else -> Color.rgb(218, 222, 224)
 	}
 
 	override fun onTouchEvent(event: MotionEvent): Boolean {

@@ -1,0 +1,7 @@
+newmtl AircraftBlack
+Ka 0.010 0.010 0.010
+Kd 0.025 0.025 0.025
+Ks 0.060 0.060 0.060
+Ns 36.0
+d 1.0
+illum 2

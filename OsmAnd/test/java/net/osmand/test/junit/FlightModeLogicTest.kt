@@ -3,6 +3,7 @@ package net.osmand.test.junit
 import net.osmand.plus.plugins.flightmode.FlightLeg
 import net.osmand.plus.plugins.flightmode.FlightCabinSide
 import net.osmand.plus.plugins.flightmode.FlightPlan
+import net.osmand.plus.plugins.flightmode.FlightPhotoTimestampParser
 import net.osmand.plus.plugins.flightmode.FlightProfilePlanner
 import net.osmand.plus.plugins.flightmode.FlightRecordingPolicy
 import net.osmand.plus.plugins.flightmode.FlightReplayEngine
@@ -18,6 +19,8 @@ import net.osmand.plus.plugins.flightmode.FlightTrackMath
 import net.osmand.plus.plugins.flightmode.FlightTrip
 import net.osmand.plus.plugins.flightmode.FlightTripFingerprint
 import net.osmand.plus.plugins.flightmode.FlightWindowLook
+import net.osmand.plus.plugins.flightmode.FlightWindowGestureTarget
+import net.osmand.plus.plugins.flightmode.FlightWindowPhotoOverlay
 import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
 import net.osmand.plus.plugins.flightmode.geometry
 import net.osmand.plus.plugins.flightmode.viewAzimuthDegrees
@@ -29,8 +32,28 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class FlightModeLogicTest {
+
+	@Test
+	fun androidCameraFileNamesExposeTheirCaptureTime() {
+		val names = listOf(
+			"IMG_20260901_142355_815.jpg",
+			"IMG_20260901_142355_XXX.jpg",
+			"IMG_20260901_142355.jpg",
+			"PXL_20260901_142355815.jpg",
+			"IMG-2026-09-01-14-23-55.jpg"
+		)
+		val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+		names.forEach { name ->
+			val timestamp = FlightPhotoTimestampParser.parse(name)
+			assertTrue("Timestamp absent pour $name", timestamp != null)
+			assertEquals("20260901142355", formatter.format(Date(timestamp!!)))
+		}
+	}
 
 	@Test
 	fun satelliteQualityDefaultsToOneLevelAboveSourceTiles() {
@@ -38,6 +61,13 @@ class FlightModeLogicTest {
 			FlightSatelliteQuality.HIGH,
 			FlightPlan(listOf(FlightStop("A"), FlightStop("B"))).satelliteQuality
 		)
+	}
+
+	@Test
+	fun sunShadowsRemainEnabledByDefaultWithVisibleIntensity() {
+		val plan = FlightPlan(listOf(FlightStop("A"), FlightStop("B")))
+		assertTrue(plan.shadowsEnabled)
+		assertEquals(0.85f, plan.shadowIntensity, 0f)
 	}
 
 	@Test
@@ -137,6 +167,24 @@ class FlightModeLogicTest {
 		assertEquals(90f, look.yawDegrees, 0f)
 		assertEquals(45f, look.pitchDegrees, 0f)
 		assertEquals(-90f, FlightWindowLook(yawDegrees = -450f).clamped().yawDegrees, 0f)
+	}
+
+	@Test
+	fun photoOverlayKeepsGesturesBoundedWithoutLosingSelectedTarget() {
+		val overlay = FlightWindowPhotoOverlay(
+			photoId = "photo-1",
+			opacity = 2f,
+			scale = 20f,
+			offsetXFraction = -4f,
+			offsetYFraction = 4f,
+			gestureTarget = FlightWindowGestureTarget.PHOTO
+		).clamped()
+
+		assertEquals(1f, overlay.opacity, 0f)
+		assertEquals(FlightWindowPhotoOverlay.MAX_SCALE, overlay.scale, 0f)
+		assertEquals(-FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION, overlay.offsetXFraction, 0f)
+		assertEquals(FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION, overlay.offsetYFraction, 0f)
+		assertEquals(FlightWindowGestureTarget.PHOTO, overlay.gestureTarget)
 	}
 
 	@Test
