@@ -14,12 +14,13 @@
 	<string name="flight_mode_preload">Préchargement</string>
 	<string name="flight_mode_terrain_corridor">Relief : ±%1$d km autour du trajet</string>
 	<string name="flight_mode_satellite_radius">Satellite détaillé : %1$d km autour de la position</string>
-	<string name="flight_mode_shadows">Ombres relief + soleil</string>
+	<string name="flight_mode_shadows">Ombres portées du relief</string>
 	<string name="flight_mode_resume">Reprendre ce voyage après redémarrage</string>
-	<string name="flight_mode_terrain_source">Relief mondial Terrain Tiles</string>
+	<string name="flight_mode_terrain_source">Relief Terrain Tiles + satellite Sentinel-2</string>
 	<string name="flight_mode_preload_terrain">Précharger</string>
 	<string name="flight_mode_terrain_loading">Chargement…</string>
-	<string name="flight_mode_terrain_attribution">Terrain Tiles © Mapzen · sources SRTM, Copernicus EU-DEM, GMTED2010, ETOPO1 et producteurs régionaux.</string>
+	<string name="flight_mode_terrain_attribution">Relief Terrain Tiles © Mapzen · Satellite Sentinel-2 cloudless — s2maps.eu par EOX IT Services GmbH (données Copernicus Sentinel modifiées 2016–2017).</string>
+	<string name="flight_mode_satellite_attribution_short">Satellite : Sentinel-2 cloudless · s2maps.eu / EOX · Copernicus 2016–2017</string>
 	<string name="flight_mode_map">Carte</string>
 	<string name="flight_mode_window">Hublot</string>
 	<string name="flight_mode_sensors">Capteurs</string>

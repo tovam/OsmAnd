@@ -20,6 +20,7 @@ import java.net.HttpURLConnection
 class FlightTerrainRepository(private val app: OsmandApplication) {
 
 	private val terrainDirectory = File(app.filesDir, TERRAIN_DIRECTORY)
+	private val satelliteDirectory = File(app.filesDir, FlightSatelliteSource.CACHE_DIRECTORY)
 
 	suspend fun loadScene(
 		latitude: Double,
@@ -32,9 +33,13 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			FlightTerrainTilePlanner.scenePlan(latitude, longitude, radiusKm)
 		}
 		val tiles = linkedMapOf<TerrainTileId, TerrariumTile>()
+		val satelliteTexturePaths = linkedMapOf<TerrainTileId, String>()
 		var available = 0
 		var downloaded = 0
 		var failed = 0
+		var satelliteAvailable = 0
+		var satelliteFailed = 0
+		var satelliteDownloadsEnabled = true
 		var bytesDownloaded = 0L
 		onStatus(
 			FlightTerrainStatus(
@@ -45,20 +50,29 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		)
 
 		for (chunk in plan.tiles.chunked(PARALLEL_DOWNLOADS)) {
+			val allowSatelliteDownload = satelliteDownloadsEnabled
 			val results = coroutineScope {
 				chunk.map { tileId ->
-					async(Dispatchers.IO) { runCatching { loadTile(tileId) } }
+					async(Dispatchers.IO) { runCatching { loadTile(tileId, allowSatelliteDownload) } }
 				}.awaitAll()
 			}
 			results.forEach { result ->
 				result.onSuccess { loaded ->
 					tiles[loaded.tile.id] = loaded.tile
+					loaded.satelliteFile?.let { file ->
+						satelliteTexturePaths[loaded.tile.id] = file.absolutePath
+						satelliteAvailable++
+					}
+					if (loaded.satelliteFailed) satelliteFailed++
 					available++
 					if (loaded.downloaded) downloaded++
 					bytesDownloaded += loaded.downloadedBytes
 				}.onFailure {
 					failed++
 				}
+			}
+			if (satelliteAvailable == 0 && satelliteFailed >= SATELLITE_FAILURE_CIRCUIT_BREAKER) {
+				satelliteDownloadsEnabled = false
 			}
 			onStatus(
 				FlightTerrainStatus(
@@ -67,6 +81,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					availableTiles = available,
 					downloadedTiles = downloaded,
 					failedTiles = failed,
+					satelliteTiles = satelliteAvailable,
+					satelliteFailedTiles = satelliteFailed,
 					bytesDownloaded = bytesDownloaded,
 					zoom = plan.zoom
 				)
@@ -82,12 +98,21 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				availableTiles = available,
 				downloadedTiles = downloaded,
 				failedTiles = failed,
+				satelliteTiles = satelliteAvailable,
+				satelliteFailedTiles = satelliteFailed,
 				bytesDownloaded = bytesDownloaded,
 				zoom = plan.zoom
 			)
 		)
 		return withContext(Dispatchers.Default) {
-			FlightTerrainMeshBuilder.build(latitude, longitude, radiusKm, plan, tiles)
+			FlightTerrainMeshBuilder.build(
+				latitude,
+				longitude,
+				radiusKm,
+				plan,
+				tiles,
+				satelliteTexturePaths
+			)
 		}
 	}
 
@@ -102,21 +127,30 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		var available = 0
 		var downloaded = 0
 		var failed = 0
+		var satelliteAvailable = 0
+		var satelliteFailed = 0
+		var satelliteDownloadsEnabled = true
 		var bytesDownloaded = 0L
 		for (chunk in tilePlan.tiles.chunked(PARALLEL_DOWNLOADS)) {
+			val allowSatelliteDownload = satelliteDownloadsEnabled
 			val results = coroutineScope {
 				chunk.map { tileId ->
-					async(Dispatchers.IO) { runCatching { ensureTileFile(tileId) } }
+					async(Dispatchers.IO) { runCatching { ensureTileFiles(tileId, allowSatelliteDownload) } }
 				}.awaitAll()
 			}
 			results.forEach { result ->
 				result.onSuccess { cached ->
 					available++
-					if (cached.downloaded) downloaded++
+					if (cached.terrain.downloaded || cached.satellite?.downloaded == true) downloaded++
+					if (cached.satellite != null) satelliteAvailable++
+					else if (cached.satelliteAttempted) satelliteFailed++
 					bytesDownloaded += cached.downloadedBytes
 				}.onFailure {
 					failed++
 				}
+			}
+			if (satelliteAvailable == 0 && satelliteFailed >= SATELLITE_FAILURE_CIRCUIT_BREAKER) {
+				satelliteDownloadsEnabled = false
 			}
 			onStatus(
 				FlightTerrainStatus(
@@ -125,6 +159,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					availableTiles = available,
 					downloadedTiles = downloaded,
 					failedTiles = failed,
+					satelliteTiles = satelliteAvailable,
+					satelliteFailedTiles = satelliteFailed,
 					bytesDownloaded = bytesDownloaded,
 					zoom = tilePlan.zoom
 				)
@@ -137,51 +173,102 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			availableTiles = available,
 			downloadedTiles = downloaded,
 			failedTiles = failed,
+			satelliteTiles = satelliteAvailable,
+			satelliteFailedTiles = satelliteFailed,
 			bytesDownloaded = bytesDownloaded,
 			zoom = tilePlan.zoom,
-			message = if (failed == 0) "Relief du trajet disponible hors ligne" else "$failed tuiles indisponibles"
+			message = when {
+				failed > 0 -> "$failed tuiles de relief indisponibles"
+				satelliteFailed > 0 -> "Relief prêt · satellite partiel ($satelliteFailed manquantes)"
+				else -> "Relief + satellite du trajet disponibles hors ligne"
+			}
 		)
 	}
 
-	private fun loadTile(tileId: TerrainTileId): LoadedTerrainTile {
-		var cached = ensureTileFile(tileId)
+	private fun loadTile(tileId: TerrainTileId, allowSatelliteDownload: Boolean): LoadedTerrainTile {
+		var cached = ensureTerrainFile(tileId)
 		var tile = decodeTile(tileId, cached.file)
 		if (tile == null && !cached.downloaded) {
 			cached.file.delete()
-			cached = downloadTile(tileId, cached.file)
+			cached = downloadTerrainTile(tileId, cached.file)
 			tile = decodeTile(tileId, cached.file)
 		}
+		val satellite = runCatching { ensureSatelliteFile(tileId, allowSatelliteDownload) }.getOrNull()
 		return LoadedTerrainTile(
 			tile = tile ?: throw IOException("Tuile Terrarium illisible: ${tileId.zoom}/${tileId.x}/${tileId.y}"),
-			downloaded = cached.downloaded,
-			downloadedBytes = cached.downloadedBytes
+			satelliteFile = satellite?.file,
+			satelliteFailed = satellite == null && allowSatelliteDownload,
+			downloaded = cached.downloaded || satellite?.downloaded == true,
+			downloadedBytes = cached.downloadedBytes + (satellite?.downloadedBytes ?: 0L)
 		)
 	}
 
-	private fun ensureTileFile(tileId: TerrainTileId): CachedTerrainFile {
-		val file = tileFile(tileId)
-		if (file.isFile && file.length() > 0L) {
-			return CachedTerrainFile(file, downloaded = false, downloadedBytes = 0L)
-		}
-		return downloadTile(tileId, file)
+	private fun ensureTileFiles(tileId: TerrainTileId, allowSatelliteDownload: Boolean): CachedTileFiles {
+		val terrain = ensureTerrainFile(tileId)
+		val satellite = runCatching { ensureSatelliteFile(tileId, allowSatelliteDownload) }.getOrNull()
+		return CachedTileFiles(terrain, satellite, allowSatelliteDownload)
 	}
 
-	private fun downloadTile(tileId: TerrainTileId, destination: File): CachedTerrainFile {
+	private fun ensureTerrainFile(tileId: TerrainTileId): CachedAsset {
+		val file = tileFile(tileId)
+		if (file.isFile && file.length() > 0L) {
+			return CachedAsset(file, downloaded = false, downloadedBytes = 0L)
+		}
+		return downloadTerrainTile(tileId, file)
+	}
+
+	private fun ensureSatelliteFile(tileId: TerrainTileId, allowDownload: Boolean): CachedAsset {
+		val file = satelliteFile(tileId)
+		if (file.isFile && file.length() > 0L && isDecodableImage(file)) {
+			return CachedAsset(file, downloaded = false, downloadedBytes = 0L)
+		}
+		if (!allowDownload) throw IOException("Téléchargement satellite temporairement désactivé")
+		if (file.exists() && !file.delete()) throw IOException("Texture satellite en cache verrouillée")
+		val downloaded = downloadAsset(
+			url = FlightSatelliteSource.tileUrl(tileId),
+			destination = file,
+			accept = "image/jpeg",
+			sourceName = "EOX Sentinel-2",
+			connectTimeoutMillis = SATELLITE_CONNECT_TIMEOUT_MILLIS,
+			readTimeoutMillis = SATELLITE_READ_TIMEOUT_MILLIS
+		)
+		if (!isDecodableImage(file)) {
+			file.delete()
+			throw IOException("Texture satellite illisible: ${tileId.zoom}/${tileId.x}/${tileId.y}")
+		}
+		return downloaded
+	}
+
+	private fun downloadTerrainTile(tileId: TerrainTileId, destination: File): CachedAsset =
+		downloadAsset(
+			url = "$TERRARIUM_BASE_URL/${tileId.zoom}/${tileId.x}/${tileId.y}.png",
+			destination = destination,
+			accept = "image/png",
+			sourceName = "Terrain Tiles"
+		)
+
+	private fun downloadAsset(
+		url: String,
+		destination: File,
+		accept: String,
+		sourceName: String,
+		connectTimeoutMillis: Int = CONNECT_TIMEOUT_MILLIS,
+		readTimeoutMillis: Int = READ_TIMEOUT_MILLIS
+	): CachedAsset {
 		val parent = destination.parentFile ?: throw IOException("Dossier de cache invalide")
 		if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de créer le cache du relief")
 		val partial = File(parent, destination.name + PARTIAL_SUFFIX)
 		if (partial.exists() && !partial.delete()) throw IOException("Téléchargement temporaire verrouillé")
-		val url = "$TERRARIUM_BASE_URL/${tileId.zoom}/${tileId.x}/${tileId.y}.png"
 		val connection = NetworkUtils.getHttpURLConnection(url)
 		try {
 			connection.requestMethod = "GET"
-			connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
-			connection.readTimeout = READ_TIMEOUT_MILLIS
+			connection.connectTimeout = connectTimeoutMillis
+			connection.readTimeout = readTimeoutMillis
 			connection.setRequestProperty("User-Agent", Version.getFullVersion(app))
-			connection.setRequestProperty("Accept", "image/png")
+			connection.setRequestProperty("Accept", accept)
 			connection.connect()
 			if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-				throw IOException("Terrain Tiles HTTP ${connection.responseCode}")
+				throw IOException("$sourceName HTTP ${connection.responseCode}")
 			}
 			var total = 0L
 			BufferedInputStream(connection.inputStream).use { input ->
@@ -191,20 +278,26 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						val count = input.read(buffer)
 						if (count < 0) break
 						total += count
-						if (total > MAX_TILE_BYTES) throw IOException("Tuile Terrarium anormalement volumineuse")
+						if (total > MAX_TILE_BYTES) throw IOException("Réponse $sourceName anormalement volumineuse")
 						output.write(buffer, 0, count)
 					}
 				}
 			}
-			if (total == 0L) throw IOException("Tuile Terrarium vide")
+			if (total == 0L) throw IOException("Réponse $sourceName vide")
 			if (!partial.renameTo(destination)) {
-				throw IOException("Impossible de finaliser la tuile Terrarium")
+				throw IOException("Impossible de finaliser la tuile $sourceName")
 			}
-			return CachedTerrainFile(destination, downloaded = true, downloadedBytes = total)
+			return CachedAsset(destination, downloaded = true, downloadedBytes = total)
 		} finally {
 			connection.disconnect()
 			if (partial.exists()) partial.delete()
 		}
+	}
+
+	private fun isDecodableImage(file: File): Boolean {
+		val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+		BitmapFactory.decodeFile(file.absolutePath, options)
+		return options.outWidth > 0 && options.outHeight > 0
 	}
 
 	private fun decodeTile(tileId: TerrainTileId, file: File): TerrariumTile? {
@@ -224,14 +317,28 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	private fun tileFile(tileId: TerrainTileId): File =
 		File(File(File(terrainDirectory, tileId.zoom.toString()), tileId.x.toString()), "${tileId.y}.png")
 
-	private data class CachedTerrainFile(
+	private fun satelliteFile(tileId: TerrainTileId): File =
+		File(File(File(satelliteDirectory, tileId.zoom.toString()), tileId.x.toString()), "${tileId.y}.jpg")
+
+	private data class CachedAsset(
 		val file: File,
 		val downloaded: Boolean,
 		val downloadedBytes: Long
 	)
 
+	private data class CachedTileFiles(
+		val terrain: CachedAsset,
+		val satellite: CachedAsset?,
+		val satelliteAttempted: Boolean
+	) {
+		val downloadedBytes: Long
+			get() = terrain.downloadedBytes + (satellite?.downloadedBytes ?: 0L)
+	}
+
 	private data class LoadedTerrainTile(
 		val tile: TerrariumTile,
+		val satelliteFile: File?,
+		val satelliteFailed: Boolean,
 		val downloaded: Boolean,
 		val downloadedBytes: Long
 	)
@@ -241,8 +348,11 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		private const val TERRARIUM_BASE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium"
 		private const val PARTIAL_SUFFIX = ".download"
 		private const val PARALLEL_DOWNLOADS = 6
+		private const val SATELLITE_FAILURE_CIRCUIT_BREAKER = PARALLEL_DOWNLOADS
 		private const val CONNECT_TIMEOUT_MILLIS = 15_000
 		private const val READ_TIMEOUT_MILLIS = 30_000
+		private const val SATELLITE_CONNECT_TIMEOUT_MILLIS = 8_000
+		private const val SATELLITE_READ_TIMEOUT_MILLIS = 15_000
 		private const val DOWNLOAD_BUFFER_SIZE = 16 * 1_024
 		private const val MAX_TILE_BYTES = 4L * 1_024L * 1_024L
 	}

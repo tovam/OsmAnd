@@ -859,6 +859,17 @@ private fun FlightWindowScene(
 			onRetry = onRetryTerrain,
 			modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
 		)
+		if ((scene?.satelliteTiles ?: 0) > 0) {
+			Text(
+				text = stringResource(R.string.flight_mode_satellite_attribution_short),
+				color = Color(0xFFC7D0D6),
+				fontSize = 8.sp,
+				modifier = Modifier
+					.align(Alignment.BottomStart)
+					.background(Color(0x990A0F13))
+					.padding(horizontal = 5.dp, vertical = 3.dp)
+			)
+		}
 		if (calibrating) {
 			Canvas(Modifier.fillMaxSize()) {
 				val center = Offset(size.width / 2f, size.height / 2f)
@@ -1017,6 +1028,8 @@ private fun terrainStatusText(status: FlightTerrainStatus): String = when (statu
 	FlightTerrainPhase.PLANNING -> "Calcul des tuiles nécessaires…"
 	FlightTerrainPhase.DOWNLOADING -> buildString {
 		append("${status.availableTiles}/${status.requestedTiles} tuiles")
+		if (status.satelliteTiles > 0) append(" · satellite ${status.satelliteTiles}")
+		if (status.satelliteFailedTiles > 0) append(" · ${status.satelliteFailedTiles} satellite manquantes")
 		status.zoom?.let { append(" · z$it") }
 		if (status.bytesDownloaded > 0L) append(" · ${formatDataSize(status.bytesDownloaded)}")
 	}

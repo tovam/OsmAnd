@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/icon" />
+    <item
+        android:width="18dp"
+        android:height="18dp"
+        android:bottom="2dp"
+        android:drawable="@drawable/ic_launcher_smart_badge"
+        android:gravity="bottom|end"
+        android:right="2dp" />
+</layer-list>

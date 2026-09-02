@@ -8,20 +8,21 @@ object FlightTerrainMeshBuilder {
 
 	private const val GRID_QUADS = 32
 	private const val GRID_SIZE = GRID_QUADS + 1
-	const val VERTEX_COMPONENTS = 7
+	const val VERTEX_COMPONENTS = 9
 
 	fun build(
 		centerLatitude: Double,
 		centerLongitude: Double,
 		radiusKm: Int,
 		plan: TerrainTilePlan,
-		tiles: Map<TerrainTileId, TerrariumTile>
+		tiles: Map<TerrainTileId, TerrariumTile>,
+		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap()
 	): FlightTerrainScene {
 		val projection = FlightTerrainCoordinates(centerLatitude, centerLongitude)
 		val sampler = TileElevationSampler(plan.zoom, tiles)
 		val meshes = plan.tiles.mapNotNull { tileId ->
 			val tile = tiles[tileId] ?: return@mapNotNull null
-			buildTileMesh(tile, sampler, projection)
+			buildTileMesh(tile, sampler, projection, satelliteTexturePaths[tileId])
 		}
 		val centerGround = sampler.elevationAt(
 			FlightTerrainTilePlanner.longitudeToTileX(centerLongitude, plan.zoom),
@@ -36,6 +37,7 @@ object FlightTerrainMeshBuilder {
 			meshes = meshes,
 			loadedTiles = tiles.size,
 			missingTiles = (plan.tiles.size - tiles.size).coerceAtLeast(0),
+			satelliteTiles = satelliteTexturePaths.size,
 			centerGroundElevationMeters = centerGround
 		)
 	}
@@ -43,7 +45,8 @@ object FlightTerrainMeshBuilder {
 	private fun buildTileMesh(
 		tile: TerrariumTile,
 		sampler: TileElevationSampler,
-		projection: FlightTerrainCoordinates
+		projection: FlightTerrainCoordinates,
+		satelliteTexturePath: String?
 	): FlightTerrainMesh {
 		val vertices = FloatArray(GRID_SIZE * GRID_SIZE * VERTEX_COMPONENTS)
 		for (row in 0 until GRID_SIZE) {
@@ -59,6 +62,8 @@ object FlightTerrainMeshBuilder {
 				vertices[offset + 1] = position[1]
 				vertices[offset + 2] = position[2]
 				vertices[offset + 6] = elevation
+				vertices[offset + 7] = column.toFloat() / GRID_QUADS
+				vertices[offset + 8] = row.toFloat() / GRID_QUADS
 			}
 		}
 		calculateNormals(vertices)
@@ -79,7 +84,7 @@ object FlightTerrainMeshBuilder {
 				indices[indexOffset++] = bottomRight.toShort()
 			}
 		}
-		return FlightTerrainMesh(vertices, indices)
+		return FlightTerrainMesh(vertices, indices, satelliteTexturePath)
 	}
 
 	private fun calculateNormals(vertices: FloatArray) {

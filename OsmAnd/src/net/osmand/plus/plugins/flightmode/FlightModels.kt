@@ -26,7 +26,7 @@ data class FlightStop(
 data class FlightPlan(
 	val stops: List<FlightStop>,
 	val terrainCorridorKm: Int = 300,
-	val detailedSatelliteRadiusKm: Int = 10,
+	val detailedSatelliteRadiusKm: Int = 300,
 	val shadowsEnabled: Boolean = true,
 	val resumeAfterRestart: Boolean = true
 ) {

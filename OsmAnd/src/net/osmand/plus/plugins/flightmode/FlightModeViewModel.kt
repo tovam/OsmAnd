@@ -230,10 +230,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					terrainScene = terrainScene,
 					terrainStatus = uiState.terrainStatus.copy(
 						phase = FlightTerrainPhase.READY,
-						message = if (terrainScene.missingTiles == 0) {
-							"Relief réel prêt"
-						} else {
-							"Relief partiel : ${terrainScene.missingTiles} tuiles manquantes"
+						message = when {
+							terrainScene.missingTiles > 0 ->
+								"Relief partiel : ${terrainScene.missingTiles} tuiles manquantes"
+							terrainScene.satelliteTiles < terrainScene.loadedTiles ->
+								"Relief prêt · satellite ${terrainScene.satelliteTiles}/${terrainScene.loadedTiles}"
+							else -> "Relief + satellite prêts"
 						}
 					)
 				)

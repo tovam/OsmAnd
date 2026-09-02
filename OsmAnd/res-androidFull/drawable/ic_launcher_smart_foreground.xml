@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/adaptive_icon_osmand_plus_logo" />
+    <item
+        android:width="30dp"
+        android:height="30dp"
+        android:bottom="16dp"
+        android:drawable="@drawable/ic_launcher_smart_badge"
+        android:gravity="bottom|end"
+        android:right="16dp" />
+</layer-list>

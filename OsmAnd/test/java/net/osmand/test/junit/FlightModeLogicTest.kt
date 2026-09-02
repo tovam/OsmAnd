@@ -7,6 +7,7 @@ import net.osmand.plus.plugins.flightmode.FlightProfilePlanner
 import net.osmand.plus.plugins.flightmode.FlightRecordingPolicy
 import net.osmand.plus.plugins.flightmode.FlightReplayEngine
 import net.osmand.plus.plugins.flightmode.FlightSample
+import net.osmand.plus.plugins.flightmode.FlightSatelliteSource
 import net.osmand.plus.plugins.flightmode.FlightStop
 import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
@@ -117,6 +118,38 @@ class FlightModeLogicTest {
 		assertEquals(1, scene.meshes.size)
 		assertEquals(33 * 33 * FlightTerrainMeshBuilder.VERTEX_COMPONENTS, scene.meshes.single().vertices.size)
 		assertEquals(32 * 32 * 6, scene.meshes.single().indices.size)
+	}
+
+	@Test
+	fun satelliteUsesTheSameWebMercatorTileWithWmtsRowBeforeColumn() {
+		val tile = TerrainTileId(8, 141, 95)
+		assertEquals(
+			"https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/8/95/141.jpg",
+			FlightSatelliteSource.tileUrl(tile)
+		)
+	}
+
+	@Test
+	fun terrainMeshCarriesSatelliteUvCoordinatesAndTexturePath() {
+		val zoom = 8
+		val tileId = TerrainTileId(zoom, 141, 95)
+		val tile = TerrariumTile(tileId, 256, 256, FloatArray(256 * 256) { 100f })
+		val texturePath = "/synthetic/satellite.jpg"
+		val mesh = FlightTerrainMeshBuilder.build(
+			centerLatitude = 42.0,
+			centerLongitude = 19.0,
+			radiusKm = 50,
+			plan = TerrainTilePlan(zoom, listOf(tileId)),
+			tiles = mapOf(tileId to tile),
+			satelliteTexturePaths = mapOf(tileId to texturePath)
+		).meshes.single()
+
+		assertEquals(texturePath, mesh.satelliteTexturePath)
+		assertEquals(0f, mesh.vertices[7], 0f)
+		assertEquals(0f, mesh.vertices[8], 0f)
+		val lastVertexOffset = (33 * 33 - 1) * FlightTerrainMeshBuilder.VERTEX_COMPONENTS
+		assertEquals(1f, mesh.vertices[lastVertexOffset + 7], 0f)
+		assertEquals(1f, mesh.vertices[lastVertexOffset + 8], 0f)
 	}
 
 	@Test
