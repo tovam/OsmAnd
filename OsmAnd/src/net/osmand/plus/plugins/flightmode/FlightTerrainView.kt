@@ -42,12 +42,24 @@ class FlightTerrainView @JvmOverloads constructor(
 		scene: FlightTerrainScene?,
 		sample: FlightSample?,
 		windowPlacement: FlightWindowPlacement,
+		windowLook: FlightWindowLook,
 		altitudeOverrideMeters: Float?,
 		shadingEnabled: Boolean,
+		satelliteOpacity: Float,
+		terrainOpacity: Float,
 		onRendererError: (String) -> Unit
 	) {
 		rendererErrorListener = onRendererError
-		terrainRenderer.update(scene, sample, windowPlacement, altitudeOverrideMeters, shadingEnabled)
+		terrainRenderer.update(
+			scene,
+			sample,
+			windowPlacement,
+			windowLook,
+			altitudeOverrideMeters,
+			shadingEnabled,
+			satelliteOpacity,
+			terrainOpacity
+		)
 		requestRender()
 	}
 
@@ -62,9 +74,15 @@ class FlightTerrainView @JvmOverloads constructor(
 		@Volatile
 		private var windowPlacement: FlightWindowPlacement = FlightWindowPlacement()
 		@Volatile
+		private var windowLook: FlightWindowLook = FlightWindowLook()
+		@Volatile
 		private var altitudeOverrideMeters: Float? = null
 		@Volatile
 		private var shadingEnabled: Boolean = true
+		@Volatile
+		private var satelliteOpacity: Float = 0.92f
+		@Volatile
+		private var terrainOpacity: Float = 0.70f
 
 		private var program = 0
 		private var shadowProgram = 0
@@ -87,6 +105,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var daylightLocation = -1
 		private var satelliteTextureLocation = -1
 		private var hasSatelliteTextureLocation = -1
+		private var satelliteOpacityLocation = -1
+		private var terrainOpacityLocation = -1
 		private var shadowTextureLocation = -1
 		private var shadowTexelSizeLocation = -1
 		private var shadowsEnabledLocation = -1
@@ -108,14 +128,20 @@ class FlightTerrainView @JvmOverloads constructor(
 			scene: FlightTerrainScene?,
 			sample: FlightSample?,
 			windowPlacement: FlightWindowPlacement,
+			windowLook: FlightWindowLook,
 			altitudeOverrideMeters: Float?,
-			shadingEnabled: Boolean
+			shadingEnabled: Boolean,
+			satelliteOpacity: Float,
+			terrainOpacity: Float
 		) {
 			this.scene = scene
 			this.sample = sample
 			this.windowPlacement = windowPlacement.clamped()
+			this.windowLook = windowLook.clamped()
 			this.altitudeOverrideMeters = altitudeOverrideMeters
 			this.shadingEnabled = shadingEnabled
+			this.satelliteOpacity = satelliteOpacity.coerceIn(0f, 1f)
+			this.terrainOpacity = terrainOpacity.coerceIn(0f, 1f)
 		}
 
 		override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -136,6 +162,8 @@ class FlightTerrainView @JvmOverloads constructor(
 				daylightLocation = GLES20.glGetUniformLocation(program, "uDaylight")
 				satelliteTextureLocation = GLES20.glGetUniformLocation(program, "uSatelliteTexture")
 				hasSatelliteTextureLocation = GLES20.glGetUniformLocation(program, "uHasSatelliteTexture")
+				satelliteOpacityLocation = GLES20.glGetUniformLocation(program, "uSatelliteOpacity")
+				terrainOpacityLocation = GLES20.glGetUniformLocation(program, "uTerrainOpacity")
 				shadowTextureLocation = GLES20.glGetUniformLocation(program, "uShadowMap")
 				shadowTexelSizeLocation = GLES20.glGetUniformLocation(program, "uShadowTexelSize")
 				shadowsEnabledLocation = GLES20.glGetUniformLocation(program, "uShadowsEnabled")
@@ -170,6 +198,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			val currentScene = scene
 			val currentSample = sample
 			val currentWindowPlacement = windowPlacement
+			val currentWindowLook = windowLook
 			val latitude = currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
 			val longitude = currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
 			val sun = FlightSunPosition.direction(
@@ -214,10 +243,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			val camera = coordinates.toLocal(latitude, longitude, altitude.toDouble())
 			val bearing = currentSample?.bearingDegrees ?: DEFAULT_BEARING_DEGREES
 			val geometry = currentWindowPlacement.geometry()
-			val viewAzimuth = Math.toRadians(bearing.toDouble()) + geometry.relativeAzimuthRadians
-			val horizontalDirection = cos(geometry.elevationRadians)
+			val viewAzimuth = Math.toRadians(bearing.toDouble()) + geometry.relativeAzimuthRadians +
+				Math.toRadians(currentWindowLook.yawDegrees.toDouble())
+			val viewElevation = (geometry.elevationRadians + Math.toRadians(currentWindowLook.pitchDegrees.toDouble()))
+				.coerceIn(Math.toRadians(-85.0), Math.toRadians(85.0))
+			val horizontalDirection = cos(viewElevation)
 			val directionX = (sin(viewAzimuth) * horizontalDirection).toFloat()
-			val directionY = sin(geometry.elevationRadians)
+			val directionY = sin(viewElevation).toFloat()
 			val directionZ = (-cos(viewAzimuth) * horizontalDirection).toFloat()
 
 			val view = FloatArray(16)
@@ -247,6 +279,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUniform1f(shadingLocation, if (shadingEnabled) 1f else 0f)
 			GLES20.glUniform3f(skyColorLocation, sky[0], sky[1], sky[2])
 			GLES20.glUniform1f(daylightLocation, daylight)
+			GLES20.glUniform1f(satelliteOpacityLocation, satelliteOpacity)
+			GLES20.glUniform1f(terrainOpacityLocation, terrainOpacity)
 			GLES20.glUniform1f(shadowsEnabledLocation, if (shadowsActive) 1f else 0f)
 			GLES20.glUniform2f(
 				shadowTexelSizeLocation,
@@ -641,6 +675,8 @@ class FlightTerrainView @JvmOverloads constructor(
 				uniform float uDaylight;
 				uniform sampler2D uSatelliteTexture;
 				uniform float uHasSatelliteTexture;
+				uniform float uSatelliteOpacity;
+				uniform float uTerrainOpacity;
 				uniform sampler2D uShadowMap;
 				uniform vec2 uShadowTexelSize;
 				uniform float uShadowsEnabled;
@@ -694,7 +730,10 @@ class FlightTerrainView @JvmOverloads constructor(
 					terrain = mix(terrain, snow, smoothstep(2400.0, 3400.0, vElevation));
 					vec3 procedural = mix(water, terrain, step(0.0, vElevation));
 					vec3 satellite = texture2D(uSatelliteTexture, vTexCoord).rgb;
-					vec3 base = mix(procedural, satellite, uHasSatelliteTexture * 0.96);
+					float terrainWeight = max(uTerrainOpacity, 0.001);
+					float satelliteWeight = uHasSatelliteTexture * uSatelliteOpacity;
+					vec3 base = (procedural * terrainWeight + satellite * satelliteWeight) /
+						max(terrainWeight + satelliteWeight, 0.001);
 					float castShadow = shadowVisibility();
 					vec3 lit = base * vLight * castShadow * mix(0.08, 1.0, uDaylight);
 					float fogAmount = smoothstep(0.68, 1.0, vFog);

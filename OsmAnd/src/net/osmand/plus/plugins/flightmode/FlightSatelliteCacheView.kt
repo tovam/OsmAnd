@@ -42,10 +42,10 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 
 	private val worker: ExecutorService = Executors.newSingleThreadExecutor()
 	private val bitmapCache = object : LruCache<String, Bitmap>(BITMAP_CACHE_KIB) {
-		override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount / 1024
+		override fun sizeOf(key: String, value: Bitmap): Int = (value.allocationByteCount / 1024).coerceAtLeast(1)
 	}
-	private val queuedPaths = mutableSetOf<String>()
-	private val failedPaths = mutableSetOf<String>()
+	private val queuedKeys = mutableSetOf<String>()
+	private val failedKeys = mutableSetOf<String>()
 	private val tilePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 	private val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
 		color = Color.rgb(30, 42, 50)
@@ -138,8 +138,8 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 				loading = false
 				tiles = snapshot
 				bitmapCache.evictAll()
-				queuedPaths.clear()
-				failedPaths.clear()
+				queuedKeys.clear()
+				failedKeys.clear()
 				updateBounds()
 				fitContent()
 				onCacheInfoChanged?.invoke(
@@ -236,19 +236,20 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 			return
 		}
 		val scaledTileSize = TILE_SIZE * contentScale
+		val desiredSampleSize = sampleSizeFor(scaledTileSize)
 		tiles.forEach { tile ->
 			val left = offsetX + (tile.displayX - minDisplayX) * scaledTileSize
 			val top = offsetY + (tile.y - minY) * scaledTileSize
 			val destination = RectF(left, top, left + scaledTileSize, top + scaledTileSize)
 			if (!RectF.intersects(destination, RectF(0f, 0f, width.toFloat(), height.toFloat()))) return@forEach
 			val path = tile.file.absolutePath
-			val bitmap = bitmapCache.get(path)
+			val bitmap = cachedBitmap(path, desiredSampleSize)
 			if (bitmap != null) {
 				canvas.drawBitmap(bitmap, null, destination, tilePaint)
 			} else {
 				canvas.drawRect(destination, placeholderPaint)
-				queueBitmap(path)
 			}
+			queueBitmap(path, desiredSampleSize)
 			canvas.drawRect(destination, gridPaint)
 		}
 	}
@@ -257,15 +258,49 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 		canvas.drawText(message, width / 2f, height / 2f - (messagePaint.ascent() + messagePaint.descent()) / 2f, messagePaint)
 	}
 
-	private fun queueBitmap(path: String) {
-		if (path in failedPaths || path in queuedPaths || queuedPaths.size >= MAXIMUM_QUEUED_BITMAPS) return
-		queuedPaths += path
+	private fun sampleSizeFor(renderedTileSize: Float): Int = when {
+		renderedTileSize >= 320f -> 1
+		renderedTileSize >= 160f -> 2
+		renderedTileSize >= 80f -> 4
+		renderedTileSize >= 40f -> 8
+		else -> 16
+	}
+
+	private fun cacheKey(path: String, sampleSize: Int): String = "$path#$sampleSize"
+
+	private fun cachedBitmap(path: String, desiredSampleSize: Int): Bitmap? {
+		bitmapCache.get(cacheKey(path, desiredSampleSize))?.let { return it }
+		var closest: Bitmap? = null
+		var closestDistance = Int.MAX_VALUE
+		for (sampleSize in SAMPLE_SIZES) {
+			val candidate = bitmapCache.get(cacheKey(path, sampleSize)) ?: continue
+			val distance = kotlin.math.abs(sampleSize - desiredSampleSize)
+			if (distance < closestDistance) {
+				closest = candidate
+				closestDistance = distance
+			}
+		}
+		return closest
+	}
+
+	private fun queueBitmap(path: String, sampleSize: Int) {
+		val key = cacheKey(path, sampleSize)
+		if (bitmapCache.get(key) != null || key in failedKeys || key in queuedKeys ||
+			queuedKeys.size >= MAXIMUM_QUEUED_BITMAPS
+		) return
+		queuedKeys += key
 		worker.execute {
-			val bitmap = BitmapFactory.decodeFile(path)
+			val bitmap = BitmapFactory.decodeFile(
+				path,
+				BitmapFactory.Options().apply {
+					inSampleSize = sampleSize
+					inPreferredConfig = Bitmap.Config.RGB_565
+				}
+			)
 			post {
-				queuedPaths -= path
+				queuedKeys -= key
 				if (detached) return@post
-				if (bitmap != null) bitmapCache.put(path, bitmap) else failedPaths += path
+				if (bitmap != null) bitmapCache.put(key, bitmap) else failedKeys += key
 				invalidate()
 			}
 		}
@@ -297,6 +332,7 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 		private const val MINIMUM_SCALE = 0.002f
 		private const val MAXIMUM_SOURCE_PIXEL_SCALE = 8f
 		private const val BITMAP_CACHE_KIB = 64 * 1024
-		private const val MAXIMUM_QUEUED_BITMAPS = 24
+		private const val MAXIMUM_QUEUED_BITMAPS = 64
+		private val SAMPLE_SIZES = listOf(1, 2, 4, 8, 16)
 	}
 }

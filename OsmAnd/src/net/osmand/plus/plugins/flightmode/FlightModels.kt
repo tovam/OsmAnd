@@ -52,6 +52,23 @@ data class FlightWindowPlacement(
 	}
 }
 
+data class FlightWindowLook(
+	val yawDegrees: Float = 0f,
+	val pitchDegrees: Float = 0f
+) {
+	fun clamped(): FlightWindowLook = copy(
+		yawDegrees = yawDegrees.coerceIn(MIN_YAW_DEGREES, MAX_YAW_DEGREES),
+		pitchDegrees = pitchDegrees.coerceIn(MIN_PITCH_DEGREES, MAX_PITCH_DEGREES)
+	)
+
+	companion object {
+		const val MIN_YAW_DEGREES = -120f
+		const val MAX_YAW_DEGREES = 120f
+		const val MIN_PITCH_DEGREES = -70f
+		const val MAX_PITCH_DEGREES = 70f
+	}
+}
+
 data class FlightWindowGeometry(
 	val lateralOffsetMeters: Float,
 	val horizontalDistanceMeters: Float,
@@ -155,6 +172,20 @@ data class FlightTrip(
 			if (!hasUsableTimestamps || samples.size < 2) return null
 			return samples.last().timestampMillis - samples.first().timestampMillis
 		}
+
+	fun progressFor(sample: FlightSample): Float {
+		if (samples.size < 2) return 0f
+		if (hasUsableTimestamps) {
+			val start = samples.first().timestampMillis
+			val duration = samples.last().timestampMillis - start
+			if (duration > 0L) {
+				return ((sample.timestampMillis - start).toDouble() / duration)
+					.toFloat()
+					.coerceIn(0f, 1f)
+			}
+		}
+		return (sample.index.toFloat() / samples.lastIndex.coerceAtLeast(1)).coerceIn(0f, 1f)
+	}
 }
 
 data class FlightSnapshot(
@@ -186,8 +217,23 @@ data class FlightProfile(
 	val legs: List<FlightProfileLeg>,
 	val points: List<FlightProfilePoint>,
 	val totalDistanceKm: Float,
-	val totalDurationMinutes: Int
+	val totalDurationMinutes: Int,
+	val recorded: Boolean = false
 )
+
+data class FlightSpan(
+	val startProgress: Float,
+	val endProgress: Float
+) {
+	fun normalized(): FlightSpan = if (startProgress <= endProgress) {
+		copy(
+			startProgress = startProgress.coerceIn(0f, 1f),
+			endProgress = endProgress.coerceIn(0f, 1f)
+		)
+	} else {
+		FlightSpan(endProgress.coerceIn(0f, 1f), startProgress.coerceIn(0f, 1f))
+	}
+}
 
 data class FlightRecordingPolicy(
 	val cruisePointDistanceMeters: Float = 1_000f,
@@ -230,10 +276,15 @@ data class FlightUiState(
 	val terrainStatus: FlightTerrainStatus = FlightTerrainStatus(),
 	val terrainScene: FlightTerrainScene? = null,
 	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
+	val windowLook: FlightWindowLook = FlightWindowLook(),
 	val windowAltitudeOverrideMeters: Float? = null,
+	val satelliteOpacity: Float = 0.92f,
+	val terrainOpacity: Float = 0.70f,
 	val mapFollowing: Boolean = true,
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),
 	val showTrackPoints: Boolean = false,
+	val flightSpans: List<FlightSpan> = emptyList(),
+	val pendingFlightStartProgress: Float? = null,
 	val photoMainCamera: Boolean = true,
 	val photoSelfie: Boolean = false,
 	val photoMap: Boolean = true,

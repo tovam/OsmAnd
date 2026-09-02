@@ -76,11 +76,23 @@ object FlightProfilePlanner {
 
 	fun fromTrip(trip: FlightTrip): FlightProfile {
 		if (trip.samples.isEmpty()) return FlightProfile(emptyList(), emptyList(), 0f, 0)
-		val denominator = trip.samples.lastIndex.coerceAtLeast(1).toFloat()
-		val profileLegs = trip.legs.map { leg ->
+		val sourceLegs = trip.legs.ifEmpty {
+			listOf(
+				FlightLeg(
+					index = 0,
+					name = "",
+					startSampleIndex = 0,
+					endSampleIndex = trip.samples.lastIndex,
+					distanceMeters = trip.totalDistanceMeters,
+					startTimeMillis = if (trip.hasUsableTimestamps) trip.samples.first().timestampMillis else null,
+					endTimeMillis = if (trip.hasUsableTimestamps) trip.samples.last().timestampMillis else null
+				)
+			)
+		}
+		val profileLegs = sourceLegs.map { leg ->
 			val points = trip.samples.subList(leg.startSampleIndex, leg.endSampleIndex + 1).map { sample ->
 				FlightProfilePoint(
-					progress = sample.index / denominator,
+					progress = trip.progressFor(sample),
 					altitudeMeters = sample.altitudeMeters?.toFloat() ?: 0f,
 					legIndex = leg.index
 				)
@@ -90,10 +102,10 @@ object FlightProfilePlanner {
 			} else 0
 			FlightProfileLeg(
 				index = leg.index,
-				from = FlightStop(if (leg.index == 0) "Départ" else "Escale ${leg.index}"),
-				to = FlightStop(if (leg.index == trip.legs.lastIndex) "Arrivée" else "Escale ${leg.index + 1}"),
-				startProgress = leg.startSampleIndex / denominator,
-				endProgress = leg.endSampleIndex / denominator,
+				from = FlightStop(""),
+				to = FlightStop(""),
+				startProgress = points.firstOrNull()?.progress ?: 0f,
+				endProgress = points.lastOrNull()?.progress ?: 0f,
 				distanceKm = (leg.distanceMeters / 1_000.0).toFloat(),
 				cruiseAltitudeMeters = points.maxOfOrNull { it.altitudeMeters } ?: 0f,
 				estimatedDurationMinutes = durationMinutes,
@@ -104,7 +116,8 @@ object FlightProfilePlanner {
 			legs = profileLegs,
 			points = profileLegs.flatMap { it.points },
 			totalDistanceKm = (trip.totalDistanceMeters / 1_000.0).toFloat(),
-			totalDurationMinutes = ((trip.durationMillis ?: 0L) / 60_000.0).roundToInt()
+			totalDurationMinutes = ((trip.durationMillis ?: 0L) / 60_000.0).roundToInt(),
+			recorded = true
 		)
 	}
 

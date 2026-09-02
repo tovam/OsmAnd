@@ -66,6 +66,29 @@ class FlightModeLogicTest {
 	}
 
 	@Test
+	fun recordedProfileUsesTheSameTimelineAsReplayWithoutInventingStopNames() {
+		val samples = listOf(
+			sample(0, 1_000L, 48.0, 2.0).copy(altitudeMeters = 100.0),
+			sample(1, 11_000L, 48.1, 2.1).copy(altitudeMeters = 3_000.0),
+			sample(2, 101_000L, 49.0, 3.0).copy(altitudeMeters = 10_000.0)
+		)
+		val trip = FlightTrip(
+			"recorded",
+			samples,
+			listOf(FlightLeg(0, "segment GPX", 0, 2, 1_000.0, 1_000L, 101_000L)),
+			true,
+			1_000.0,
+			"synthetic.gpx"
+		)
+
+		val profile = FlightProfilePlanner.fromTrip(trip)
+
+		assertTrue(profile.recorded)
+		assertEquals(0.10f, profile.points[1].progress, 0.0001f)
+		assertTrue(profile.legs.all { it.from.name.isBlank() && it.to.name.isBlank() })
+	}
+
+	@Test
 	fun cruiseDefaultsToAboutOnePointPerKilometre() {
 		val policy = FlightRecordingPolicy()
 		val interval = policy.intervalSeconds(250f)

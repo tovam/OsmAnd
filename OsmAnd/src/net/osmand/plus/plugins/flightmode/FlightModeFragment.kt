@@ -28,6 +28,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var previousMapState: MapState? = null
 	private var lastMapRefreshMillis = 0L
 	private var mapInteractionBlockerLayer: FlightMapInteractionBlockerLayer? = null
+	private var replayMapLayer: FlightReplayMapLayer? = null
 	private var mapTouchDownX = 0f
 	private var mapTouchDownY = 0f
 	private val mapTouchSlop by lazy { ViewConfiguration.get(requireContext()).scaledTouchSlop.toFloat() }
@@ -106,11 +107,13 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onSeekReplay = viewModel::seekReplay,
 					onToggleReplay = viewModel::toggleReplayPlaying,
 					onAdvanceReplay = viewModel::advanceReplay,
-					onMapSample = ::showSampleOnMap,
+					onMapState = ::showReplayStateOnMap,
 					onSetWindowAltitudeOverride = viewModel::setWindowAltitudeOverride,
 					onMoveWindow = viewModel::moveWindow,
 					onSaveWindowPlacement = viewModel::saveWindowPlacement,
 					onSetWindowSide = viewModel::setWindowSide,
+					onMoveWindowLook = viewModel::moveWindowLook,
+					onRecenterWindowLook = viewModel::recenterWindowLook,
 					onSetWindowZoom = viewModel::setWindowZoom,
 					onChangeWindowZoom = viewModel::changeWindowZoom,
 					onSetCabinTransparent = viewModel::setCabinTransparent,
@@ -118,6 +121,12 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onTerrainRendererError = viewModel::setTerrainRendererError,
 					onSetMapFollowing = viewModel::setMapFollowing,
 					onShowTrackPoints = viewModel::setShowTrackPoints,
+					onMarkFlightStart = viewModel::markFlightStart,
+					onMarkFlightEnd = viewModel::markFlightEnd,
+					onCancelFlightStart = viewModel::cancelFlightStart,
+					onRemoveFlightSpan = viewModel::removeFlightSpan,
+					onSetSatelliteOpacity = viewModel::setSatelliteOpacity,
+					onSetTerrainOpacity = viewModel::setTerrainOpacity,
 					onSetRecordingPolicy = viewModel::setRecordingPolicy,
 					onSetPhotoSources = viewModel::setPhotoSources
 				)
@@ -158,8 +167,9 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	override fun getInsetTargets(): InsetTargetsCollection = InsetTargetsCollection()
 
-	private fun showSampleOnMap(sample: FlightSample) {
-		if (!viewModel.uiState.mapFollowing) return
+	private fun showReplayStateOnMap(trip: FlightTrip?, sample: FlightSample?, showPoints: Boolean) {
+		replayMapLayer?.update(trip, sample, showPoints)
+		if (sample == null || viewModel.uiState.page != FlightPage.MAP || !viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
 		mapView.setLatLon(sample.latitude, sample.longitude)
 		mapView.setElevationAngle(55f)
@@ -186,6 +196,14 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 				mapInteractionBlockerLayer = layer
 			}
 		}
+		if (replayMapLayer == null) {
+			FlightReplayMapLayer(requireContext()).also { layer ->
+				mapView.addLayer(layer, REPLAY_MAP_LAYER_Z_ORDER)
+				replayMapLayer = layer
+				val state = viewModel.uiState
+				layer.update(state.trip, state.snapshot?.sample, state.showTrackPoints)
+			}
+		}
 	}
 
 	private fun removeMapInteractionGuard() {
@@ -193,6 +211,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		mapView.removeTouchListener(mapTouchListener)
 		mapInteractionBlockerLayer?.let(mapView::removeLayer)
 		mapInteractionBlockerLayer = null
+		replayMapLayer?.let(mapView::removeLayer)
+		replayMapLayer = null
 	}
 
 	private fun captureMapState() {
@@ -235,6 +255,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		private const val TAG = "FlightModeFragment"
 		private const val MAP_REFRESH_INTERVAL_MILLIS = 250L
 		private const val MAP_INTERACTION_BLOCKER_Z_ORDER = 1_000f
+		private const val REPLAY_MAP_LAYER_Z_ORDER = 999f
 
 		fun showInstance(manager: FragmentManager) {
 			if (AndroidUtils.isFragmentCanBeAdded(manager, TAG)) {

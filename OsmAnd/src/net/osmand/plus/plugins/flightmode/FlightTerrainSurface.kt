@@ -9,8 +9,11 @@ fun FlightTerrainSurface(
 	scene: FlightTerrainScene?,
 	sample: FlightSample?,
 	windowPlacement: FlightWindowPlacement,
+	windowLook: FlightWindowLook,
 	altitudeOverrideMeters: Float?,
 	shadingEnabled: Boolean,
+	satelliteOpacity: Float,
+	terrainOpacity: Float,
 	onRendererError: (String) -> Unit,
 	modifier: Modifier = Modifier
 ) {
@@ -22,8 +25,11 @@ fun FlightTerrainSurface(
 				scene = scene,
 				sample = sample,
 				windowPlacement = windowPlacement,
+				windowLook = windowLook,
 				altitudeOverrideMeters = altitudeOverrideMeters,
 				shadingEnabled = shadingEnabled,
+				satelliteOpacity = satelliteOpacity,
+				terrainOpacity = terrainOpacity,
 				onRendererError = onRendererError
 			)
 		}

@@ -144,7 +144,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			trip = null,
 			replayPlaying = false,
 			replayProgress = 0f,
-			tripLoadError = null
+			tripLoadError = null,
+			flightSpans = emptyList(),
+			pendingFlightStartProgress = null
 		)
 	}
 
@@ -174,6 +176,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					snapshot = firstSnapshot,
 					replayProgress = 0f,
 					replayPlaying = false,
+					flightSpans = emptyList(),
+					pendingFlightStartProgress = null,
 					loadingTrip = false,
 					tripLoadError = null
 				)
@@ -382,6 +386,23 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun setWindowSide(side: FlightCabinSide) {
 		setWindowPlacement(uiState.windowPlacement.copy(side = side))
+		recenterWindowLook()
+	}
+
+	fun moveWindowLook(yawDeltaDegrees: Float, pitchDeltaDegrees: Float) {
+		val current = uiState.windowLook
+		uiState = uiState.copy(
+			windowLook = current.copy(
+				yawDegrees = current.yawDegrees + yawDeltaDegrees,
+				pitchDegrees = current.pitchDegrees + pitchDeltaDegrees
+			).clamped()
+		)
+	}
+
+	fun recenterWindowLook() {
+		if (uiState.windowLook != FlightWindowLook()) {
+			uiState = uiState.copy(windowLook = FlightWindowLook())
+		}
 	}
 
 	fun setWindowZoom(zoom: Float) {
@@ -412,6 +433,40 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(showTrackPoints = show)
 	}
 
+	fun markFlightStart() {
+		if (uiState.sessionMode != FlightSessionMode.REPLAY) return
+		uiState = uiState.copy(pendingFlightStartProgress = uiState.replayProgress)
+	}
+
+	fun markFlightEnd() {
+		val start = uiState.pendingFlightStartProgress ?: return
+		val span = FlightSpan(start, uiState.replayProgress).normalized()
+		if (span.endProgress - span.startProgress < MINIMUM_FLIGHT_SPAN_PROGRESS) return
+		uiState = uiState.copy(
+			flightSpans = (uiState.flightSpans + span).sortedBy { it.startProgress },
+			pendingFlightStartProgress = null
+		)
+	}
+
+	fun cancelFlightStart() {
+		uiState = uiState.copy(pendingFlightStartProgress = null)
+	}
+
+	fun removeFlightSpan(index: Int) {
+		if (index !in uiState.flightSpans.indices) return
+		uiState = uiState.copy(
+			flightSpans = uiState.flightSpans.toMutableList().apply { removeAt(index) }
+		)
+	}
+
+	fun setSatelliteOpacity(opacity: Float) {
+		uiState = uiState.copy(satelliteOpacity = opacity.coerceIn(0f, 1f))
+	}
+
+	fun setTerrainOpacity(opacity: Float) {
+		uiState = uiState.copy(terrainOpacity = opacity.coerceIn(0f, 1f))
+	}
+
 	fun setRecordingPolicy(policy: FlightRecordingPolicy) {
 		uiState = uiState.copy(recordingPolicy = policy)
 	}
@@ -438,5 +493,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		private const val MINIMUM_RELOAD_DISTANCE_KM = 20.0
 		private const val MINIMUM_WINDOW_ALTITUDE_METERS = -500f
 		private const val MAXIMUM_WINDOW_ALTITUDE_METERS = 15_000f
+		private const val MINIMUM_FLIGHT_SPAN_PROGRESS = 0.0005f
 	}
 }
