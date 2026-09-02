@@ -14,6 +14,8 @@ class FlightMapInteractionBlockerLayer(context: Context) : OsmandMapLayer(contex
 
 	override fun onDraw(canvas: Canvas, tileBox: RotatedTileBox, settings: DrawSettings) = Unit
 
+	override fun drawInScreenPixels(): Boolean = false
+
 	override fun onSingleTap(point: PointF, tileBox: RotatedTileBox): Boolean = true
 
 	override fun onLongPressEvent(point: PointF, tileBox: RotatedTileBox): Boolean = true
