@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import net.osmand.plus.views.OsmandMapTileView
 
 /**
  * The flight HUD lives in a full-screen ComposeView above OsmAnd's map. This view
@@ -13,7 +14,7 @@ import android.view.ViewConfiguration
  */
 class FlightMapGestureProxyView(
 	context: Context,
-	private var target: View,
+	private var target: OsmandMapTileView,
 	private var onExplorationGesture: () -> Unit
 ) : View(context) {
 
@@ -30,7 +31,7 @@ class FlightMapGestureProxyView(
 		isFocusable = false
 	}
 
-	fun update(target: View, onExplorationGesture: () -> Unit) {
+	fun update(target: OsmandMapTileView, onExplorationGesture: () -> Unit) {
 		this.target = target
 		this.onExplorationGesture = onExplorationGesture
 	}
@@ -60,13 +61,14 @@ class FlightMapGestureProxyView(
 		}
 
 		getLocationOnScreen(sourceLocation)
-		target.getLocationOnScreen(targetLocation)
+		val targetView = target.view ?: return true
+		targetView.getLocationOnScreen(targetLocation)
 		val forwarded = MotionEvent.obtain(event)
 		forwarded.offsetLocation(
 			(sourceLocation[0] - targetLocation[0]).toFloat(),
 			(sourceLocation[1] - targetLocation[1]).toFloat()
 		)
-		target.dispatchTouchEvent(forwarded)
+		target.onTouchEvent(forwarded)
 		forwarded.recycle()
 		if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
 			targetGestureActive = false
@@ -78,7 +80,7 @@ class FlightMapGestureProxyView(
 		if (targetGestureActive) {
 			val now = SystemClock.uptimeMillis()
 			val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
-			target.dispatchTouchEvent(cancel)
+			target.onTouchEvent(cancel)
 			cancel.recycle()
 			targetGestureActive = false
 		}
