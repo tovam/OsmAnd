@@ -16,11 +16,12 @@ import kotlinx.coroutines.withContext
 import net.osmand.Location
 import net.osmand.plus.OsmAndLocationProvider.GPSInfo
 import net.osmand.plus.OsmandApplication
+import net.osmand.shared.gpx.GpxFile
 
 class FlightModeViewModel(application: Application) : AndroidViewModel(application) {
 
 	private val app = application as OsmandApplication
-	private val headPoseStore = FlightHeadPoseStore(application)
+	private val windowPlacementStore = FlightWindowPlacementStore(application)
 	private val terrainRepository = FlightTerrainRepository(app)
 	private val citySearch = FlightCitySearch(app)
 	private var replayEngine: FlightReplayEngine? = null
@@ -30,8 +31,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	var uiState by mutableStateOf(
 		FlightUiState(
-			headPose = headPoseStore.load(),
-			neutralHeadPose = headPoseStore.load()
+			windowPlacement = windowPlacementStore.load()
 		)
 	)
 		private set
@@ -140,6 +140,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(
 			page = FlightPage.MAP,
 			sessionMode = FlightSessionMode.LIVE,
+			mapFollowing = true,
 			trip = null,
 			replayPlaying = false,
 			replayProgress = 0f,
@@ -148,10 +149,18 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun loadTrip(uri: Uri) {
+		loadTrip { FlightTripLoader.load(app, uri) }
+	}
+
+	fun loadTrip(gpxFile: GpxFile) {
+		loadTrip { FlightTripLoader.load(gpxFile) }
+	}
+
+	private fun loadTrip(loader: () -> FlightTrip) {
 		uiState = uiState.copy(loadingTrip = true, tripLoadError = null)
 		viewModelScope.launch {
 			val result = runCatching {
-				withContext(Dispatchers.IO) { FlightTripLoader.load(app, uri) }
+				withContext(Dispatchers.IO) { loader() }
 			}
 			result.onSuccess { trip ->
 				replayEngine = FlightReplayEngine(trip)
@@ -159,6 +168,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				uiState = uiState.copy(
 					page = FlightPage.MAP,
 					sessionMode = FlightSessionMode.REPLAY,
+					mapFollowing = true,
 					trip = trip,
 					profile = FlightProfilePlanner.fromTrip(trip),
 					snapshot = firstSnapshot,
@@ -346,34 +356,56 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 	}
 
-	fun moveHead(horizontalFraction: Float, verticalFraction: Float, zoomChange: Float) {
-		val current = uiState.headPose
-		val moved = current.copy(
-			horizontalMeters = current.horizontalMeters + horizontalFraction * 0.48f,
-			verticalMeters = current.verticalMeters + verticalFraction * 0.34f,
-			distanceMeters = current.distanceMeters / zoomChange.coerceIn(0.7f, 1.4f)
-		).clamped()
-		uiState = uiState.copy(headPose = moved)
-	}
-
-	fun setHeadDistance(distanceMeters: Float) {
+	fun setWindowAltitudeOverride(altitudeMeters: Float?) {
 		uiState = uiState.copy(
-			headPose = uiState.headPose.copy(distanceMeters = distanceMeters).clamped()
+			windowAltitudeOverrideMeters = altitudeMeters?.coerceIn(
+				MINIMUM_WINDOW_ALTITUDE_METERS,
+				MAXIMUM_WINDOW_ALTITUDE_METERS
+			)
 		)
 	}
 
-	fun setHeadCalibration(enabled: Boolean) {
-		uiState = uiState.copy(calibratingHead = enabled)
+	fun moveWindow(forwardDeltaMeters: Float, verticalDeltaMeters: Float) {
+		val current = uiState.windowPlacement
+		setWindowPlacement(
+			current.copy(
+				forwardOffsetMeters = current.forwardOffsetMeters + forwardDeltaMeters,
+				verticalOffsetMeters = current.verticalOffsetMeters + verticalDeltaMeters
+			),
+			persist = false
+		)
 	}
 
-	fun saveNeutralHeadPose() {
-		val pose = uiState.headPose.clamped()
-		headPoseStore.save(pose)
-		uiState = uiState.copy(neutralHeadPose = pose, calibratingHead = false)
+	fun saveWindowPlacement() {
+		windowPlacementStore.save(uiState.windowPlacement)
 	}
 
-	fun recenterHead() {
-		uiState = uiState.copy(headPose = uiState.neutralHeadPose, calibratingHead = false)
+	fun setWindowSide(side: FlightCabinSide) {
+		setWindowPlacement(uiState.windowPlacement.copy(side = side))
+	}
+
+	fun setWindowZoom(zoom: Float) {
+		setWindowPlacement(uiState.windowPlacement.copy(zoom = zoom), persist = false)
+	}
+
+	fun changeWindowZoom(factor: Float) {
+		setWindowZoom(uiState.windowPlacement.zoom * factor.coerceIn(0.75f, 1.35f))
+	}
+
+	fun setCabinTransparent(transparent: Boolean) {
+		setWindowPlacement(uiState.windowPlacement.copy(cabinTransparent = transparent))
+	}
+
+	private fun setWindowPlacement(placement: FlightWindowPlacement, persist: Boolean = true) {
+		val safePlacement = placement.clamped()
+		if (persist) windowPlacementStore.save(safePlacement)
+		uiState = uiState.copy(windowPlacement = safePlacement)
+	}
+
+	fun setMapFollowing(following: Boolean) {
+		if (uiState.mapFollowing != following) {
+			uiState = uiState.copy(mapFollowing = following)
+		}
 	}
 
 	fun setShowTrackPoints(show: Boolean) {
@@ -404,5 +436,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
 		private const val TERRAIN_RELOAD_RADIUS_FRACTION = 0.32
 		private const val MINIMUM_RELOAD_DISTANCE_KM = 20.0
+		private const val MINIMUM_WINDOW_ALTITUDE_METERS = -500f
+		private const val MAXIMUM_WINDOW_ALTITUDE_METERS = 15_000f
 	}
 }

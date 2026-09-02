@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import net.osmand.Location
 import net.osmand.plus.shared.SharedUtil
+import net.osmand.shared.gpx.GpxFile
 import net.osmand.shared.gpx.primitives.WptPt
 import java.io.IOException
 
@@ -17,7 +18,16 @@ object FlightTripLoader {
 			SharedUtil.loadGpxFile(input)
 		}
 			?: throw IOException("Impossible d’ouvrir ce fichier")
+		return load(gpxFile, displayName)
+	}
+
+	@Throws(IOException::class)
+	fun load(gpxFile: GpxFile, sourceName: String? = null): FlightTrip {
 		gpxFile.error?.let { throw IOException(it.message ?: "Fichier GPX invalide") }
+		val displayName = sourceName?.takeIf { it.isNotBlank() }
+			?: gpxFile.metadata.name?.takeIf { it.isNotBlank() }
+			?: gpxFile.path.substringAfterLast('/').substringAfterLast('\\').takeIf { it.isNotBlank() }
+			?: "Trace OsmAnd"
 
 		val samples = mutableListOf<FlightSample>()
 		val legs = mutableListOf<FlightLeg>()

@@ -1,6 +1,5 @@
 package net.osmand.test.junit
 
-import net.osmand.plus.plugins.flightmode.FlightHeadPose
 import net.osmand.plus.plugins.flightmode.FlightLeg
 import net.osmand.plus.plugins.flightmode.FlightPlan
 import net.osmand.plus.plugins.flightmode.FlightProfilePlanner
@@ -14,6 +13,8 @@ import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
 import net.osmand.plus.plugins.flightmode.FlightTerrainMeshBuilder
 import net.osmand.plus.plugins.flightmode.FlightTerrainTilePlanner
 import net.osmand.plus.plugins.flightmode.FlightTrip
+import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
+import net.osmand.plus.plugins.flightmode.geometry
 import net.osmand.plus.plugins.flightmode.TerrainTileId
 import net.osmand.plus.plugins.flightmode.TerrainTilePlan
 import net.osmand.plus.plugins.flightmode.TerrariumCodec
@@ -72,11 +73,32 @@ class FlightModeLogicTest {
 	}
 
 	@Test
-	fun headPoseIsBoundedToPlausibleEyeBox() {
-		val pose = FlightHeadPose(2f, -2f, 0.01f).clamped()
-		assertEquals(FlightHeadPose.MAX_HORIZONTAL_METERS, pose.horizontalMeters, 0f)
-		assertEquals(-FlightHeadPose.MAX_VERTICAL_METERS, pose.verticalMeters, 0f)
-		assertEquals(FlightHeadPose.MIN_DISTANCE_METERS, pose.distanceMeters, 0f)
+	fun windowPlacementIsBoundedToPlausibleCabinGeometry() {
+		val placement = FlightWindowPlacement(
+			forwardOffsetMeters = 2f,
+			verticalOffsetMeters = -2f,
+			zoom = 12f
+		).clamped()
+		assertEquals(FlightWindowPlacement.MAX_FORWARD_OFFSET_METERS, placement.forwardOffsetMeters, 0f)
+		assertEquals(FlightWindowPlacement.MIN_VERTICAL_OFFSET_METERS, placement.verticalOffsetMeters, 0f)
+		assertEquals(FlightWindowPlacement.MAX_ZOOM, placement.zoom, 0f)
+	}
+
+	@Test
+	fun windowGeometryDrivesAnObliqueViewTowardTheWindowCenter() {
+		val centered = FlightWindowPlacement().geometry()
+		assertEquals((-Math.PI / 2.0).toFloat(), centered.relativeAzimuthRadians, 0.0001f)
+		assertEquals(0f, centered.elevationRadians, 0f)
+		assertEquals(1f, centered.horizontalIncidence, 0f)
+
+		val aheadAndAbove = FlightWindowPlacement(
+			forwardOffsetMeters = 0.60f,
+			verticalOffsetMeters = 0.20f
+		).geometry()
+		assertTrue(kotlin.math.abs(aheadAndAbove.relativeAzimuthRadians) < (Math.PI / 2.0).toFloat())
+		assertTrue(aheadAndAbove.elevationRadians > 0f)
+		assertTrue(aheadAndAbove.horizontalIncidence < 1f)
+		assertTrue(aheadAndAbove.verticalIncidence < 1f)
 	}
 
 	@Test

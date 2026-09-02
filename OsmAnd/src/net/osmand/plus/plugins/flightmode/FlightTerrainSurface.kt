@@ -8,7 +8,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun FlightTerrainSurface(
 	scene: FlightTerrainScene?,
 	sample: FlightSample?,
-	pose: FlightHeadPose,
+	windowPlacement: FlightWindowPlacement,
+	altitudeOverrideMeters: Float?,
 	shadingEnabled: Boolean,
 	onRendererError: (String) -> Unit,
 	modifier: Modifier = Modifier
@@ -20,7 +21,8 @@ fun FlightTerrainSurface(
 			view.updateScene(
 				scene = scene,
 				sample = sample,
-				pose = pose,
+				windowPlacement = windowPlacement,
+				altitudeOverrideMeters = altitudeOverrideMeters,
 				shadingEnabled = shadingEnabled,
 				onRendererError = onRendererError
 			)

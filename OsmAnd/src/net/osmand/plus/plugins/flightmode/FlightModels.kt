@@ -1,5 +1,7 @@
 package net.osmand.plus.plugins.flightmode
 
+import kotlin.math.atan2
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -7,6 +9,8 @@ enum class FlightPage {
 	PREPARE,
 	MAP,
 	WINDOW,
+	WINDOW_SETUP,
+	SATELLITE,
 	SENSORS,
 	PHOTO
 }
@@ -15,6 +19,67 @@ enum class FlightSessionMode {
 	PREPARE,
 	LIVE,
 	REPLAY
+}
+
+enum class FlightCabinSide {
+	LEFT,
+	RIGHT
+}
+
+data class FlightWindowPlacement(
+	val side: FlightCabinSide = FlightCabinSide.LEFT,
+	val forwardOffsetMeters: Float = 0f,
+	val verticalOffsetMeters: Float = 0f,
+	val zoom: Float = 1f,
+	val cabinTransparent: Boolean = false
+) {
+	fun clamped(): FlightWindowPlacement = copy(
+		forwardOffsetMeters = forwardOffsetMeters.coerceIn(MIN_FORWARD_OFFSET_METERS, MAX_FORWARD_OFFSET_METERS),
+		verticalOffsetMeters = verticalOffsetMeters.coerceIn(MIN_VERTICAL_OFFSET_METERS, MAX_VERTICAL_OFFSET_METERS),
+		zoom = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+	)
+
+	companion object {
+		const val WINDOW_DIAMETER_METERS = 0.25f
+		const val WALL_DISTANCE_METERS = 0.35f
+		const val DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES = 58f
+		const val MIN_FORWARD_OFFSET_METERS = -0.90f
+		const val MAX_FORWARD_OFFSET_METERS = 1.10f
+		const val MIN_VERTICAL_OFFSET_METERS = -0.55f
+		const val MAX_VERTICAL_OFFSET_METERS = 0.55f
+		const val MIN_ZOOM = 0.65f
+		const val MAX_ZOOM = 4f
+	}
+}
+
+data class FlightWindowGeometry(
+	val lateralOffsetMeters: Float,
+	val horizontalDistanceMeters: Float,
+	val eyeToWindowDistanceMeters: Float,
+	val relativeAzimuthRadians: Float,
+	val elevationRadians: Float,
+	val horizontalIncidence: Float,
+	val verticalIncidence: Float
+)
+
+fun FlightWindowPlacement.geometry(): FlightWindowGeometry {
+	val placement = clamped()
+	val lateralOffset = if (placement.side == FlightCabinSide.RIGHT) {
+		FlightWindowPlacement.WALL_DISTANCE_METERS
+	} else {
+		-FlightWindowPlacement.WALL_DISTANCE_METERS
+	}
+	val horizontalDistance = hypot(lateralOffset, placement.forwardOffsetMeters)
+	val eyeToWindowDistance = hypot(horizontalDistance, placement.verticalOffsetMeters)
+	return FlightWindowGeometry(
+		lateralOffsetMeters = lateralOffset,
+		horizontalDistanceMeters = horizontalDistance,
+		eyeToWindowDistanceMeters = eyeToWindowDistance,
+		relativeAzimuthRadians = atan2(lateralOffset, placement.forwardOffsetMeters),
+		elevationRadians = atan2(placement.verticalOffsetMeters, horizontalDistance),
+		horizontalIncidence = FlightWindowPlacement.WALL_DISTANCE_METERS / horizontalDistance,
+		verticalIncidence = horizontalDistance / eyeToWindowDistance
+	)
 }
 
 data class FlightStop(
@@ -63,6 +128,7 @@ data class FlightSample(
 	val satellitesUsed: Int? = null,
 	val satellitesFound: Int? = null,
 	val soundDb: Float? = null,
+	val soundSpectrum: List<Float>? = null,
 	val vibrationHz: Float? = null
 )
 
@@ -123,25 +189,6 @@ data class FlightProfile(
 	val totalDurationMinutes: Int
 )
 
-data class FlightHeadPose(
-	val horizontalMeters: Float = 0f,
-	val verticalMeters: Float = 0f,
-	val distanceMeters: Float = 0.18f
-) {
-	fun clamped(): FlightHeadPose = copy(
-		horizontalMeters = horizontalMeters.coerceIn(-MAX_HORIZONTAL_METERS, MAX_HORIZONTAL_METERS),
-		verticalMeters = verticalMeters.coerceIn(-MAX_VERTICAL_METERS, MAX_VERTICAL_METERS),
-		distanceMeters = distanceMeters.coerceIn(MIN_DISTANCE_METERS, MAX_DISTANCE_METERS)
-	)
-
-	companion object {
-		const val MAX_HORIZONTAL_METERS = 0.35f
-		const val MAX_VERTICAL_METERS = 0.25f
-		const val MIN_DISTANCE_METERS = 0.08f
-		const val MAX_DISTANCE_METERS = 0.80f
-	}
-}
-
 data class FlightRecordingPolicy(
 	val cruisePointDistanceMeters: Float = 1_000f,
 	val maximumStraightIntervalSeconds: Float = 20f,
@@ -182,9 +229,9 @@ data class FlightUiState(
 	val tripLoadError: String? = null,
 	val terrainStatus: FlightTerrainStatus = FlightTerrainStatus(),
 	val terrainScene: FlightTerrainScene? = null,
-	val headPose: FlightHeadPose = FlightHeadPose(),
-	val neutralHeadPose: FlightHeadPose = FlightHeadPose(),
-	val calibratingHead: Boolean = false,
+	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
+	val windowAltitudeOverrideMeters: Float? = null,
+	val mapFollowing: Boolean = true,
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),
 	val showTrackPoints: Boolean = false,
 	val photoMainCamera: Boolean = true,

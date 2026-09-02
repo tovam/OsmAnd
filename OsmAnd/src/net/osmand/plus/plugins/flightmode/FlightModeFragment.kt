@@ -2,7 +2,9 @@ package net.osmand.plus.plugins.flightmode
 
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,8 +16,10 @@ import net.osmand.Location
 import net.osmand.plus.OsmAndLocationProvider.OsmAndLocationListener
 import net.osmand.plus.R
 import net.osmand.plus.base.BaseFullScreenFragment
+import net.osmand.plus.track.SelectTrackTabsFragment
 import net.osmand.plus.utils.AndroidUtils
 import net.osmand.plus.utils.InsetTargetsCollection
+import net.osmand.plus.views.OsmandMapTileView
 
 class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
@@ -23,6 +27,26 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var previousHudVisibility = View.VISIBLE
 	private var previousMapState: MapState? = null
 	private var lastMapRefreshMillis = 0L
+	private var mapInteractionBlockerLayer: FlightMapInteractionBlockerLayer? = null
+	private var mapTouchDownX = 0f
+	private var mapTouchDownY = 0f
+	private val mapTouchSlop by lazy { ViewConfiguration.get(requireContext()).scaledTouchSlop.toFloat() }
+	private val mapTouchListener = OsmandMapTileView.TouchListener { event ->
+		when (event.actionMasked) {
+			MotionEvent.ACTION_DOWN -> {
+				mapTouchDownX = event.x
+				mapTouchDownY = event.y
+			}
+			MotionEvent.ACTION_POINTER_DOWN -> viewModel.setMapFollowing(false)
+			MotionEvent.ACTION_MOVE -> {
+				val deltaX = event.x - mapTouchDownX
+				val deltaY = event.y - mapTouchDownY
+				if (event.pointerCount > 1 || deltaX * deltaX + deltaY * deltaY >= mapTouchSlop * mapTouchSlop) {
+					viewModel.setMapFollowing(false)
+				}
+			}
+		}
+	}
 
 	private val openTripLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
 		if (uri != null) viewModel.loadTrip(uri)
@@ -31,7 +55,11 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private val backPressedCallback = object : OnBackPressedCallback(true) {
 		override fun handleOnBackPressed() {
 			when (viewModel.uiState.page) {
-				FlightPage.WINDOW, FlightPage.SENSORS, FlightPage.PHOTO -> viewModel.showPage(FlightPage.MAP)
+				FlightPage.WINDOW_SETUP -> {
+					viewModel.saveWindowPlacement()
+					viewModel.showPage(FlightPage.WINDOW)
+				}
+				FlightPage.WINDOW, FlightPage.SATELLITE, FlightPage.SENSORS, FlightPage.PHOTO -> viewModel.showPage(FlightPage.MAP)
 				FlightPage.MAP, FlightPage.PREPARE -> close()
 			}
 		}
@@ -61,6 +89,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 							)
 						)
 					},
+					onSelectInternalTrack = ::openInternalTrack,
 					onStartLive = {
 						viewModel.startLive()
 						app.locationProvider.lastKnownLocation?.let {
@@ -78,13 +107,16 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onToggleReplay = viewModel::toggleReplayPlaying,
 					onAdvanceReplay = viewModel::advanceReplay,
 					onMapSample = ::showSampleOnMap,
-					onMoveHead = viewModel::moveHead,
-					onSetHeadDistance = viewModel::setHeadDistance,
-					onSetHeadCalibration = viewModel::setHeadCalibration,
-					onSaveNeutralHead = viewModel::saveNeutralHeadPose,
-					onRecenterHead = viewModel::recenterHead,
+					onSetWindowAltitudeOverride = viewModel::setWindowAltitudeOverride,
+					onMoveWindow = viewModel::moveWindow,
+					onSaveWindowPlacement = viewModel::saveWindowPlacement,
+					onSetWindowSide = viewModel::setWindowSide,
+					onSetWindowZoom = viewModel::setWindowZoom,
+					onChangeWindowZoom = viewModel::changeWindowZoom,
+					onSetCabinTransparent = viewModel::setCabinTransparent,
 					onRetryTerrain = viewModel::retryTerrain,
 					onTerrainRendererError = viewModel::setTerrainRendererError,
+					onSetMapFollowing = viewModel::setMapFollowing,
 					onShowTrackPoints = viewModel::setShowTrackPoints,
 					onSetRecordingPolicy = viewModel::setRecordingPolicy,
 					onSetPhotoSources = viewModel::setPhotoSources
@@ -101,12 +133,15 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		previousHudVisibility = hud.visibility
 		hud.visibility = View.GONE
 		captureMapState()
+		installMapInteractionGuard()
 		app.locationProvider.addLocationListener(this)
 		activity.refreshMap()
 	}
 
 	override fun onPause() {
 		app.locationProvider.removeLocationListener(this)
+		viewModel.saveWindowPlacement()
+		removeMapInteractionGuard()
 		restoreMapState()
 		val activity = requireMapActivity()
 		activity.findViewById<View>(R.id.map_hud_container).visibility = previousHudVisibility
@@ -124,6 +159,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	override fun getInsetTargets(): InsetTargetsCollection = InsetTargetsCollection()
 
 	private fun showSampleOnMap(sample: FlightSample) {
+		if (!viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
 		mapView.setLatLon(sample.latitude, sample.longitude)
 		mapView.setElevationAngle(55f)
@@ -132,6 +168,31 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 			lastMapRefreshMillis = now
 			mapView.refreshMap()
 		}
+	}
+
+	private fun openInternalTrack() {
+		SelectTrackTabsFragment.showInstance(
+			parentFragmentManager,
+			SelectTrackTabsFragment.GpxFileSelectionListener { gpxFile -> viewModel.loadTrip(gpxFile) }
+		)
+	}
+
+	private fun installMapInteractionGuard() {
+		val mapView = app.osmandMap.mapView
+		mapView.addTouchListener(mapTouchListener)
+		if (mapInteractionBlockerLayer == null) {
+			FlightMapInteractionBlockerLayer(requireContext()).also { layer ->
+				mapView.addLayer(layer, MAP_INTERACTION_BLOCKER_Z_ORDER)
+				mapInteractionBlockerLayer = layer
+			}
+		}
+	}
+
+	private fun removeMapInteractionGuard() {
+		val mapView = app.osmandMap.mapView
+		mapView.removeTouchListener(mapTouchListener)
+		mapInteractionBlockerLayer?.let(mapView::removeLayer)
+		mapInteractionBlockerLayer = null
 	}
 
 	private fun captureMapState() {
@@ -173,6 +234,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	companion object {
 		private const val TAG = "FlightModeFragment"
 		private const val MAP_REFRESH_INTERVAL_MILLIS = 250L
+		private const val MAP_INTERACTION_BLOCKER_Z_ORDER = 1_000f
 
 		fun showInstance(manager: FragmentManager) {
 			if (AndroidUtils.isFragmentCanBeAdded(manager, TAG)) {

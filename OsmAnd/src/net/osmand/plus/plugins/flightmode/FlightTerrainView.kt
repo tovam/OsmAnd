@@ -41,12 +41,13 @@ class FlightTerrainView @JvmOverloads constructor(
 	fun updateScene(
 		scene: FlightTerrainScene?,
 		sample: FlightSample?,
-		pose: FlightHeadPose,
+		windowPlacement: FlightWindowPlacement,
+		altitudeOverrideMeters: Float?,
 		shadingEnabled: Boolean,
 		onRendererError: (String) -> Unit
 	) {
 		rendererErrorListener = onRendererError
-		terrainRenderer.update(scene, sample, pose, shadingEnabled)
+		terrainRenderer.update(scene, sample, windowPlacement, altitudeOverrideMeters, shadingEnabled)
 		requestRender()
 	}
 
@@ -59,7 +60,9 @@ class FlightTerrainView @JvmOverloads constructor(
 		@Volatile
 		private var sample: FlightSample? = null
 		@Volatile
-		private var pose: FlightHeadPose = FlightHeadPose()
+		private var windowPlacement: FlightWindowPlacement = FlightWindowPlacement()
+		@Volatile
+		private var altitudeOverrideMeters: Float? = null
 		@Volatile
 		private var shadingEnabled: Boolean = true
 
@@ -104,12 +107,14 @@ class FlightTerrainView @JvmOverloads constructor(
 		fun update(
 			scene: FlightTerrainScene?,
 			sample: FlightSample?,
-			pose: FlightHeadPose,
+			windowPlacement: FlightWindowPlacement,
+			altitudeOverrideMeters: Float?,
 			shadingEnabled: Boolean
 		) {
 			this.scene = scene
 			this.sample = sample
-			this.pose = pose.clamped()
+			this.windowPlacement = windowPlacement.clamped()
+			this.altitudeOverrideMeters = altitudeOverrideMeters
 			this.shadingEnabled = shadingEnabled
 		}
 
@@ -164,6 +169,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			}
 			val currentScene = scene
 			val currentSample = sample
+			val currentWindowPlacement = windowPlacement
 			val latitude = currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
 			val longitude = currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
 			val sun = FlightSunPosition.direction(
@@ -200,24 +206,29 @@ class FlightTerrainView @JvmOverloads constructor(
 			clearDefaultFrameBuffer(sky)
 
 			val ground = currentScene.centerGroundElevationMeters ?: 0f
-			val reportedAltitude = currentSample?.altitudeMeters?.toFloat() ?: DEFAULT_FLIGHT_ALTITUDE_METERS
+			val reportedAltitude = altitudeOverrideMeters
+				?: currentSample?.altitudeMeters?.toFloat()
+				?: DEFAULT_FLIGHT_ALTITUDE_METERS
 			val altitude = max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
 			val coordinates = FlightTerrainCoordinates(currentScene.centerLatitude, currentScene.centerLongitude)
 			val camera = coordinates.toLocal(latitude, longitude, altitude.toDouble())
 			val bearing = currentSample?.bearingDegrees ?: DEFAULT_BEARING_DEGREES
-			val viewAzimuth = Math.toRadians((bearing + RIGHT_WINDOW_OFFSET_DEGREES).toDouble())
-			val directionX = sin(viewAzimuth).toFloat()
-			val directionZ = (-cos(viewAzimuth)).toFloat()
+			val geometry = currentWindowPlacement.geometry()
+			val viewAzimuth = Math.toRadians(bearing.toDouble()) + geometry.relativeAzimuthRadians
+			val horizontalDirection = cos(geometry.elevationRadians)
+			val directionX = (sin(viewAzimuth) * horizontalDirection).toFloat()
+			val directionY = sin(geometry.elevationRadians)
+			val directionZ = (-cos(viewAzimuth) * horizontalDirection).toFloat()
 
 			val view = FloatArray(16)
 			Matrix.setLookAtM(
 				view,
 				0,
 				camera[0], camera[1], camera[2],
-				camera[0] + directionX, camera[1], camera[2] + directionZ,
+				camera[0] + directionX, camera[1] + directionY, camera[2] + directionZ,
 				0f, 1f, 0f
 			)
-			val projection = offAxisProjection(pose, currentScene.radiusKm)
+			val projection = windowProjection(currentWindowPlacement, currentScene.radiusKm)
 			val mvp = FloatArray(16)
 			Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
 
@@ -256,19 +267,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 		}
 
-		private fun offAxisProjection(pose: FlightHeadPose, radiusKm: Int): FloatArray {
+		private fun windowProjection(placement: FlightWindowPlacement, radiusKm: Int): FloatArray {
 			val projection = FloatArray(16)
 			val aspect = surfaceWidth.toFloat() / surfaceHeight
-			val halfWindowHeight = WINDOW_HALF_SIZE_METERS
-			val halfWindowWidth = halfWindowHeight * aspect
-			val distance = pose.distanceMeters.coerceAtLeast(FlightHeadPose.MIN_DISTANCE_METERS)
-			val scale = NEAR_PLANE_METERS / distance
-			val left = (-halfWindowWidth - pose.horizontalMeters) * scale
-			val right = (halfWindowWidth - pose.horizontalMeters) * scale
-			val bottom = (-halfWindowHeight + pose.verticalMeters) * scale
-			val top = (halfWindowHeight + pose.verticalMeters) * scale
 			val far = max(MINIMUM_FAR_PLANE_METERS, radiusKm * 1_000f * 2.2f)
-			Matrix.frustumM(projection, 0, left, right, bottom, top, NEAR_PLANE_METERS, far)
+			val fieldOfView = (FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / placement.zoom)
+				.coerceIn(MINIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES, MAXIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES)
+			Matrix.perspectiveM(projection, 0, fieldOfView, aspect, NEAR_PLANE_METERS, far)
 			return projection
 		}
 
@@ -581,8 +586,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val DEFAULT_FLIGHT_ALTITUDE_METERS = 10_000f
 			private const val MINIMUM_GROUND_CLEARANCE_METERS = 60f
 			private const val DEFAULT_BEARING_DEGREES = 0f
-			private const val RIGHT_WINDOW_OFFSET_DEGREES = 90f
-			private const val WINDOW_HALF_SIZE_METERS = 0.125f
+			private const val MINIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES = 14f
+			private const val MAXIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES = 82f
 			private const val NEAR_PLANE_METERS = 10f
 			private const val MINIMUM_FAR_PLANE_METERS = 750_000f
 			private const val SKY_RED = 0.22f
