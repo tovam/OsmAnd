@@ -2,6 +2,7 @@
 <resources>
 	<string name="flight_mode_name">Suivi de vol</string>
 	<string name="flight_mode_description">Enregistrement continu, instruments, vue hublot et relecture d’un vol.</string>
+	<string name="flight_mode_osmand_map">Carte OsmAnd</string>
 	<string name="flight_mode_prepare">Préparer le vol</string>
 	<string name="flight_mode_live">Direct</string>
 	<string name="flight_mode_replay">Replay</string>
@@ -28,10 +29,10 @@
 	<string name="flight_mode_terrain_source">Relief Terrain Tiles + satellite Sentinel-2</string>
 	<string name="flight_mode_preload_terrain">Enregistrer hors ligne</string>
 	<string name="flight_mode_preload_current_track">Hors ligne</string>
-	<string name="flight_mode_preload_explanation">Télécharge le relief et le satellite Standard du corridor, puis les rattache au Journal de vol. Haute et Ultra restent des rendus locaux régénérables.</string>
+	<string name="flight_mode_preload_explanation">Automatique : le relief et le satellite Standard du corridor sont enregistrés avec le Journal. Haute, Ultra et Ultra+ restent des rendus locaux régénérables.</string>
 	<string name="flight_mode_terrain_loading">Chargement…</string>
 	<string name="flight_mode_terrain_attribution">Relief Terrain Tiles © Mapzen · Satellite Sentinel-2 cloudless — s2maps.eu par EOX IT Services GmbH (données Copernicus Sentinel modifiées 2016–2017).</string>
-	<string name="flight_mode_satellite_attribution_short">Satellite : Sentinel-2 cloudless · s2maps.eu / EOX · Copernicus 2016–2017</string>
+	<string name="flight_mode_satellite_attribution_short">Carte : OsmAnd / © contributeurs OpenStreetMap · Satellite : Sentinel-2 cloudless / EOX / Copernicus</string>
 	<string name="flight_mode_map">Carte</string>
 	<string name="flight_mode_window">Hublot</string>
 	<string name="flight_mode_window_setup">Position du hublot</string>
@@ -67,6 +68,7 @@
 	<string name="flight_mode_satellite_quality_standard">Standard</string>
 	<string name="flight_mode_satellite_quality_high">Haute</string>
 	<string name="flight_mode_satellite_quality_ultra">Ultra</string>
+	<string name="flight_mode_satellite_quality_ultra_plus">Ultra+</string>
 	<string name="flight_mode_sensors">Capteurs</string>
 	<string name="flight_mode_photo">Photo+</string>
 	<string name="flight_mode_altitude">Altitude</string>
@@ -130,7 +132,7 @@
 	<string name="flight_mode_take_photo">Prendre la photo horodatée</string>
 	<string name="flight_mode_live_photo_help">La photo est liée à son heure exacte. Position, cap, carte, relief et capteurs pourront être reconstruits depuis le voyage enregistré.</string>
 	<string name="flight_mode_replay_photos">Photos du replay</string>
-	<string name="flight_mode_replay_photo_help">Ajoute les photos prises pendant ce trajet. Leur date EXIF les place automatiquement sur la chronologie ; vérifie puis valide l’association.</string>
+	<string name="flight_mode_replay_photo_help">Ajoute les photos prises pendant ce trajet. L’heure est cherchée dans l’EXIF, le nom du fichier, puis ses dates ; vérifie ensuite l’association proposée.</string>
 	<string name="flight_mode_add_gallery_photos">Ajouter des photos de la galerie</string>
 	<string name="flight_mode_photos_to_confirm">%1$d photo(s) à confirmer</string>
 	<string name="flight_mode_confirm_photos">Valider les associations</string>
@@ -140,6 +142,8 @@
 	<string name="flight_mode_photo_not_matched">Non associée</string>
 	<string name="flight_mode_open_photo_window">Revoir ce moment dans Hublot</string>
 	<string name="flight_mode_photo_match_by_time">Associer par l’heure</string>
+	<string name="flight_mode_photo_match_at">Associer à %1$s</string>
+	<string name="flight_mode_photo_match_automatically">Associer automatiquement</string>
 	<string name="flight_mode_photo_match_here">Associer ici</string>
 	<string name="flight_mode_photo_open_map">Voir sur la carte</string>
 	<string name="flight_mode_photo_open_window">Voir dans Hublot</string>
@@ -149,6 +153,13 @@
 	<string name="flight_mode_photo_details">Informations associées</string>
 	<string name="flight_mode_photo_file">Fichier</string>
 	<string name="flight_mode_photo_date">Date</string>
+	<string name="flight_mode_photo_date_source">Heure détectée via</string>
+	<string name="flight_mode_photo_date_source_exif">EXIF</string>
+	<string name="flight_mode_photo_date_source_media">Date de prise Android</string>
+	<string name="flight_mode_photo_date_source_filename">Nom du fichier</string>
+	<string name="flight_mode_photo_date_source_modified">Date de modification</string>
+	<string name="flight_mode_photo_date_source_added">Date d’ajout</string>
+	<string name="flight_mode_photo_date_source_live">Prise Photo+ en direct</string>
 	<string name="flight_mode_photo_file_size">Taille</string>
 	<string name="flight_mode_photo_position">Position</string>
 	<string name="flight_mode_photo_timeline">Chronologie</string>
@@ -182,6 +193,7 @@
 	<string name="flight_mode_storage_terrain">Relief brut Terrarium</string>
 	<string name="flight_mode_storage_satellite_sources">Images satellite téléchargées</string>
 	<string name="flight_mode_storage_satellite_render">Textures satellite calculées</string>
+	<string name="flight_mode_storage_osmand_map_render">Textures carte OsmAnd calculées</string>
 	<string name="flight_mode_storage_graphics">Éléments graphiques embarqués</string>
 	<string name="flight_mode_storage_other">Fichiers temporaires / autres</string>
 	<string name="flight_mode_storage_total">Total Suivi de vol</string>

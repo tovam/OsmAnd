@@ -150,7 +150,6 @@ fun FlightModeScreen(
 	onAddStop: () -> Unit,
 	onRemoveStop: (Int) -> Unit,
 	onUpdatePlan: (FlightPlan) -> Unit,
-	onPreloadTerrain: () -> Unit,
 	onSeekReplay: (Float) -> Unit,
 	onToggleReplay: () -> Unit,
 	onAdvanceReplay: (Long) -> Unit,
@@ -175,6 +174,7 @@ fun FlightModeScreen(
 	onRemoveFlightSpan: (Int) -> Unit,
 	onSetSatelliteOpacity: (Float) -> Unit,
 	onSetTerrainOpacity: (Float) -> Unit,
+	onSetNativeMapOpacity: (Float) -> Unit,
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
 	onSetRecordingPolicy: (FlightRecordingPolicy) -> Unit,
 	onSetPhotoSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit,
@@ -229,10 +229,14 @@ fun FlightModeScreen(
 				(state.photos + state.pendingPhotos).sortedWith(PHOTO_TIME_COMPARATOR)
 			)
 		}
-		LaunchedEffect(state.page, state.terrainScene, state.terrainStatus.phase) {
-			if ((state.page == FlightPage.WINDOW || state.page == FlightPage.SATELLITE) && state.terrainScene == null &&
-				(state.terrainStatus.phase == FlightTerrainPhase.IDLE || state.terrainStatus.phase == FlightTerrainPhase.READY)
-			) {
+		LaunchedEffect(state.page, state.terrainScene, state.terrainStatus.phase, state.nativeMapOpacity) {
+			val terrainPage = state.page == FlightPage.WINDOW || state.page == FlightPage.SATELLITE
+			val idle = state.terrainStatus.phase == FlightTerrainPhase.IDLE ||
+				state.terrainStatus.phase == FlightTerrainPhase.READY
+			val missingScene = terrainPage && state.terrainScene == null && idle
+			val missingNativeMap = state.page == FlightPage.SATELLITE && state.nativeMapOpacity > 0f &&
+				state.terrainScene?.nativeMapRequested == false && state.terrainStatus.phase == FlightTerrainPhase.READY
+			if (missingScene || missingNativeMap) {
 				onRetryTerrain()
 			}
 		}
@@ -272,7 +276,6 @@ fun FlightModeScreen(
 					onAddStop = onAddStop,
 					onRemoveStop = onRemoveStop,
 					onUpdatePlan = onUpdatePlan,
-					onPreloadTerrain = onPreloadTerrain,
 					onOpenJourney = onOpenJourney
 				)
 				FlightPage.MAP -> MapScreen(
@@ -321,8 +324,8 @@ fun FlightModeScreen(
 					onChangeZoom = onChangeWindowZoom,
 					onSetSatelliteOpacity = onSetSatelliteOpacity,
 					onSetTerrainOpacity = onSetTerrainOpacity,
+					onSetNativeMapOpacity = onSetNativeMapOpacity,
 					onSetSatelliteQuality = onSetSatelliteQuality,
-					onPreloadTerrain = onPreloadTerrain,
 					onRetryTerrain = onRetryTerrain,
 					onTerrainRendererError = onTerrainRendererError
 				)
@@ -470,7 +473,6 @@ private fun PrepareScreen(
 	onAddStop: () -> Unit,
 	onRemoveStop: (Int) -> Unit,
 	onUpdatePlan: (FlightPlan) -> Unit,
-	onPreloadTerrain: () -> Unit,
 	onOpenJourney: (String) -> Unit
 ) {
 	val focusManager = LocalFocusManager.current
@@ -566,7 +568,7 @@ private fun PrepareScreen(
 					checked = state.plan.resumeAfterRestart,
 					onChecked = { onUpdatePlan(state.plan.copy(resumeAfterRestart = it)) }
 				)
-				TerrainPreloadControl(state.terrainStatus, onPreloadTerrain)
+				TerrainPreloadStatus(state.offlinePreloadStatus)
 				Text(
 					text = stringResource(R.string.flight_mode_terrain_attribution),
 					color = FlightMuted,
@@ -894,7 +896,6 @@ private fun WindowScreen(
 				altitudeOverrideMeters = state.windowAltitudeOverrideMeters,
 				shadingEnabled = state.plan.shadowsEnabled,
 				satelliteOpacity = state.satelliteOpacity,
-				terrainOpacity = state.terrainOpacity,
 				onSetSide = onSetSide,
 				onMoveLook = onMoveLook,
 				onRecenterLook = onRecenterLook,
@@ -1041,8 +1042,8 @@ private fun SatelliteScreen(
 	onChangeZoom: (Float) -> Unit,
 	onSetSatelliteOpacity: (Float) -> Unit,
 	onSetTerrainOpacity: (Float) -> Unit,
+	onSetNativeMapOpacity: (Float) -> Unit,
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
-	onPreloadTerrain: () -> Unit,
 	onRetryTerrain: () -> Unit,
 	onTerrainRendererError: (String) -> Unit
 ) {
@@ -1107,9 +1108,11 @@ private fun SatelliteScreen(
 			quality = state.plan.satelliteQuality,
 			satelliteOpacity = state.satelliteOpacity,
 			terrainOpacity = state.terrainOpacity,
+			nativeMapOpacity = state.nativeMapOpacity,
 			onSetQuality = onSetSatelliteQuality,
 			onSetSatelliteOpacity = onSetSatelliteOpacity,
-			onSetTerrainOpacity = onSetTerrainOpacity
+			onSetTerrainOpacity = onSetTerrainOpacity,
+			onSetNativeMapOpacity = onSetNativeMapOpacity
 		)
 		Row(
 			Modifier.fillMaxWidth().height(43.dp).background(FlightPanelStrong).padding(horizontal = 9.dp),
@@ -1117,8 +1120,8 @@ private fun SatelliteScreen(
 		) {
 			Column(Modifier.weight(1f)) {
 				Text(
-					terrainStatusText(state.terrainStatus),
-					color = if (state.terrainStatus.phase == FlightTerrainPhase.ERROR) FlightWarning else FlightMuted,
+					terrainStatusText(state.offlinePreloadStatus),
+					color = if (state.offlinePreloadStatus.phase == FlightTerrainPhase.ERROR) FlightWarning else FlightMuted,
 					fontSize = 8.sp,
 					maxLines = 1,
 					overflow = TextOverflow.Ellipsis
@@ -1131,11 +1134,6 @@ private fun SatelliteScreen(
 					overflow = TextOverflow.Ellipsis
 				)
 			}
-			CompactAction(
-				text = stringResource(R.string.flight_mode_preload_current_track).uppercase(),
-				color = FlightOrange,
-				onClick = onPreloadTerrain
-			)
 		}
 		FlightBottomNavigation(FlightPage.SATELLITE, onPageChange)
 	}
@@ -1195,6 +1193,7 @@ private fun FlightTerrainExplorer(
 			shadingEnabled = state.plan.shadowsEnabled,
 			satelliteOpacity = state.satelliteOpacity,
 			terrainOpacity = state.terrainOpacity,
+			nativeMapOpacity = state.nativeMapOpacity,
 			onRendererError = onRendererError,
 			modifier = Modifier.fillMaxSize()
 		)
@@ -1218,14 +1217,17 @@ private fun SatelliteBlendControls(
 	quality: FlightSatelliteQuality,
 	satelliteOpacity: Float,
 	terrainOpacity: Float,
+	nativeMapOpacity: Float,
 	onSetQuality: (FlightSatelliteQuality) -> Unit,
 	onSetSatelliteOpacity: (Float) -> Unit,
-	onSetTerrainOpacity: (Float) -> Unit
+	onSetTerrainOpacity: (Float) -> Unit,
+	onSetNativeMapOpacity: (Float) -> Unit
 ) {
 	Column(Modifier.fillMaxWidth().background(FlightPanelStrong).border(1.dp, FlightLine)) {
 		SatelliteQualitySelector(quality, onSetQuality)
 		CompactBlendSlider(stringResource(R.string.flight_mode_satellite).uppercase(), satelliteOpacity, FlightBlue, onSetSatelliteOpacity)
 		CompactBlendSlider(stringResource(R.string.flight_mode_relief).uppercase(), terrainOpacity, FlightOrange, onSetTerrainOpacity)
+		CompactBlendSlider(stringResource(R.string.flight_mode_osmand_map).uppercase(), nativeMapOpacity, FlightGreen, onSetNativeMapOpacity)
 	}
 }
 
@@ -1260,6 +1262,7 @@ private fun SatelliteQualitySelector(
 						FlightSatelliteQuality.STANDARD -> stringResource(R.string.flight_mode_satellite_quality_standard)
 						FlightSatelliteQuality.HIGH -> stringResource(R.string.flight_mode_satellite_quality_high)
 						FlightSatelliteQuality.ULTRA -> stringResource(R.string.flight_mode_satellite_quality_ultra)
+						FlightSatelliteQuality.ULTRA_PLUS -> stringResource(R.string.flight_mode_satellite_quality_ultra_plus)
 					},
 					color = if (selected) FlightBlue else FlightText,
 					fontSize = 8.sp,
@@ -1526,7 +1529,9 @@ private fun PhotoAssociationControls(
 	Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
 		Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
 			CompactAction(
-				stringResource(R.string.flight_mode_photo_match_by_time).uppercase(),
+				photo.timestampMillis?.let { timestamp ->
+					stringResource(R.string.flight_mode_photo_match_at, formatClock(timestamp)).uppercase()
+				} ?: stringResource(R.string.flight_mode_photo_match_automatically).uppercase(),
 				FlightBlue,
 				{ onAssociateAutomatically(photo.id) },
 				Modifier.weight(1f)
@@ -1635,6 +1640,21 @@ private fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSamp
 			stringResource(R.string.flight_mode_photo_date),
 			photo.timestampMillis?.let(::formatDateTime) ?: stringResource(R.string.flight_mode_photo_without_date)
 		)
+		photo.timestampSource?.let { source ->
+			PhotoMetadataLine(
+				stringResource(R.string.flight_mode_photo_date_source),
+				stringResource(
+					when (source) {
+						FlightPhotoTimestampSource.EXIF -> R.string.flight_mode_photo_date_source_exif
+						FlightPhotoTimestampSource.MEDIA_CAPTURE -> R.string.flight_mode_photo_date_source_media
+						FlightPhotoTimestampSource.FILE_NAME -> R.string.flight_mode_photo_date_source_filename
+						FlightPhotoTimestampSource.FILE_MODIFIED -> R.string.flight_mode_photo_date_source_modified
+						FlightPhotoTimestampSource.FILE_ADDED -> R.string.flight_mode_photo_date_source_added
+						FlightPhotoTimestampSource.LIVE_CAPTURE -> R.string.flight_mode_photo_date_source_live
+					}
+				)
+			)
+		}
 		PhotoMetadataLine(stringResource(R.string.flight_mode_photo_file_size), formatStorageBytes(fileSize))
 		if (sample == null) {
 			PhotoMetadataLine(
@@ -1862,6 +1882,7 @@ private fun FlightStorageUsageTable(usage: FlightStorageUsage) {
 		StorageRow(stringResource(R.string.flight_mode_storage_terrain), usage.terrainBytes)
 		StorageRow(stringResource(R.string.flight_mode_storage_satellite_sources), usage.satelliteSourceBytes)
 		StorageRow(stringResource(R.string.flight_mode_storage_satellite_render), usage.satelliteRenderBytes)
+		StorageRow(stringResource(R.string.flight_mode_storage_osmand_map_render), usage.nativeMapRenderBytes)
 		StorageRow(stringResource(R.string.flight_mode_storage_graphics), usage.graphicsBytes)
 		if (usage.otherBytes > 0L) StorageRow(stringResource(R.string.flight_mode_storage_other), usage.otherBytes)
 		Row(
@@ -2242,7 +2263,7 @@ private fun SwitchSettingRow(title: String, checked: Boolean, onChecked: (Boolea
 }
 
 @Composable
-private fun TerrainPreloadControl(status: FlightTerrainStatus, onPreload: () -> Unit) {
+private fun TerrainPreloadStatus(status: FlightTerrainStatus) {
 	val working = status.phase == FlightTerrainPhase.PLANNING ||
 		status.phase == FlightTerrainPhase.DOWNLOADING ||
 		status.phase == FlightTerrainPhase.BUILDING
@@ -2252,12 +2273,6 @@ private fun TerrainPreloadControl(status: FlightTerrainStatus, onPreload: () -> 
 				Text(stringResource(R.string.flight_mode_terrain_source), color = FlightText, fontSize = 13.sp)
 				Text(terrainStatusText(status), color = if (status.phase == FlightTerrainPhase.ERROR) FlightWarning else FlightMuted, fontSize = 11.sp)
 			}
-			FlatButton(
-				text = if (working) stringResource(R.string.flight_mode_terrain_loading) else stringResource(R.string.flight_mode_preload_terrain),
-				modifier = Modifier.width(132.dp),
-				accent = false,
-				onClick = { if (!working) onPreload() }
-			)
 		}
 		if (working && status.requestedTiles > 0) {
 			LinearProgressIndicator(
@@ -2398,7 +2413,6 @@ private fun FlightWindowScene(
 	altitudeOverrideMeters: Float?,
 	shadingEnabled: Boolean,
 	satelliteOpacity: Float,
-	terrainOpacity: Float,
 	onSetSide: (FlightCabinSide) -> Unit,
 	onMoveLook: (Float, Float) -> Unit,
 	onRecenterLook: () -> Unit,
@@ -2440,7 +2454,10 @@ private fun FlightWindowScene(
 			altitudeOverrideMeters = altitudeOverrideMeters,
 			shadingEnabled = shadingEnabled,
 			satelliteOpacity = satelliteOpacity,
-			terrainOpacity = terrainOpacity,
+			// The window view still uses the Terrarium mesh for the real terrain shape,
+			// but the procedural relief colours belong exclusively to Satellite et 3D.
+			terrainOpacity = 0f,
+			nativeMapOpacity = 0f,
 			onRendererError = onRendererError,
 			modifier = Modifier.fillMaxSize()
 		)
@@ -2465,15 +2482,15 @@ private fun FlightWindowScene(
 					.aspectRatio(1f),
 				factory = { context -> FlightWindowOverviewView(context) },
 				update = { overview ->
-						overview.update(
-							trip = trip,
-							sample = sample,
-							viewAzimuthDegrees = placement.viewAzimuthDegrees(sample.bearingDegrees ?: 0f, look),
-							viewConeDegrees = placement.horizontalFieldOfViewDegrees(sceneAspectRatio),
-							quality = scene?.satelliteQuality ?: FlightSatelliteQuality.HIGH,
-							cacheKey = "${scene?.satelliteQuality}:${terrainStatus.phase}:${terrainStatus.zoom}:" +
-								"${terrainStatus.satelliteTiles}:${terrainStatus.availableTiles}"
-						)
+					overview.update(
+						trip = trip,
+						sample = sample,
+						viewAzimuthDegrees = placement.viewAzimuthDegrees(sample.bearingDegrees ?: 0f, look),
+						viewConeDegrees = placement.horizontalFieldOfViewDegrees(sceneAspectRatio),
+						quality = scene?.satelliteQuality ?: FlightSatelliteQuality.HIGH,
+						cacheKey = "${scene?.satelliteQuality}:${terrainStatus.phase}:${terrainStatus.zoom}:" +
+							"${terrainStatus.satelliteTiles}:${terrainStatus.availableTiles}"
+					)
 				}
 			)
 		}
@@ -3169,7 +3186,7 @@ private fun terrainStatusText(status: FlightTerrainStatus): String = when (statu
 		status.zoom?.let { append(" · z$it") }
 		if (status.bytesDownloaded > 0L) append(" · ${formatDataSize(status.bytesDownloaded)}")
 	}
-	FlightTerrainPhase.BUILDING -> "Construction du maillage GPU…"
+	FlightTerrainPhase.BUILDING -> status.message ?: "Construction du maillage GPU…"
 	FlightTerrainPhase.READY -> status.message ?: "Relief disponible hors ligne"
 	FlightTerrainPhase.ERROR -> status.message ?: "Relief indisponible"
 }
@@ -3242,13 +3259,13 @@ private fun FlightModePreview(state: FlightUiState) {
 		state = state,
 		onClose = {}, onPageChange = {}, onImportTrip = {}, onSelectInternalTrack = {}, onStartLive = {},
 		onUpdateStop = { _, _ -> }, onSelectCity = { _, _ -> }, onDismissCitySuggestions = {},
-		onAddStop = {}, onRemoveStop = {}, onUpdatePlan = {}, onPreloadTerrain = {},
+		onAddStop = {}, onRemoveStop = {}, onUpdatePlan = {},
 		onSeekReplay = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapState = { _, _, _, _ -> },
 		onSetWindowAltitudeOverride = {}, onMoveWindow = { _, _ -> }, onSaveWindowPlacement = {}, onSetWindowSide = {},
 		onMoveWindowLook = { _, _ -> }, onRecenterWindowLook = {}, onSetWindowZoom = {}, onChangeWindowZoom = {}, onSetCabinTransparent = {}, onSetCabinHidden = {},
 		onRetryTerrain = {}, onTerrainRendererError = {}, onSetMapFollowing = {}, onShowTrackPoints = {},
 		onMarkFlightStart = {}, onMarkFlightEnd = {}, onCancelFlightStart = {}, onRemoveFlightSpan = {},
-		onSetSatelliteOpacity = {}, onSetTerrainOpacity = {}, onSetSatelliteQuality = {},
+		onSetSatelliteOpacity = {}, onSetTerrainOpacity = {}, onSetNativeMapOpacity = {}, onSetSatelliteQuality = {},
 		onSetRecordingPolicy = {}, onSetPhotoSources = { _, _, _, _ -> },
 		onPhotoAction = {}, onValidatePhotos = {}, onDiscardPhotos = {}, onSelectPhoto = {},
 		onAssociatePhotoAutomatically = {}, onAssociatePhotoAtCurrentReplay = {},

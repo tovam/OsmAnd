@@ -14,6 +14,7 @@ fun FlightTerrainSurface(
 	shadingEnabled: Boolean,
 	satelliteOpacity: Float,
 	terrainOpacity: Float,
+	nativeMapOpacity: Float,
 	onRendererError: (String) -> Unit,
 	modifier: Modifier = Modifier
 ) {
@@ -30,6 +31,7 @@ fun FlightTerrainSurface(
 				shadingEnabled = shadingEnabled,
 				satelliteOpacity = satelliteOpacity,
 				terrainOpacity = terrainOpacity,
+				nativeMapOpacity = nativeMapOpacity,
 				onRendererError = onRendererError
 			)
 		}

@@ -17,13 +17,22 @@ object FlightTerrainMeshBuilder {
 		plan: TerrainTilePlan,
 		tiles: Map<TerrainTileId, TerrariumTile>,
 		satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
-		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap()
+		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+		nativeMapTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+		nativeMapFailedTiles: Int = 0,
+		nativeMapRequested: Boolean = nativeMapTexturePaths.isNotEmpty()
 	): FlightTerrainScene {
 		val projection = FlightTerrainCoordinates(centerLatitude, centerLongitude)
 		val sampler = TileElevationSampler(plan.zoom, tiles)
 		val meshes = plan.tiles.mapNotNull { tileId ->
 			val tile = tiles[tileId] ?: return@mapNotNull null
-			buildTileMesh(tile, sampler, projection, satelliteTexturePaths[tileId])
+			buildTileMesh(
+				tile,
+				sampler,
+				projection,
+				satelliteTexturePaths[tileId],
+				nativeMapTexturePaths[tileId]
+			)
 		}
 		val centerGround = sampler.elevationAt(
 			FlightTerrainTilePlanner.longitudeToTileX(centerLongitude, plan.zoom),
@@ -40,6 +49,9 @@ object FlightTerrainMeshBuilder {
 			loadedTiles = tiles.size,
 			missingTiles = (plan.tiles.size - tiles.size).coerceAtLeast(0),
 			satelliteTiles = satelliteTexturePaths.size,
+			nativeMapTiles = nativeMapTexturePaths.size,
+			nativeMapFailedTiles = nativeMapFailedTiles,
+			nativeMapRequested = nativeMapRequested,
 			centerGroundElevationMeters = centerGround
 		)
 	}
@@ -48,7 +60,8 @@ object FlightTerrainMeshBuilder {
 		tile: TerrariumTile,
 		sampler: TileElevationSampler,
 		projection: FlightTerrainCoordinates,
-		satelliteTexturePath: String?
+		satelliteTexturePath: String?,
+		nativeMapTexturePath: String?
 	): FlightTerrainMesh {
 		val vertices = FloatArray(GRID_SIZE * GRID_SIZE * VERTEX_COMPONENTS)
 		for (row in 0 until GRID_SIZE) {
@@ -86,7 +99,12 @@ object FlightTerrainMeshBuilder {
 				indices[indexOffset++] = bottomRight.toShort()
 			}
 		}
-		return FlightTerrainMesh(vertices, indices, satelliteTexturePath)
+		return FlightTerrainMesh(
+			vertices = vertices,
+			indices = indices,
+			satelliteTexturePath = satelliteTexturePath,
+			nativeMapTexturePath = nativeMapTexturePath
+		)
 	}
 
 	private fun calculateNormals(vertices: FloatArray) {

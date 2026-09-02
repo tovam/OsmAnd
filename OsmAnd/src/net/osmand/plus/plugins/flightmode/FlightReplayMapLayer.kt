@@ -25,6 +25,8 @@ import net.osmand.util.MapUtils
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -57,8 +59,12 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private var pointMarkersCollection: MapMarkersCollection? = null
 	private var photoMarkersCollection: MapMarkersCollection? = null
 	private var aircraftLinesCollection: VectorLinesCollection? = null
+	private var aircraftMarkerCollection: MapMarkersCollection? = null
+	private var aircraftMarker: MapMarker? = null
+	private var aircraftMarkerSample: FlightSample? = null
 	private var aircraftVisualLengthMeters = Double.NaN
 	private var aircraftGroundAltitudeMeters = Float.NaN
+	private var lastAircraftVectorUpdateMillis = 0L
 
 	fun update(
 		trip: FlightTrip?,
@@ -107,21 +113,25 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		if (routeGeometryDirty) rebuildRoute(current.trip)
 		if (pointGeometryDirty) rebuildRecordedPoints(current.trip, current.showPoints)
 		if (photoGeometryDirty) rebuildPhotoMarkers(current.trip, current.photos)
-		val visualLengthMeters = aircraftLengthMeters(tileBox)
+		val visualLengthMeters = aircraftLengthMeters(tileBox, current.sample)
 		val groundAltitudeMeters = current.sample?.let { sample ->
 			renderer.getLocationHeightInMeters(point31(sample))
 				.takeIf { it > NativeUtilities.MIN_ALTITUDE_VALUE }
 		} ?: 0f
 		if (aircraftScaleChanged(visualLengthMeters)) aircraftDirty = true
 		if (aircraftGroundChanged(groundAltitudeMeters)) aircraftDirty = true
-		if (aircraftDirty) {
+		updateAircraftMarker(current.trip, current.sample)
+		val now = android.os.SystemClock.uptimeMillis()
+		if (aircraftDirty && (current.sample == null || now - lastAircraftVectorUpdateMillis >= AIRCRAFT_VECTOR_UPDATE_INTERVAL_MILLIS)) {
 			updateAircraft(current.trip, current.sample, visualLengthMeters, groundAltitudeMeters)
+			lastAircraftVectorUpdateMillis = now
 		}
 
 		routeLinesCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		pointMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		photoMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		aircraftLinesCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
+		aircraftMarkerCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 	}
 
 	private fun rebuildRoute(trip: FlightTrip?) {
@@ -141,7 +151,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			if (range.last - range.first < 1) continue
 			val points = QVectorPointI()
 			val heights = QListFloat()
-			for (index in range) {
+			for (index in sampledIndices(range, MAXIMUM_ROUTE_POINTS)) {
 				points.add(point31(samples[index]))
 				heights.add(nativeHeights[index])
 			}
@@ -166,6 +176,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				points = points,
 				heights = heights
 			)
+			lineId = buildCorridorFramework(collection, lineId, lineScale, samples, range)
 		}
 		if (collection.getLinesCount() > 0) routeLinesCollection = collection
 		routeGeometryDirty = false
@@ -198,6 +209,96 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			.setJointStyle(VectorLine.JointStyle.ROUND.swigValue())
 			.setApproximationEnabled(false)
 			.buildAndAddToCollection(collection)
+	}
+
+	private fun buildCorridorFramework(
+		collection: VectorLinesCollection,
+		firstLineId: Int,
+		lineScale: Double,
+		samples: List<FlightSample>,
+		range: IntRange
+	): Int {
+		var lineId = firstLineId
+		val railIndices = sampledIndices(range, MAXIMUM_CORRIDOR_RAIL_POINTS)
+		for (rail in 0 until CORRIDOR_RAIL_COUNT) {
+			val angle = rail * 2.0 * PI / CORRIDOR_RAIL_COUNT
+			val points = QVectorPointI()
+			val heights = QListFloat()
+			railIndices.forEach { index ->
+				val radius = corridorRadius(nativeHeights[index])
+				val lateralMeters = cos(angle) * radius
+				val verticalMeters = sin(angle) * radius
+				val bearing = bearingAt(samples, index).toDouble()
+				val direction = bearing + if (lateralMeters >= 0.0) 90.0 else -90.0
+				val location = destination(
+					LatLon(samples[index].latitude, samples[index].longitude),
+					abs(lateralMeters),
+					direction
+				)
+				points.add(point31(location))
+				heights.add(max(VISUAL_CLEARANCE_METERS, nativeHeights[index] + verticalMeters.toFloat()))
+			}
+			buildTubeStroke(
+				collection, lineId++, baseOrder - 2,
+				CORRIDOR_RAIL_WIDTH_DP * lineScale, CORRIDOR_RAIL_COLOR, points, heights
+			)
+		}
+
+		val ringIndices = sampledIndices(range, MAXIMUM_CORRIDOR_RINGS)
+		ringIndices.forEach { index ->
+			val points = QVectorPointI()
+			val heights = QListFloat()
+			val radius = corridorRadius(nativeHeights[index])
+			val bearing = bearingAt(samples, index).toDouble()
+			for (segment in 0..CORRIDOR_RING_SEGMENTS) {
+				val angle = segment * 2.0 * PI / CORRIDOR_RING_SEGMENTS
+				val lateralMeters = cos(angle) * radius
+				val verticalMeters = sin(angle) * radius
+				val direction = bearing + if (lateralMeters >= 0.0) 90.0 else -90.0
+				val location = destination(
+					LatLon(samples[index].latitude, samples[index].longitude),
+					abs(lateralMeters),
+					direction
+				)
+				points.add(point31(location))
+				heights.add(max(VISUAL_CLEARANCE_METERS, nativeHeights[index] + verticalMeters.toFloat()))
+			}
+			buildTubeStroke(
+				collection, lineId++, baseOrder - 3,
+				CORRIDOR_RING_WIDTH_DP * lineScale, CORRIDOR_RING_COLOR, points, heights
+			)
+		}
+		return lineId
+	}
+
+	private fun sampledIndices(range: IntRange, maximumCount: Int): List<Int> {
+		val count = range.last - range.first + 1
+		if (count <= maximumCount) return range.toList()
+		val step = ceil((count - 1) / (maximumCount - 1).toDouble()).toInt().coerceAtLeast(1)
+		return buildList {
+			var index = range.first
+			while (index <= range.last) {
+				add(index)
+				index += step
+			}
+			if (lastOrNull() != range.last) add(range.last)
+		}
+	}
+
+	private fun corridorRadius(heightMeters: Float): Double =
+		((heightMeters - VISUAL_CLEARANCE_METERS).coerceAtLeast(0f) * CORRIDOR_ALTITUDE_RADIUS_RATIO +
+			CORRIDOR_MINIMUM_RADIUS_METERS).coerceAtMost(CORRIDOR_MAXIMUM_RADIUS_METERS.toFloat()).toDouble()
+
+	private fun bearingAt(samples: List<FlightSample>, index: Int): Float {
+		samples[index].bearingDegrees?.let { return it }
+		val next = (index + 1..samples.lastIndex).firstOrNull { candidate ->
+			samples[candidate].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[candidate])
+		}
+		if (next != null) return FlightTrackMath.bearingBetween(samples[index], samples[next])
+		val previous = (index - 1 downTo 0).firstOrNull { candidate ->
+			samples[candidate].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[candidate])
+		}
+		return previous?.let { FlightTrackMath.bearingBetween(samples[it], samples[index]) } ?: 0f
 	}
 
 	private fun rebuildRecordedPoints(trip: FlightTrip?, showPoints: Boolean) {
@@ -277,7 +378,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		// MapMarker deliberately ignores height for Model3DMapSymbol in OsmAnd-core. Building the
 		// aircraft from elevated native vectors keeps its centre at the real geographic position
 		// instead of drawing a ground model that only appears displaced when the camera is tilted.
-		clearAircraftCollection()
+		clearAircraftLinesCollection()
 		aircraftVisualLengthMeters = visualLengthMeters
 		aircraftGroundAltitudeMeters = groundAltitudeMeters
 		if (sample == null || visualLengthMeters <= 0.0) {
@@ -336,6 +437,38 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		aircraftDirty = false
 	}
 
+	private fun updateAircraftMarker(trip: FlightTrip?, sample: FlightSample?) {
+		if (sample == null) {
+			aircraftMarker?.setIsHidden(true)
+			aircraftMarkerSample = null
+			return
+		}
+		if (aircraftMarker != null && aircraftMarkerSample == sample) return
+		val altitude = visualHeightForSample(trip, sample)
+		val marker = aircraftMarker ?: run {
+			val collection = aircraftMarkerCollection ?: MapMarkersCollection().also {
+				aircraftMarkerCollection = it
+			}
+			MapMarkerBuilder()
+				.setMarkerId(AIRCRAFT_MARKER_ID)
+				.setBaseOrder(pointsOrder - 8)
+				.setPosition(point31(sample))
+				.setHeight(altitude)
+				.setElevationScaleFactor(1f)
+				.setIsHidden(false)
+				.setIsAccuracyCircleSupported(false)
+				.setPinIconHorisontalAlignment(MapMarker.PinIconHorisontalAlignment.CenterHorizontal)
+				.setPinIconVerticalAlignment(MapMarker.PinIconVerticalAlignment.CenterVertical)
+				.setPinIcon(NativeUtilities.createSkImageFromBitmap(createAircraftMarkerBitmap()))
+				.buildAndAddToCollection(collection)
+				.also { aircraftMarker = it }
+		}
+		marker.setPosition(point31(sample))
+		marker.setHeight(altitude)
+		marker.setIsHidden(false)
+		aircraftMarkerSample = sample
+	}
+
 	private fun buildAircraftPart(
 		collection: VectorLinesCollection,
 		lineId: Int,
@@ -364,16 +497,22 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		return lineId + 2
 	}
 
-	private fun aircraftLengthMeters(tileBox: RotatedTileBox): Double {
-		val width = tileBox.pixWidth
-		val height = tileBox.pixHeight
-		if (width <= 1 || height <= 1) return AIRCRAFT_MINIMUM_LENGTH_METERS
+	private fun aircraftLengthMeters(tileBox: RotatedTileBox, sample: FlightSample?): Double {
+		val currentTileBox = view?.currentRotatedTileBox?.takeIf { it.pixWidth > 1 && it.pixHeight > 1 } ?: tileBox
+		val width = currentTileBox.pixWidth
+		val height = currentTileBox.pixHeight
+		if (width <= 1 || height <= 1) return AIRCRAFT_FALLBACK_LENGTH_METERS
 		val sampleWidth = width.coerceAtMost(AIRCRAFT_SCALE_SAMPLE_PIXELS)
 		val centerX = width / 2
 		val centerY = height / 2
 		val left = centerX - sampleWidth / 2
 		val right = centerX + sampleWidth / 2
-		val metersPerPixel = tileBox.getDistance(left, centerY, right, centerY) / sampleWidth
+		val measuredMetersPerPixel = currentTileBox.getDistance(left, centerY, right, centerY) / sampleWidth
+		val metersPerPixel = measuredMetersPerPixel.takeIf { it.isFinite() && it > 0.0 } ?: run {
+			val latitude = sample?.latitude ?: currentTileBox.centerLatLon.latitude
+			MapUtils.getTileDistanceWidth(latitude, currentTileBox.fullZoom.toFloat()) /
+				(256.0 * currentTileBox.mapDensity.coerceAtLeast(0.1))
+		}
 		// The aircraft is native world geometry rather than a billboard. Convert its requested
 		// screen size to metres at every zoom so it remains readable. The upper bound only guards
 		// pathological whole-world views; the previous 60 km cap reduced it to a few pixels on the
@@ -504,6 +643,42 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		}
 	}
 
+	private fun createAircraftMarkerBitmap(): Bitmap {
+		val scale = context.resources.displayMetrics.density.coerceAtLeast(1f)
+		val size = (AIRCRAFT_MARKER_BITMAP_DP * scale).roundToInt().coerceAtLeast(48)
+		return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
+			val canvas = Canvas(bitmap)
+			val center = size / 2f
+			val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+				color = Color.argb(220, 255, 139, 56)
+				style = Paint.Style.STROKE
+				strokeWidth = size * 0.055f
+			}
+			val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+				color = Color.argb(225, 5, 12, 16)
+				style = Paint.Style.STROKE
+				strokeWidth = size * 0.13f
+				strokeCap = Paint.Cap.ROUND
+				strokeJoin = Paint.Join.ROUND
+			}
+			val plane = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+				color = Color.WHITE
+				style = Paint.Style.STROKE
+				strokeWidth = size * 0.07f
+				strokeCap = Paint.Cap.ROUND
+				strokeJoin = Paint.Join.ROUND
+			}
+			canvas.drawCircle(center, center, size * 0.43f, ring)
+			fun drawAircraft(paint: Paint) {
+				canvas.drawLine(center, size * 0.17f, center, size * 0.79f, paint)
+				canvas.drawLine(size * 0.20f, size * 0.49f, size * 0.80f, size * 0.49f, paint)
+				canvas.drawLine(size * 0.37f, size * 0.72f, size * 0.63f, size * 0.72f, paint)
+			}
+			drawAircraft(halo)
+			drawAircraft(plane)
+		}
+	}
+
 	private fun estimatedFlightAltitude(progress: Float): Float {
 		val arc = sin(progress.coerceIn(0f, 1f) * PI).toFloat().coerceAtLeast(0f)
 		return UNKNOWN_ENDPOINT_ALTITUDE_METERS + arc * UNKNOWN_CRUISE_ALTITUDE_METERS
@@ -565,6 +740,15 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 
 	private fun clearAircraftCollection() {
 		val renderer = mapRenderer
+		clearAircraftLinesCollection()
+		aircraftMarkerCollection?.let { renderer?.removeSymbolsProvider(it) }
+		aircraftMarkerCollection = null
+		aircraftMarker = null
+		aircraftMarkerSample = null
+	}
+
+	private fun clearAircraftLinesCollection() {
+		val renderer = mapRenderer
 		aircraftLinesCollection?.let { renderer?.removeSymbolsProvider(it) }
 		aircraftLinesCollection = null
 	}
@@ -578,6 +762,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		nativeHeights = FloatArray(0)
 		aircraftVisualLengthMeters = Double.NaN
 		aircraftGroundAltitudeMeters = Float.NaN
+		lastAircraftVectorUpdateMillis = 0L
 	}
 
 	override fun cleanupResources() {
@@ -591,12 +776,23 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 
 	companion object {
 		private const val MAXIMUM_NATIVE_POINTS = 1_200
+		private const val MAXIMUM_ROUTE_POINTS = 4_000
+		private const val MAXIMUM_CORRIDOR_RAIL_POINTS = 800
+		private const val MAXIMUM_CORRIDOR_RINGS = 28
+		private const val CORRIDOR_RAIL_COUNT = 6
+		private const val CORRIDOR_RING_SEGMENTS = 12
 		private const val TUBE_SLEEVE_WIDTH_DP = 10.5
 		private const val TUBE_CORE_WIDTH_DP = 5.5
+		private const val CORRIDOR_RAIL_WIDTH_DP = 1.4
+		private const val CORRIDOR_RING_WIDTH_DP = 1.25
+		private const val CORRIDOR_ALTITUDE_RADIUS_RATIO = 0.04f
+		private const val CORRIDOR_MINIMUM_RADIUS_METERS = 24f
+		private const val CORRIDOR_MAXIMUM_RADIUS_METERS = 520.0
 		private const val POINT_BITMAP_DP = 10f
 		private const val PHOTO_BITMAP_DP = 26f
 		private const val PHOTO_MARKER_CLEARANCE_METERS = 36f
-		private const val AIRCRAFT_LENGTH_DP = 52.0
+		private const val AIRCRAFT_LENGTH_DP = 96.0
+		private const val AIRCRAFT_MARKER_BITMAP_DP = 70f
 		private const val AIRCRAFT_BODY_WIDTH_DP = 5.0
 		private const val AIRCRAFT_WING_WIDTH_DP = 3.6
 		private const val AIRCRAFT_TAIL_WIDTH_DP = 3.1
@@ -604,10 +800,12 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val AIRCRAFT_SLEEVE_EXTRA_WIDTH_DP = 2.2
 		private const val AIRCRAFT_FIN_HEIGHT_RATIO = 0.11
 		private const val AIRCRAFT_MAXIMUM_FIN_HEIGHT_METERS = 1_200.0
-		private const val AIRCRAFT_SCALE_REBUILD_RATIO = 0.05
+		private const val AIRCRAFT_SCALE_REBUILD_RATIO = 0.20
 		private const val AIRCRAFT_SCALE_SAMPLE_PIXELS = 160
 		private const val AIRCRAFT_MINIMUM_LENGTH_METERS = 45.0
+		private const val AIRCRAFT_FALLBACK_LENGTH_METERS = 4_000.0
 		private const val AIRCRAFT_MAXIMUM_LENGTH_METERS = 6_000_000.0
+		private const val AIRCRAFT_VECTOR_UPDATE_INTERVAL_MILLIS = 200L
 		private const val TETHER_WIDTH_DP = 1.7
 		private const val TETHER_HORIZONTAL_OFFSET_METERS = 0.10
 		private const val TETHER_GROUND_CLEARANCE_METERS = 1.5f
@@ -621,9 +819,12 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val MAX_ALTITUDE_METERS = 30_000.0
 		private const val REPLAY_POINTS_Z_ORDER = 998.5f
 		private const val AIRCRAFT_LINE_ID_START = 2_000_000_000
+		private const val AIRCRAFT_MARKER_ID = 1_999_999_999
 		private const val PHOTO_MARKER_ID_START = 1_900_000_000
 		private val TUBE_SLEEVE_COLOR = Color.argb(230, 6, 15, 20)
 		private val TUBE_CORE_COLOR = Color.rgb(255, 145, 58)
+		private val CORRIDOR_RAIL_COLOR = Color.argb(150, 255, 184, 100)
+		private val CORRIDOR_RING_COLOR = Color.argb(112, 255, 202, 142)
 		private val POINT_COLOR = Color.rgb(93, 216, 255)
 		private val PHOTO_COLOR = Color.rgb(255, 204, 102)
 		private val AIRCRAFT_SLEEVE_COLOR = Color.argb(238, 6, 15, 20)

@@ -122,7 +122,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onAddStop = viewModel::addStop,
 					onRemoveStop = viewModel::removeStop,
 					onUpdatePlan = viewModel::updatePlan,
-					onPreloadTerrain = viewModel::preloadTerrain,
 					onSeekReplay = viewModel::seekReplay,
 					onToggleReplay = viewModel::toggleReplayPlaying,
 					onAdvanceReplay = viewModel::advanceReplay,
@@ -147,6 +146,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onRemoveFlightSpan = viewModel::removeFlightSpan,
 					onSetSatelliteOpacity = viewModel::setSatelliteOpacity,
 					onSetTerrainOpacity = viewModel::setTerrainOpacity,
+					onSetNativeMapOpacity = viewModel::setNativeMapOpacity,
 					onSetSatelliteQuality = viewModel::setSatelliteQuality,
 					onSetRecordingPolicy = viewModel::setRecordingPolicy,
 					onSetPhotoSources = viewModel::setPhotoSources,
@@ -189,7 +189,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		previousHudVisibility = hud.visibility
 		hud.visibility = View.GONE
 		captureMapState()
-		enableNativeFlightRelief()
+		disableNativeFlightRelief()
 		suppressSurfaceGpxTracks()
 		installMapInteractionGuard()
 		startLocationUpdates()
@@ -353,21 +353,27 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	}
 
 	/**
-	 * Reuse OsmAnd's native heightmap provider in the regular Map tab when the
-	 * device already has OsmAnd elevation packages. The preference is restored on
-	 * exit; our Terrarium PNG cache remains the source for Hublot/Satellite.
+	 * The native OsmAnd relief is deliberately hidden throughout the flight fragment.
+	 * Its green tiles otherwise bleed through the regular map and coastal water. The
+	 * dedicated renderer applies the visible relief layer only in Satellite et 3D;
+	 * Hublot keeps the terrain geometry without those relief colours. Restore the
+	 * user's global OsmAnd setting on exit.
 	 */
-	private fun enableNativeFlightRelief() {
+	private fun disableNativeFlightRelief() {
 		if (previous3DMapsEnabled != null) return
 		previous3DMapsEnabled = app.settings.ENABLE_3D_MAPS.get()
-		if (previous3DMapsEnabled != true) app.settings.ENABLE_3D_MAPS.set(true)
-		NativeCoreContext.getMapRendererContext()?.recreateHeightmapProvider()
+		if (previous3DMapsEnabled == true) {
+			app.settings.ENABLE_3D_MAPS.set(false)
+			NativeCoreContext.getMapRendererContext()?.recreateHeightmapProvider()
+		}
 	}
 
 	private fun restoreNativeReliefSetting() {
 		val previous = previous3DMapsEnabled ?: return
-		if (app.settings.ENABLE_3D_MAPS.get() != previous) app.settings.ENABLE_3D_MAPS.set(previous)
-		NativeCoreContext.getMapRendererContext()?.recreateHeightmapProvider()
+		if (app.settings.ENABLE_3D_MAPS.get() != previous) {
+			app.settings.ENABLE_3D_MAPS.set(previous)
+			NativeCoreContext.getMapRendererContext()?.recreateHeightmapProvider()
+		}
 		previous3DMapsEnabled = null
 		flightMapViewInitialized = false
 	}

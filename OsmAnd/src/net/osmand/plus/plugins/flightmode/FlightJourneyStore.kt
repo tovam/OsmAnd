@@ -2,6 +2,7 @@ package net.osmand.plus.plugins.flightmode
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import net.osmand.IndexConstants
@@ -24,6 +25,10 @@ import kotlin.math.abs
 
 /** Persists one editable flight log and exports a portable archive. */
 class FlightJourneyStore(private val context: Context) {
+	private data class DetectedPhotoTimestamp(
+		val timestampMillis: Long,
+		val source: FlightPhotoTimestampSource
+	)
 
 	private val journeysDirectory = File(context.filesDir, JOURNEYS_DIRECTORY).also { it.mkdirs() }
 	private val mediaDirectory = File(context.filesDir, MEDIA_DIRECTORY).also { it.mkdirs() }
@@ -60,7 +65,8 @@ class FlightJourneyStore(private val context: Context) {
 		val terrainBytes = treeSize(File(context.filesDir, TERRARIUM_DIRECTORY))
 		val satelliteSourceBytes = treeSize(File(context.filesDir, FlightSatelliteSource.CACHE_DIRECTORY))
 		val satelliteRenderBytes = treeSize(File(context.filesDir, FlightSatelliteSource.RENDER_CACHE_DIRECTORY))
-		val categorizedTerrainBytes = terrainBytes + satelliteSourceBytes + satelliteRenderBytes
+		val nativeMapRenderBytes = treeSize(File(context.filesDir, FlightNativeMapTextureRepository.CACHE_DIRECTORY))
+		val categorizedTerrainBytes = terrainBytes + satelliteSourceBytes + satelliteRenderBytes + nativeMapRenderBytes
 		val otherTerrainBytes = (treeSize(terrainRoot) - categorizedTerrainBytes).coerceAtLeast(0L)
 		val allJournalBytes = treeSize(journeysDirectory)
 		val allPhotosBytes = treeSize(mediaDirectory)
@@ -82,6 +88,7 @@ class FlightJourneyStore(private val context: Context) {
 			terrainBytes = terrainBytes,
 			satelliteSourceBytes = satelliteSourceBytes,
 			satelliteRenderBytes = satelliteRenderBytes,
+			nativeMapRenderBytes = nativeMapRenderBytes,
 			graphicsBytes = assetTreeSize(FLIGHT_GRAPHICS_ASSET_DIRECTORY) + installedGraphicsBytes,
 			otherBytes = otherTerrainBytes + (allFlightFilesBytes - knownPrivateBytes).coerceAtLeast(0L)
 		)
@@ -321,13 +328,15 @@ class FlightJourneyStore(private val context: Context) {
 			context.contentResolver.openInputStream(uri)?.buffered()?.use { input ->
 				destination.outputStream().buffered().use { output -> input.copyTo(output) }
 			} ?: throw IOException("Photo inaccessible")
-			val timestamp = photoTimestamp(uri, destination)
+			val detectedTimestamp = photoTimestamp(uri, destination, originalName)
+			val timestamp = detectedTimestamp?.timestampMillis
 			FlightPhotoAttachment(
 				id = UUID.randomUUID().toString(),
 				fileName = originalName,
 				localPath = destination.absolutePath,
 				timestampMillis = timestamp,
-				matchedSampleIndex = matchSampleIndex(trip, timestamp)
+				matchedSampleIndex = matchSampleIndex(trip, timestamp),
+				timestampSource = detectedTimestamp?.source
 			)
 		}.getOrNull()
 	}
@@ -343,14 +352,18 @@ class FlightJourneyStore(private val context: Context) {
 		includeMap: Boolean,
 		includeScene3d: Boolean
 	): FlightPhotoAttachment {
-		val timestamp = runCatching { MediaMetadataUtils.getPhotoCreationTime(file) }.getOrNull()
-			?: fallbackTimestampMillis
+		val exifTimestamp = runCatching { MediaMetadataUtils.getPhotoCreationTime(file) }
+			.getOrNull()?.takeIf { it > 0L }
+		val timestamp = exifTimestamp ?: fallbackTimestampMillis
 		return FlightPhotoAttachment(
 			id = UUID.randomUUID().toString(),
 			fileName = file.name,
 			localPath = file.absolutePath,
 			timestampMillis = timestamp,
 			matchedSampleIndex = matchSampleIndex(trip, timestamp),
+			timestampSource = if (exifTimestamp != null) {
+				FlightPhotoTimestampSource.EXIF
+			} else FlightPhotoTimestampSource.LIVE_CAPTURE,
 			includeMainCamera = includeMainCamera,
 			includeSelfie = includeSelfie,
 			includeMap = includeMap,
@@ -393,6 +406,7 @@ class FlightJourneyStore(private val context: Context) {
 					put("fileName", photo.fileName)
 					put("storageName", photoStorageNames[photo.id] ?: File(photo.localPath).name)
 					putOptional("timestampMillis", photo.timestampMillis)
+					putOptional("timestampSource", photo.timestampSource?.name)
 					putOptional("matchedSampleIndex", photo.matchedSampleIndex)
 					put("includeMainCamera", photo.includeMainCamera)
 					put("includeSelfie", photo.includeSelfie)
@@ -416,6 +430,9 @@ class FlightJourneyStore(private val context: Context) {
 					localPath = photoPath(storageName),
 					timestampMillis = json.optNullableLong("timestampMillis"),
 					matchedSampleIndex = json.optNullableInt("matchedSampleIndex"),
+					timestampSource = json.optString("timestampSource").takeIf(String::isNotBlank)?.let { value ->
+						runCatching { FlightPhotoTimestampSource.valueOf(value) }.getOrNull()
+					},
 					includeMainCamera = json.optBoolean("includeMainCamera", true),
 					includeSelfie = json.optBoolean("includeSelfie", false),
 					includeMap = json.optBoolean("includeMap", true),
@@ -659,25 +676,71 @@ class FlightJourneyStore(private val context: Context) {
 		if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
 	}
 
-	private fun photoTimestamp(uri: Uri, copiedFile: File): Long? {
-		runCatching { MediaMetadataUtils.getPhotoCreationTime(copiedFile) }.getOrNull()?.let { return it }
-		return runCatching {
+	private fun photoTimestamp(uri: Uri, copiedFile: File, originalName: String): DetectedPhotoTimestamp? {
+		runCatching { MediaMetadataUtils.getPhotoCreationTime(copiedFile) }
+			.getOrNull()?.takeIf { it > 0L }?.let {
+				return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.EXIF)
+			}
+		val mediaDates = runCatching {
 			context.contentResolver.query(
 				uri,
-				arrayOf(MediaStore.Images.Media.DATE_TAKEN, MediaStore.MediaColumns.DATE_ADDED),
+				arrayOf(
+					MediaStore.Images.Media.DATE_TAKEN,
+					MediaStore.MediaColumns.DATE_MODIFIED,
+					MediaStore.MediaColumns.DATE_ADDED
+				),
 				null,
 				null,
 				null
 			)?.use { cursor ->
 				if (!cursor.moveToFirst()) return@use null
 				val takenColumn = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+				val modifiedColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
 				val addedColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED)
 				val taken = if (takenColumn >= 0 && !cursor.isNull(takenColumn)) cursor.getLong(takenColumn) else 0L
-				if (taken > 0L) taken else {
-					val addedSeconds = if (addedColumn >= 0 && !cursor.isNull(addedColumn)) cursor.getLong(addedColumn) else 0L
-					addedSeconds.takeIf { it > 0L }?.times(1_000L)
-				}
+				val modifiedSeconds = if (modifiedColumn >= 0 && !cursor.isNull(modifiedColumn)) cursor.getLong(modifiedColumn) else 0L
+				val addedSeconds = if (addedColumn >= 0 && !cursor.isNull(addedColumn)) cursor.getLong(addedColumn) else 0L
+				Triple(taken, modifiedSeconds * 1_000L, addedSeconds * 1_000L)
 			}
+		}.getOrNull()
+		mediaDates?.first?.takeIf { it > 0L }?.let {
+			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.MEDIA_CAPTURE)
+		}
+		photoTimestampFromFileName(originalName)?.let {
+			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_NAME)
+		}
+		val documentModified = runCatching {
+			context.contentResolver.query(
+				uri,
+				arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+				null,
+				null,
+				null
+			)?.use { cursor ->
+				val column = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+				if (column >= 0 && cursor.moveToFirst() && !cursor.isNull(column)) cursor.getLong(column) else 0L
+			}
+		}.getOrNull()?.takeIf { it > 0L }
+		(documentModified ?: mediaDates?.second)?.takeIf { it > 0L }?.let {
+			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_MODIFIED)
+		}
+		return mediaDates?.third?.takeIf { it > 0L }?.let {
+			DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_ADDED)
+		}
+	}
+
+	private fun photoTimestampFromFileName(fileName: String): Long? {
+		val compact = Regex("(?:^|[^0-9])(\\d{4})(\\d{2})(\\d{2})[_-]?(\\d{2})(\\d{2})(\\d{2})(?:\\d{3})?(?:[^0-9]|$)")
+			.find(fileName)
+			?.groupValues
+			?.drop(1)
+			?.joinToString("")
+		val separated = Regex(
+			"(?:^|[^0-9])(\\d{4})[-_.](\\d{2})[-_.](\\d{2})[ T_-](\\d{2})[-_.:](\\d{2})[-_.:](\\d{2})(?:[^0-9]|$)"
+		).find(fileName)?.groupValues?.drop(1)?.joinToString("")
+		val encoded = compact ?: separated ?: return null
+		return runCatching {
+			SimpleDateFormat("yyyyMMddHHmmss", Locale.US).apply { isLenient = false }.parse(encoded)?.time
 		}.getOrNull()
 	}
 

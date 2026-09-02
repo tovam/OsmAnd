@@ -252,21 +252,26 @@ class FlightModeLogicTest {
 	}
 
 	@Test
-	fun terrainMeshCarriesSatelliteUvCoordinatesAndTexturePath() {
+	fun terrainMeshCarriesDrapedTexturePathsAndSharedUvCoordinates() {
 		val zoom = 8
 		val tileId = TerrainTileId(zoom, 141, 95)
 		val tile = TerrariumTile(tileId, 256, 256, FloatArray(256 * 256) { 100f })
 		val texturePath = "/synthetic/satellite.jpg"
-		val mesh = FlightTerrainMeshBuilder.build(
+		val nativeMapTexturePath = "/synthetic/osmand-map.png"
+		val scene = FlightTerrainMeshBuilder.build(
 			centerLatitude = 42.0,
 			centerLongitude = 19.0,
 			radiusKm = 50,
 			plan = TerrainTilePlan(zoom, listOf(tileId)),
 			tiles = mapOf(tileId to tile),
-			satelliteTexturePaths = mapOf(tileId to texturePath)
-		).meshes.single()
+			satelliteTexturePaths = mapOf(tileId to texturePath),
+			nativeMapTexturePaths = mapOf(tileId to nativeMapTexturePath)
+		)
+		val mesh = scene.meshes.single()
 
 		assertEquals(texturePath, mesh.satelliteTexturePath)
+		assertEquals(nativeMapTexturePath, mesh.nativeMapTexturePath)
+		assertTrue(scene.nativeMapRequested)
 		assertEquals(0f, mesh.vertices[7], 0f)
 		assertEquals(0f, mesh.vertices[8], 0f)
 		val lastVertexOffset = (33 * 33 - 1) * FlightTerrainMeshBuilder.VERTEX_COMPONENTS

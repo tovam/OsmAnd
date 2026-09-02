@@ -30,6 +30,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private val journeyStore = FlightJourneyStore(application)
 	private var replayEngine: FlightReplayEngine? = null
 	private var terrainJob: Job? = null
+	private var offlinePreloadJob: Job? = null
 	private var storageJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var requestedTerrainCenter: Pair<Double, Double>? = null
@@ -56,6 +57,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun showPage(page: FlightPage) {
 		uiState = uiState.copy(page = page)
 		if (page == FlightPage.JOURNEYS) refreshStorageUsage()
+		if (page == FlightPage.SATELLITE && uiState.nativeMapOpacity > 0f &&
+			uiState.terrainScene?.nativeMapRequested == false
+		) {
+			(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
+		}
 	}
 
 	fun refreshStorageUsage() {
@@ -172,6 +178,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun startLive() {
+		offlinePreloadJob?.cancel()
 		pendingDuplicateTrip = null
 		replayEngine = null
 		liveSamples.clear()
@@ -197,6 +204,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyDirty = true,
 			photos = emptyList(),
 			offlineAssets = FlightOfflineAssets(),
+			offlinePreloadStatus = FlightTerrainStatus(),
 			pendingPhotos = emptyList(),
 			selectedPhotoId = null,
 			journeyMessage = null
@@ -357,6 +365,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyDirty = dirty,
 			photos = sortedPhotos,
 			offlineAssets = offlineAssets,
+			offlinePreloadStatus = FlightTerrainStatus(),
 			pendingPhotos = emptyList(),
 			selectedPhotoId = sortedPhotos.firstOrNull()?.id,
 			journeyMessage = message,
@@ -366,6 +375,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			savedJourneys = journeyStore.list()
 		)
 		firstSnapshot?.sample?.let(::requestTerrain)
+		if (hasOfflineCorridorSource()) scheduleAutomaticOfflinePreload()
 	}
 
 	private fun showTripLoadFailure(error: Throwable) {
@@ -436,6 +446,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (shouldRecordLiveSample(sample)) appendLiveSample(sample)
 		uiState = uiState.copy(snapshot = FlightSnapshot(sample, progress = 0f))
 		requestTerrain(sample)
+		if (uiState.offlinePreloadStatus.phase == FlightTerrainPhase.IDLE &&
+			offlinePreloadJob?.isActive != true && hasOfflineCorridorSource()
+		) {
+			scheduleAutomaticOfflinePreload()
+		}
 	}
 
 	fun updateEnvironment(reading: FlightEnvironmentReading) {
@@ -512,35 +527,54 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun preloadTerrain() {
-		terrainJob?.cancel()
-		terrainJob = viewModelScope.launch {
-			try {
-				val plan = uiState.plan
-				val trip = uiState.trip
-				val finalStatus = terrainRepository.preloadCorridor(plan, trip) { status ->
-					uiState = uiState.copy(terrainStatus = status)
-				}
-				val assets = if (trip != null) withContext(Dispatchers.IO) {
-					journeyStore.discoverOfflineAssets(plan, trip, uiState.offlineAssets)
-				} else uiState.offlineAssets
-				val assetsChanged = assets != uiState.offlineAssets
-				uiState = uiState.copy(
-					terrainStatus = finalStatus,
-					offlineAssets = assets,
-					journeyDirty = uiState.journeyDirty || assetsChanged
-				)
-				refreshStorageUsage()
-				if (assetsChanged && uiState.journeyId != null) saveJourney()
-			} catch (error: CancellationException) {
-				throw error
-			} catch (error: Exception) {
-				uiState = uiState.copy(
-					terrainStatus = uiState.terrainStatus.copy(
-						phase = FlightTerrainPhase.ERROR,
-						message = error.message ?: "Préchargement du relief impossible"
-					)
-				)
+		offlinePreloadJob?.cancel()
+		offlinePreloadJob = viewModelScope.launch {
+			runOfflinePreload()
+		}
+	}
+
+	private fun scheduleAutomaticOfflinePreload() {
+		offlinePreloadJob?.cancel()
+		val sceneJob = terrainJob
+		offlinePreloadJob = viewModelScope.launch {
+			// Let the visible local scene win the I/O race. The corridor is durable but
+			// background work, and starts as soon as the first scene is usable.
+			sceneJob?.join()
+			runOfflinePreload()
+		}
+	}
+
+	private fun hasOfflineCorridorSource(): Boolean =
+		uiState.trip?.samples?.size?.let { it >= 2 } == true ||
+			uiState.plan.stops.count { it.latitude != null && it.longitude != null } >= 2
+
+	private suspend fun runOfflinePreload() {
+		try {
+			val plan = uiState.plan
+			val trip = uiState.trip
+			val finalStatus = terrainRepository.preloadCorridor(plan, trip) { status ->
+				uiState = uiState.copy(offlinePreloadStatus = status)
 			}
+			val assets = if (trip != null) withContext(Dispatchers.IO) {
+				journeyStore.discoverOfflineAssets(plan, trip, uiState.offlineAssets)
+			} else uiState.offlineAssets
+			val assetsChanged = assets != uiState.offlineAssets
+			uiState = uiState.copy(
+				offlinePreloadStatus = finalStatus,
+				offlineAssets = assets,
+				journeyDirty = uiState.journeyDirty || assetsChanged
+			)
+			refreshStorageUsage()
+			if (assetsChanged && uiState.journeyId != null) saveJourney()
+		} catch (error: CancellationException) {
+			throw error
+		} catch (error: Exception) {
+			uiState = uiState.copy(
+				offlinePreloadStatus = uiState.offlinePreloadStatus.copy(
+					phase = FlightTerrainPhase.ERROR,
+					message = error.message ?: "Préchargement du relief impossible"
+				)
+			)
 		}
 	}
 
@@ -560,9 +594,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun requestTerrain(sample: FlightSample, force: Boolean = false) {
+		val includeNativeMap = uiState.page == FlightPage.SATELLITE && uiState.nativeMapOpacity > 0f
 		val scene = uiState.terrainScene
 		if (!force && scene != null && scene.radiusKm == uiState.plan.terrainCorridorKm &&
-			scene.satelliteQuality == uiState.plan.satelliteQuality
+			scene.satelliteQuality == uiState.plan.satelliteQuality &&
+			(!includeNativeMap || scene.nativeMapRequested)
 		) {
 			val distance = FlightTerrainTilePlanner.distanceKm(
 				scene.centerLatitude,
@@ -592,7 +628,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					latitude = sample.latitude,
 					longitude = sample.longitude,
 					radiusKm = uiState.plan.terrainCorridorKm,
-					satelliteQuality = uiState.plan.satelliteQuality
+					satelliteQuality = uiState.plan.satelliteQuality,
+					includeNativeMap = includeNativeMap
 				) { status ->
 					uiState = uiState.copy(terrainStatus = status)
 				}
@@ -601,10 +638,17 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					terrainStatus = uiState.terrainStatus.copy(
 						phase = FlightTerrainPhase.READY,
 						message = when {
+							terrainScene.missingTiles > 0 && includeNativeMap ->
+								"Relief partiel : ${terrainScene.missingTiles} tuiles manquantes · carte OsmAnd ${terrainScene.nativeMapTiles}/${terrainScene.loadedTiles}"
 							terrainScene.missingTiles > 0 ->
 								"Relief partiel : ${terrainScene.missingTiles} tuiles manquantes"
+							includeNativeMap && terrainScene.nativeMapTiles < terrainScene.loadedTiles ->
+								"Relief prêt · carte OsmAnd ${terrainScene.nativeMapTiles}/${terrainScene.loadedTiles}"
+							includeNativeMap && terrainScene.satelliteTiles < terrainScene.loadedTiles ->
+								"Relief + carte OsmAnd prêts · satellite ${terrainScene.satelliteTiles}/${terrainScene.loadedTiles}"
 							terrainScene.satelliteTiles < terrainScene.loadedTiles ->
 								"Relief prêt · satellite ${terrainScene.satelliteTiles}/${terrainScene.loadedTiles}"
+							includeNativeMap -> "Relief + satellite + carte OsmAnd prêts"
 							else -> "Relief + satellite prêts"
 						}
 					)
@@ -761,6 +805,16 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun setTerrainOpacity(opacity: Float) {
 		uiState = uiState.copy(terrainOpacity = opacity.coerceIn(0f, 1f))
+	}
+
+	fun setNativeMapOpacity(opacity: Float) {
+		val clamped = opacity.coerceIn(0f, 1f)
+		uiState = uiState.copy(nativeMapOpacity = clamped)
+		if (clamped > 0f && uiState.page == FlightPage.SATELLITE &&
+			uiState.terrainScene?.nativeMapRequested == false
+		) {
+			(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
+		}
 	}
 
 	fun setRecordingPolicy(policy: FlightRecordingPolicy) {
@@ -946,7 +1000,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			uiState = uiState.copy(
 				selectedPhotoId = id,
 				journeyMessage = if (timestamp == null) {
-					"Cette photo n’a pas de date EXIF · place le curseur puis choisis Associer ici"
+					"Aucune heure détectable (EXIF, nom ou fichier) · place le curseur puis choisis Associer ici"
 				} else {
 					"La trace n’a pas d’heure exploitable · place le curseur puis choisis Associer ici"
 				}
@@ -1023,6 +1077,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	override fun onCleared() {
 		terrainJob?.cancel()
+		offlinePreloadJob?.cancel()
 		storageJob?.cancel()
 		citySearchJob?.cancel()
 		super.onCleared()

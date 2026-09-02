@@ -47,6 +47,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		shadingEnabled: Boolean,
 		satelliteOpacity: Float,
 		terrainOpacity: Float,
+		nativeMapOpacity: Float,
 		onRendererError: (String) -> Unit
 	) {
 		rendererErrorListener = onRendererError
@@ -58,7 +59,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			altitudeOverrideMeters,
 			shadingEnabled,
 			satelliteOpacity,
-			terrainOpacity
+			terrainOpacity,
+			nativeMapOpacity
 		)
 		requestRender()
 	}
@@ -83,6 +85,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var satelliteOpacity: Float = 0.92f
 		@Volatile
 		private var terrainOpacity: Float = 0.70f
+		@Volatile
+		private var nativeMapOpacity: Float = 0.58f
 
 		private var program = 0
 		private var shadowProgram = 0
@@ -107,6 +111,9 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var hasSatelliteTextureLocation = -1
 		private var satelliteOpacityLocation = -1
 		private var terrainOpacityLocation = -1
+		private var nativeMapTextureLocation = -1
+		private var hasNativeMapTextureLocation = -1
+		private var nativeMapOpacityLocation = -1
 		private var shadowTextureLocation = -1
 		private var shadowTexelSizeLocation = -1
 		private var shadowsEnabledLocation = -1
@@ -134,7 +141,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			altitudeOverrideMeters: Float?,
 			shadingEnabled: Boolean,
 			satelliteOpacity: Float,
-			terrainOpacity: Float
+			terrainOpacity: Float,
+			nativeMapOpacity: Float
 		) {
 			this.scene = scene
 			this.sample = sample
@@ -144,6 +152,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			this.shadingEnabled = shadingEnabled
 			this.satelliteOpacity = satelliteOpacity.coerceIn(0f, 1f)
 			this.terrainOpacity = terrainOpacity.coerceIn(0f, 1f)
+			this.nativeMapOpacity = nativeMapOpacity.coerceIn(0f, 1f)
 		}
 
 		override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -166,6 +175,9 @@ class FlightTerrainView @JvmOverloads constructor(
 				hasSatelliteTextureLocation = GLES20.glGetUniformLocation(program, "uHasSatelliteTexture")
 				satelliteOpacityLocation = GLES20.glGetUniformLocation(program, "uSatelliteOpacity")
 				terrainOpacityLocation = GLES20.glGetUniformLocation(program, "uTerrainOpacity")
+				nativeMapTextureLocation = GLES20.glGetUniformLocation(program, "uNativeMapTexture")
+				hasNativeMapTextureLocation = GLES20.glGetUniformLocation(program, "uHasNativeMapTexture")
+				nativeMapOpacityLocation = GLES20.glGetUniformLocation(program, "uNativeMapOpacity")
 				shadowTextureLocation = GLES20.glGetUniformLocation(program, "uShadowMap")
 				shadowTexelSizeLocation = GLES20.glGetUniformLocation(program, "uShadowTexelSize")
 				shadowsEnabledLocation = GLES20.glGetUniformLocation(program, "uShadowsEnabled")
@@ -291,6 +303,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUniform1f(daylightLocation, daylight)
 			GLES20.glUniform1f(satelliteOpacityLocation, satelliteOpacity)
 			GLES20.glUniform1f(terrainOpacityLocation, terrainOpacity)
+			GLES20.glUniform1f(nativeMapOpacityLocation, nativeMapOpacity)
 			GLES20.glUniform1f(shadowsEnabledLocation, shadowStrength)
 			GLES20.glUniform2f(
 				shadowTexelSizeLocation,
@@ -298,6 +311,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				if (shadowMapSize > 0) 1f / shadowMapSize else 0f
 			)
 			GLES20.glUniform1i(satelliteTextureLocation, SATELLITE_TEXTURE_UNIT)
+			GLES20.glUniform1i(nativeMapTextureLocation, NATIVE_MAP_TEXTURE_UNIT)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + SHADOW_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, if (shadowsActive) shadowTexture else 0)
 			GLES20.glUniform1i(shadowTextureLocation, SHADOW_TEXTURE_UNIT)
@@ -307,6 +321,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glDisableVertexAttribArray(elevationLocation)
 			GLES20.glDisableVertexAttribArray(textureCoordinateLocation)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + SHADOW_TEXTURE_UNIT)
+			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + NATIVE_MAP_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 		}
@@ -337,6 +353,9 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + SATELLITE_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mesh.satelliteTextureId)
 			GLES20.glUniform1f(hasSatelliteTextureLocation, if (mesh.satelliteTextureId != 0) 1f else 0f)
+			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + NATIVE_MAP_TEXTURE_UNIT)
+			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mesh.nativeMapTextureId)
+			GLES20.glUniform1f(hasNativeMapTextureLocation, if (mesh.nativeMapTextureId != 0) 1f else 0f)
 			mesh.indices.position(0)
 			GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.indexCount, GLES20.GL_UNSIGNED_SHORT, mesh.indices)
 		}
@@ -529,9 +548,12 @@ class FlightTerrainView @JvmOverloads constructor(
 			shadowMapSize = 0
 		}
 
-		private fun createSatelliteTexture(path: String?): Int {
+		private fun createTexture(path: String?): Int {
 			if (path == null) return 0
-			val bitmap = BitmapFactory.decodeFile(path) ?: return 0
+			val bitmap = BitmapFactory.decodeFile(
+				path,
+				BitmapFactory.Options().apply { inPreferredConfig = android.graphics.Bitmap.Config.RGB_565 }
+			) ?: return 0
 			try {
 				val textureIds = IntArray(1)
 				GLES20.glGenTextures(1, textureIds, 0)
@@ -559,23 +581,30 @@ class FlightTerrainView @JvmOverloads constructor(
 		private fun isPowerOfTwo(value: Int): Boolean = value > 0 && (value and (value - 1)) == 0
 
 		private fun releaseRenderMeshes() {
-			val textures = renderMeshes.map { it.satelliteTextureId }.filter { it != 0 }.toIntArray()
+			val textures = renderMeshes.flatMap { listOf(it.satelliteTextureId, it.nativeMapTextureId) }
+				.filter { it != 0 }.distinct().toIntArray()
 			if (textures.isNotEmpty()) GLES20.glDeleteTextures(textures.size, textures, 0)
 			renderMeshes = emptyList()
 		}
 
 		private fun replaceRenderMeshes(meshes: List<FlightTerrainMesh>) {
-			val reusableTextures = renderMeshes.mapNotNull { mesh ->
+			val reusableSatelliteTextures = renderMeshes.mapNotNull { mesh ->
 				val path = mesh.satelliteTexturePath
 				if (path != null && mesh.satelliteTextureId != 0) path to mesh.satelliteTextureId else null
 			}.toMap()
+			val reusableNativeMapTextures = renderMeshes.mapNotNull { mesh ->
+				val path = mesh.nativeMapTexturePath
+				if (path != null && mesh.nativeMapTextureId != 0) path to mesh.nativeMapTextureId else null
+			}.toMap()
 			val reusedTextureIds = mutableSetOf<Int>()
 			val replacement = meshes.map { mesh ->
-				val reusableId = mesh.satelliteTexturePath?.let(reusableTextures::get)
-				if (reusableId != null) reusedTextureIds += reusableId
-				createRenderMesh(mesh, reusableId ?: 0)
+				val reusableSatelliteId = mesh.satelliteTexturePath?.let(reusableSatelliteTextures::get)
+				val reusableNativeMapId = mesh.nativeMapTexturePath?.let(reusableNativeMapTextures::get)
+				if (reusableSatelliteId != null) reusedTextureIds += reusableSatelliteId
+				if (reusableNativeMapId != null) reusedTextureIds += reusableNativeMapId
+				createRenderMesh(mesh, reusableSatelliteId ?: 0, reusableNativeMapId ?: 0)
 			}
-			val obsoleteTextures = renderMeshes.map { it.satelliteTextureId }
+			val obsoleteTextures = renderMeshes.flatMap { listOf(it.satelliteTextureId, it.nativeMapTextureId) }
 				.filter { it != 0 && it !in reusedTextureIds }
 				.distinct()
 				.toIntArray()
@@ -585,7 +614,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			renderMeshes = replacement
 		}
 
-		private fun createRenderMesh(mesh: FlightTerrainMesh, reusableTextureId: Int = 0): RenderMesh {
+		private fun createRenderMesh(
+			mesh: FlightTerrainMesh,
+			reusableSatelliteTextureId: Int = 0,
+			reusableNativeMapTextureId: Int = 0
+		): RenderMesh {
 			val vertexBuffer = ByteBuffer.allocateDirect(mesh.vertices.size * FLOAT_BYTES)
 				.order(ByteOrder.nativeOrder())
 				.asFloatBuffer()
@@ -605,8 +638,11 @@ class FlightTerrainView @JvmOverloads constructor(
 				indices = indexBuffer,
 				indexCount = mesh.indices.size,
 				satelliteTexturePath = mesh.satelliteTexturePath,
-				satelliteTextureId = reusableTextureId.takeIf { it != 0 }
-					?: createSatelliteTexture(mesh.satelliteTexturePath)
+				satelliteTextureId = reusableSatelliteTextureId.takeIf { it != 0 }
+					?: createTexture(mesh.satelliteTexturePath),
+				nativeMapTexturePath = mesh.nativeMapTexturePath,
+				nativeMapTextureId = reusableNativeMapTextureId.takeIf { it != 0 }
+					?: createTexture(mesh.nativeMapTexturePath)
 			)
 		}
 
@@ -648,7 +684,9 @@ class FlightTerrainView @JvmOverloads constructor(
 			val indices: ShortBuffer,
 			val indexCount: Int,
 			val satelliteTexturePath: String?,
-			val satelliteTextureId: Int
+			val satelliteTextureId: Int,
+			val nativeMapTexturePath: String?,
+			val nativeMapTextureId: Int
 		)
 
 		companion object {
@@ -656,6 +694,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SHORT_BYTES = 2
 			private const val SATELLITE_TEXTURE_UNIT = 0
 			private const val SHADOW_TEXTURE_UNIT = 1
+			private const val NATIVE_MAP_TEXTURE_UNIT = 2
 			private const val PREFERRED_SHADOW_MAP_SIZE = 2_048
 			private const val MINIMUM_SHADOW_MAP_SIZE = 512
 			private const val MINIMUM_SHADOW_EXTENT_METERS = 20_000f
@@ -727,6 +766,9 @@ class FlightTerrainView @JvmOverloads constructor(
 				uniform float uHasSatelliteTexture;
 				uniform float uSatelliteOpacity;
 				uniform float uTerrainOpacity;
+				uniform sampler2D uNativeMapTexture;
+				uniform float uHasNativeMapTexture;
+				uniform float uNativeMapOpacity;
 				uniform sampler2D uShadowMap;
 				uniform vec2 uShadowTexelSize;
 				uniform float uShadowsEnabled;
@@ -789,6 +831,8 @@ class FlightTerrainView @JvmOverloads constructor(
 					float satelliteWeight = uHasSatelliteTexture * uSatelliteOpacity;
 					vec3 base = (procedural * terrainWeight + satellite * satelliteWeight) /
 						max(terrainWeight + satelliteWeight, 0.001);
+					vec3 nativeMap = texture2D(uNativeMapTexture, vTexCoord).rgb;
+					base = mix(base, nativeMap, uHasNativeMapTexture * uNativeMapOpacity);
 					float castShadow = shadowVisibility();
 					vec3 lit = base * vLight * castShadow * mix(0.08, 1.0, uDaylight);
 					float fogAmount = smoothstep(0.68, 1.0, vFog);

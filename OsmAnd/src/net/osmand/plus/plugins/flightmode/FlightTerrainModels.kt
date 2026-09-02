@@ -17,6 +17,8 @@ data class FlightTerrainStatus(
 	val failedTiles: Int = 0,
 	val satelliteTiles: Int = 0,
 	val satelliteFailedTiles: Int = 0,
+	val nativeMapTiles: Int = 0,
+	val nativeMapFailedTiles: Int = 0,
 	val bytesDownloaded: Long = 0L,
 	val zoom: Int? = null,
 	val message: String? = null
@@ -53,7 +55,8 @@ data class TerrariumTile(
 data class FlightTerrainMesh(
 	val vertices: FloatArray,
 	val indices: ShortArray,
-	val satelliteTexturePath: String? = null
+	val satelliteTexturePath: String? = null,
+	val nativeMapTexturePath: String? = null
 )
 
 data class FlightTerrainScene(
@@ -66,6 +69,9 @@ data class FlightTerrainScene(
 	val loadedTiles: Int,
 	val missingTiles: Int,
 	val satelliteTiles: Int,
+	val nativeMapTiles: Int,
+	val nativeMapFailedTiles: Int,
+	val nativeMapRequested: Boolean,
 	val centerGroundElevationMeters: Float?,
 	val generation: Long = System.nanoTime()
 )

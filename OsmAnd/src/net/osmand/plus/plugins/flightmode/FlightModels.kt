@@ -32,7 +32,8 @@ enum class FlightCabinSide {
 enum class FlightSatelliteQuality(val zoomDelta: Int) {
 	STANDARD(0),
 	HIGH(1),
-	ULTRA(2)
+	ULTRA(2),
+	ULTRA_PLUS(3)
 }
 
 data class FlightWindowPlacement(
@@ -275,12 +276,22 @@ data class FlightSpan(
 	}
 }
 
+enum class FlightPhotoTimestampSource {
+	EXIF,
+	MEDIA_CAPTURE,
+	FILE_NAME,
+	FILE_MODIFIED,
+	FILE_ADDED,
+	LIVE_CAPTURE
+}
+
 data class FlightPhotoAttachment(
 	val id: String,
 	val fileName: String,
 	val localPath: String,
 	val timestampMillis: Long?,
 	val matchedSampleIndex: Int?,
+	val timestampSource: FlightPhotoTimestampSource? = null,
 	val includeMainCamera: Boolean = true,
 	val includeSelfie: Boolean = false,
 	val includeMap: Boolean = true,
@@ -358,12 +369,14 @@ data class FlightUiState(
 	val tripLoadError: String? = null,
 	val duplicateJourneyWarning: FlightJourneySummary? = null,
 	val terrainStatus: FlightTerrainStatus = FlightTerrainStatus(),
+	val offlinePreloadStatus: FlightTerrainStatus = FlightTerrainStatus(),
 	val terrainScene: FlightTerrainScene? = null,
 	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
 	val windowLook: FlightWindowLook = FlightWindowLook(),
 	val windowAltitudeOverrideMeters: Float? = null,
 	val satelliteOpacity: Float = 0.92f,
 	val terrainOpacity: Float = 0.70f,
+	val nativeMapOpacity: Float = 0.58f,
 	val mapFollowing: Boolean = true,
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),
 	val showTrackPoints: Boolean = false,
@@ -397,6 +410,7 @@ data class FlightStorageUsage(
 	val terrainBytes: Long = 0L,
 	val satelliteSourceBytes: Long = 0L,
 	val satelliteRenderBytes: Long = 0L,
+	val nativeMapRenderBytes: Long = 0L,
 	val graphicsBytes: Long = 0L,
 	val otherBytes: Long = 0L
 ) {
@@ -405,5 +419,5 @@ data class FlightStorageUsage(
 
 	val totalBytes: Long
 		get() = allJournalBytes + allPhotosBytes + terrainBytes + satelliteSourceBytes +
-			satelliteRenderBytes + graphicsBytes + otherBytes
+			satelliteRenderBytes + nativeMapRenderBytes + graphicsBytes + otherBytes
 }
