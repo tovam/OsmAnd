@@ -1,9 +1,11 @@
 package net.osmand.plus.plugins.flightmode
 
+import kotlin.math.atan
 import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.tan
 
 enum class FlightPage {
 	PREPARE,
@@ -51,13 +53,27 @@ data class FlightWindowPlacement(
 		const val WINDOW_DIAMETER_METERS = 0.25f
 		const val WALL_DISTANCE_METERS = 0.35f
 		const val DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES = 58f
+		const val MIN_VERTICAL_FIELD_OF_VIEW_DEGREES = 14f
+		const val MAX_VERTICAL_FIELD_OF_VIEW_DEGREES = 145f
 		const val MIN_FORWARD_OFFSET_METERS = -0.90f
 		const val MAX_FORWARD_OFFSET_METERS = 1.10f
 		const val MIN_VERTICAL_OFFSET_METERS = -0.55f
 		const val MAX_VERTICAL_OFFSET_METERS = 0.55f
-		const val MIN_ZOOM = 0.65f
+		const val MIN_ZOOM = 0.36f
 		const val MAX_ZOOM = 4f
 	}
+}
+
+fun FlightWindowPlacement.verticalFieldOfViewDegrees(): Float =
+	(DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / clamped().zoom).coerceIn(
+		MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
+		MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
+	)
+
+fun FlightWindowPlacement.horizontalFieldOfViewDegrees(viewAspectRatio: Float): Float {
+	val verticalRadians = Math.toRadians(verticalFieldOfViewDegrees().toDouble())
+	val horizontalRadians = 2.0 * atan(tan(verticalRadians / 2.0) * viewAspectRatio.coerceIn(0.25f, 4f))
+	return Math.toDegrees(horizontalRadians).toFloat().coerceIn(8f, 170f)
 }
 
 data class FlightWindowLook(
@@ -271,6 +287,17 @@ data class FlightPhotoAttachment(
 	val includeScene3d: Boolean = true
 )
 
+data class FlightOfflineAssets(
+	val terrainTiles: List<TerrainTileId> = emptyList(),
+	val standardSatelliteTiles: List<TerrainTileId> = emptyList()
+) {
+	val terrainTileCount: Int
+		get() = terrainTiles.size
+
+	val standardSatelliteTileCount: Int
+		get() = standardSatelliteTiles.size
+}
+
 data class FlightJourney(
 	val id: String,
 	val name: String,
@@ -279,7 +306,8 @@ data class FlightJourney(
 	val plan: FlightPlan,
 	val trip: FlightTrip,
 	val flightSpans: List<FlightSpan>,
-	val photos: List<FlightPhotoAttachment>
+	val photos: List<FlightPhotoAttachment>,
+	val offlineAssets: FlightOfflineAssets = FlightOfflineAssets()
 )
 
 data class FlightJourneySummary(
@@ -347,6 +375,7 @@ data class FlightUiState(
 	val journeyDirty: Boolean = false,
 	val savedJourneys: List<FlightJourneySummary> = emptyList(),
 	val photos: List<FlightPhotoAttachment> = emptyList(),
+	val offlineAssets: FlightOfflineAssets = FlightOfflineAssets(),
 	val pendingPhotos: List<FlightPhotoAttachment> = emptyList(),
 	val selectedPhotoId: String? = null,
 	val journeyMessage: String? = null,
@@ -361,6 +390,8 @@ data class FlightUiState(
 data class FlightStorageUsage(
 	val currentJournalBytes: Long = 0L,
 	val currentPhotosBytes: Long = 0L,
+	val currentTerrainBytes: Long = 0L,
+	val currentSatelliteStandardBytes: Long = 0L,
 	val allJournalBytes: Long = 0L,
 	val allPhotosBytes: Long = 0L,
 	val terrainBytes: Long = 0L,
@@ -370,7 +401,7 @@ data class FlightStorageUsage(
 	val otherBytes: Long = 0L
 ) {
 	val currentJourneyBytes: Long
-		get() = currentJournalBytes + currentPhotosBytes
+		get() = currentJournalBytes + currentPhotosBytes + currentTerrainBytes + currentSatelliteStandardBytes
 
 	val totalBytes: Long
 		get() = allJournalBytes + allPhotosBytes + terrainBytes + satelliteSourceBytes +

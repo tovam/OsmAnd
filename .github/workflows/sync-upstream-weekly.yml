@@ -1,0 +1,71 @@
+name: Sync OsmAnd upstream weekly
+
+on:
+  schedule:
+    # Monday morning. GitHub schedules use UTC; using :17 avoids the busy top of the hour.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: sync-osmand-upstream-master
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'tovam/OsmAnd'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork master with full history
+        uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fetch official OsmAnd upstream
+        run: |
+          git remote add upstream https://github.com/osmandapp/OsmAnd.git
+          git fetch --no-tags upstream master
+
+      - name: Merge upstream without guessing through conflicts
+        id: merge
+        run: |
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "### Upstream sync" >> "${GITHUB_STEP_SUMMARY}"
+            echo "No new upstream commit; master was already current." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git merge --no-ff --no-edit upstream/master; then
+            echo "### Upstream merge conflict" >> "${GITHUB_STEP_SUMMARY}"
+            echo "Nothing was pushed. Resolve these files manually:" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```text' >> "${GITHUB_STEP_SUMMARY}"
+            git diff --name-only --diff-filter=U >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+          echo "### Upstream sync" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Merged osmandapp/OsmAnd:master into the fork master." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Push merged master
+        if: steps.merge.outputs.changed == 'true'
+        run: git push origin HEAD:master
+
+      # A push made with GITHUB_TOKEN intentionally does not start push workflows. A manual
+      # dispatch does, so explicitly start the existing build; its workflow_run then publishes
+      # the public prerelease exactly like an ordinary fork commit.
+      - name: Start APK build and release pipeline
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-osmand-smart.yml --repo "${GITHUB_REPOSITORY}" --ref master

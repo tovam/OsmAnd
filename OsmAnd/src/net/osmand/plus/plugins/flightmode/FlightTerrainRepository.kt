@@ -163,8 +163,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			results.forEach { result ->
 				result.onSuccess { cached ->
 					available++
-					if (cached.terrain.downloaded || cached.satellite?.downloaded == true) downloaded++
-					if (cached.satellite != null) satelliteAvailable++
+					if (cached.downloaded) downloaded++
+					if (cached.standardSatellite != null) satelliteAvailable++
 					else if (cached.satelliteAttempted) satelliteFailed++
 					bytesDownloaded += cached.downloadedBytes
 				}.onFailure {
@@ -201,8 +201,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			zoom = tilePlan.zoom,
 			message = when {
 				failed > 0 -> "$failed tuiles de relief indisponibles"
-				satelliteFailed > 0 -> "Relief prêt · satellite partiel ($satelliteFailed manquantes)"
-				else -> "Relief + satellite du trajet disponibles hors ligne"
+				satelliteFailed > 0 -> "Relief prêt · satellite Standard partiel ($satelliteFailed manquantes)"
+				else -> "Relief + satellite Standard rattachés au trajet"
 			}
 		)
 	}
@@ -237,10 +237,24 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		allowSatelliteDownload: Boolean
 	): CachedTileFiles {
 		val terrain = ensureTerrainFile(tileId)
-		val satellite = runCatching {
-			ensureSatelliteTexture(tileId, satelliteQuality, allowSatelliteDownload)
+		// The parent Standard tile is the portable/offline source attached to a Flight Journal.
+		// Higher qualities are optional local render derivatives and must never replace it.
+		val standardSatellite = runCatching {
+			ensureSatelliteSourceFile(tileId, allowSatelliteDownload)
 		}.getOrNull()
-		return CachedTileFiles(terrain, satellite, allowSatelliteDownload)
+		val selectedSatellite = if (satelliteQuality == FlightSatelliteQuality.STANDARD) {
+			standardSatellite
+		} else {
+			runCatching {
+				ensureSatelliteTexture(tileId, satelliteQuality, allowSatelliteDownload)
+			}.getOrNull()
+		}
+		return CachedTileFiles(
+			terrain = terrain,
+			standardSatellite = standardSatellite,
+			selectedSatellite = selectedSatellite,
+			satelliteAttempted = allowSatelliteDownload
+		)
 	}
 
 	private fun ensureTerrainFile(tileId: TerrainTileId): CachedAsset {
@@ -463,11 +477,19 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 
 	private data class CachedTileFiles(
 		val terrain: CachedAsset,
-		val satellite: CachedAsset?,
+		val standardSatellite: CachedAsset?,
+		val selectedSatellite: CachedAsset?,
 		val satelliteAttempted: Boolean
 	) {
+		val downloaded: Boolean
+			get() = terrain.downloaded || standardSatellite?.downloaded == true || selectedSatellite?.downloaded == true
+
 		val downloadedBytes: Long
-			get() = terrain.downloadedBytes + (satellite?.downloadedBytes ?: 0L)
+			get() {
+				val satelliteAssets = listOfNotNull(standardSatellite, selectedSatellite)
+					.distinctBy { it.file.absolutePath }
+				return terrain.downloadedBytes + satelliteAssets.sumOf { it.downloadedBytes }
+			}
 	}
 
 	private data class LoadedTerrainTile(

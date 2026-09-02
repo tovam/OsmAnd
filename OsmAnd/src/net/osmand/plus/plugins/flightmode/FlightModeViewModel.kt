@@ -62,9 +62,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		storageJob?.cancel()
 		val journeyId = uiState.journeyId
 		val photos = uiState.photos
+		val offlineAssets = uiState.offlineAssets
 		uiState = uiState.copy(storageUsageLoading = true)
 		storageJob = viewModelScope.launch {
-			val usage = withContext(Dispatchers.IO) { journeyStore.storageUsage(journeyId, photos) }
+			val usage = withContext(Dispatchers.IO) {
+				journeyStore.storageUsage(journeyId, photos, offlineAssets)
+			}
 			uiState = uiState.copy(storageUsage = usage, storageUsageLoading = false)
 		}
 	}
@@ -193,6 +196,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyCreatedAtMillis = System.currentTimeMillis(),
 			journeyDirty = true,
 			photos = emptyList(),
+			offlineAssets = FlightOfflineAssets(),
 			pendingPhotos = emptyList(),
 			selectedPhotoId = null,
 			journeyMessage = null
@@ -296,6 +300,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyCreatedAtMillis = System.currentTimeMillis(),
 			flightSpans = emptyList(),
 			photos = emptyList(),
+			offlineAssets = FlightOfflineAssets(),
 			dirty = true,
 			message = "GPX importé · enregistre-le comme Journal de vol"
 		)
@@ -311,6 +316,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyCreatedAtMillis = journey.createdAtMillis,
 			flightSpans = journey.flightSpans,
 			photos = journey.photos,
+			offlineAssets = journey.offlineAssets,
 			dirty = false,
 			message = "Journal de vol chargé"
 		)
@@ -323,6 +329,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		journeyCreatedAtMillis: Long,
 		flightSpans: List<FlightSpan>,
 		photos: List<FlightPhotoAttachment>,
+		offlineAssets: FlightOfflineAssets,
 		dirty: Boolean,
 		message: String?
 	) {
@@ -330,6 +337,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		// (plain GPX, OsmAnd track or saved Flight Journal) so every screen uses
 		// the direction from the current point to the next point in the same leg.
 		val resolvedTrip = trip.copy(samples = FlightTrackMath.fillMissingBearings(trip.samples))
+		val sortedPhotos = photos.sortedWith(PHOTO_TIME_COMPARATOR)
 		replayEngine = FlightReplayEngine(resolvedTrip)
 		val firstSnapshot = replayEngine?.snapshotAt(0f)
 		uiState = uiState.copy(
@@ -347,9 +355,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyName = journeyName,
 			journeyCreatedAtMillis = journeyCreatedAtMillis,
 			journeyDirty = dirty,
-			photos = photos,
+			photos = sortedPhotos,
+			offlineAssets = offlineAssets,
 			pendingPhotos = emptyList(),
-			selectedPhotoId = photos.firstOrNull()?.id,
+			selectedPhotoId = sortedPhotos.firstOrNull()?.id,
 			journeyMessage = message,
 			loadingTrip = false,
 			tripLoadError = null,
@@ -506,10 +515,22 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		terrainJob?.cancel()
 		terrainJob = viewModelScope.launch {
 			try {
-				val finalStatus = terrainRepository.preloadCorridor(uiState.plan, uiState.trip) { status ->
+				val plan = uiState.plan
+				val trip = uiState.trip
+				val finalStatus = terrainRepository.preloadCorridor(plan, trip) { status ->
 					uiState = uiState.copy(terrainStatus = status)
 				}
-				uiState = uiState.copy(terrainStatus = finalStatus)
+				val assets = if (trip != null) withContext(Dispatchers.IO) {
+					journeyStore.discoverOfflineAssets(plan, trip, uiState.offlineAssets)
+				} else uiState.offlineAssets
+				val assetsChanged = assets != uiState.offlineAssets
+				uiState = uiState.copy(
+					terrainStatus = finalStatus,
+					offlineAssets = assets,
+					journeyDirty = uiState.journeyDirty || assetsChanged
+				)
+				refreshStorageUsage()
+				if (assetsChanged && uiState.journeyId != null) saveJourney()
 			} catch (error: CancellationException) {
 				throw error
 			} catch (error: Exception) {
@@ -768,7 +789,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			plan = uiState.plan,
 			trip = trip,
 			flightSpans = uiState.flightSpans,
-			photos = uiState.photos
+			photos = uiState.photos,
+			offlineAssets = uiState.offlineAssets
 		)
 		viewModelScope.launch {
 			val result = runCatching { withContext(Dispatchers.IO) { journeyStore.save(journey) } }
@@ -777,6 +799,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					journeyId = saved.id,
 					journeyName = saved.name,
 					journeyCreatedAtMillis = saved.createdAtMillis,
+					offlineAssets = saved.offlineAssets,
 					journeyDirty = false,
 					savedJourneys = journeyStore.list(),
 					journeyMessage = "Journal de vol enregistré"
@@ -826,13 +849,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			plan = uiState.plan,
 			trip = trip,
 			flightSpans = uiState.flightSpans,
-			photos = uiState.photos
+			photos = uiState.photos,
+			offlineAssets = uiState.offlineAssets
 		)
 		viewModelScope.launch {
 			val result = runCatching { withContext(Dispatchers.IO) { journeyStore.exportArchive(journey, uri) } }
 			uiState = uiState.copy(
 				journeyMessage = result.fold(
-					onSuccess = { "Archive exportée : GPX + capteurs + photos" },
+					onSuccess = { "Archive exportée : GPX + capteurs + photos + données hors ligne" },
 					onFailure = { it.message ?: "Export impossible" }
 				)
 			)
@@ -844,7 +868,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		viewModelScope.launch {
 			val photos = withContext(Dispatchers.IO) { journeyStore.importPhotos(uris, uiState.trip) }
 			uiState = uiState.copy(
-				pendingPhotos = uiState.pendingPhotos + photos,
+				pendingPhotos = (uiState.pendingPhotos + photos).sortedWith(PHOTO_TIME_COMPARATOR),
 				selectedPhotoId = photos.firstOrNull()?.id ?: uiState.selectedPhotoId,
 				journeyMessage = if (photos.isEmpty()) "Aucune photo lisible" else "${photos.size} photo(s) à valider"
 			)
@@ -853,9 +877,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun validatePendingPhotos() {
 		if (uiState.pendingPhotos.isEmpty()) return
-		val accepted = uiState.pendingPhotos
+		val accepted = uiState.pendingPhotos.sortedWith(PHOTO_TIME_COMPARATOR)
 		uiState = uiState.copy(
-			photos = uiState.photos + accepted,
+			photos = (uiState.photos + accepted).sortedWith(PHOTO_TIME_COMPARATOR),
 			pendingPhotos = emptyList(),
 			selectedPhotoId = accepted.first().id,
 			journeyDirty = true,
@@ -896,7 +920,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			includeScene3d = uiState.photoScene3d
 		)
 		uiState = uiState.copy(
-			photos = uiState.photos + photo,
+			photos = (uiState.photos + photo).sortedWith(PHOTO_TIME_COMPARATOR),
 			selectedPhotoId = photo.id,
 			journeyDirty = true,
 			journeyMessage = "Photo enregistrée à ${photo.timestampMillis ?: pendingCaptureTimestampMillis}"
@@ -908,6 +932,71 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(selectedPhotoId = id)
 		val sample = photo.matchedSampleIndex?.let { index -> uiState.trip?.samples?.firstOrNull { it.index == index } }
 		if (sample != null) seekReplay(uiState.trip?.progressFor(sample) ?: return)
+	}
+
+	fun associatePhotoAutomatically(id: String) {
+		val photo = findPhoto(id) ?: return
+		val timestamp = photo.timestampMillis
+		val trip = uiState.trip
+		val sample = if (timestamp != null) {
+			trip?.samples?.filter { it.timestampMillis > 0L }
+				?.minByOrNull { abs(it.timestampMillis - timestamp) }
+		} else null
+		if (sample == null) {
+			uiState = uiState.copy(
+				selectedPhotoId = id,
+				journeyMessage = if (timestamp == null) {
+					"Cette photo n’a pas de date EXIF · place le curseur puis choisis Associer ici"
+				} else {
+					"La trace n’a pas d’heure exploitable · place le curseur puis choisis Associer ici"
+				}
+			)
+			return
+		}
+		replacePhoto(photo.copy(matchedSampleIndex = sample.index), "Photo associée au point GPS le plus proche dans le temps")
+		seekReplay(trip?.progressFor(sample) ?: return)
+	}
+
+	fun associatePhotoAtCurrentReplay(id: String) {
+		val photo = findPhoto(id) ?: return
+		val sample = uiState.snapshot?.sample
+		if (sample == null) {
+			uiState = uiState.copy(selectedPhotoId = id, journeyMessage = "Aucun point courant auquel associer cette photo")
+			return
+		}
+		replacePhoto(photo.copy(matchedSampleIndex = sample.index), "Photo associée à la position actuelle du curseur")
+	}
+
+	fun clearPhotoAssociation(id: String) {
+		val photo = findPhoto(id) ?: return
+		replacePhoto(photo.copy(matchedSampleIndex = null), "Association de la photo supprimée")
+	}
+
+	fun openPhotoOnMap(id: String) {
+		selectPhoto(id)
+		if (findPhoto(id)?.matchedSampleIndex != null) {
+			uiState = uiState.copy(page = FlightPage.MAP, mapFollowing = true)
+		}
+	}
+
+	fun openPhotoInWindow(id: String) {
+		selectPhoto(id)
+		if (findPhoto(id)?.matchedSampleIndex != null) uiState = uiState.copy(page = FlightPage.WINDOW)
+	}
+
+	private fun findPhoto(id: String): FlightPhotoAttachment? =
+		(uiState.photos + uiState.pendingPhotos).firstOrNull { it.id == id }
+
+	private fun replacePhoto(photo: FlightPhotoAttachment, message: String) {
+		val attached = uiState.photos.any { it.id == photo.id }
+		uiState = uiState.copy(
+			photos = uiState.photos.map { if (it.id == photo.id) photo else it }.sortedWith(PHOTO_TIME_COMPARATOR),
+			pendingPhotos = uiState.pendingPhotos.map { if (it.id == photo.id) photo else it }
+				.sortedWith(PHOTO_TIME_COMPARATOR),
+			selectedPhotoId = photo.id,
+			journeyDirty = uiState.journeyDirty || attached,
+			journeyMessage = message
+		)
 	}
 
 	fun setPhotoSources(main: Boolean? = null, selfie: Boolean? = null, map: Boolean? = null, scene3d: Boolean? = null) {
@@ -945,6 +1034,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	companion object {
+		private val PHOTO_TIME_COMPARATOR = compareBy<FlightPhotoAttachment>(
+			{ it.timestampMillis == null },
+			{ it.timestampMillis ?: Long.MAX_VALUE },
+			{ it.fileName.lowercase() }
+		)
 		private const val MINIMUM_CITY_QUERY_LENGTH = 2
 		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
 		private const val TERRAIN_RELOAD_RADIUS_FRACTION = 0.32

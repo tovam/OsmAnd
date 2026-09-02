@@ -259,12 +259,6 @@ public class MapActivity extends OsmandActionBarActivity implements DownloadEven
 
 		InsetsUtils.processInsets(this, findViewById(R.id.drawer_layout), null, false);
 
-		if (WhatsNewDialogFragment.shouldShowDialog(app)) {
-			boolean showed = WhatsNewDialogFragment.showInstance(getSupportFragmentManager());
-			if (showed) {
-				SecondSplashScreenFragment.SHOW = false;
-			}
-		}
 		mapWidgetsVisibilityHelper = new WidgetsVisibilityHelper(this);
 		dashboardOnMap.createDashboardView();
 		extendedMapActivity = new ExtendedMapActivity();

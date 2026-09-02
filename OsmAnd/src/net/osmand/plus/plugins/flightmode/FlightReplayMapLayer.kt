@@ -374,6 +374,10 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val left = centerX - sampleWidth / 2
 		val right = centerX + sampleWidth / 2
 		val metersPerPixel = tileBox.getDistance(left, centerY, right, centerY) / sampleWidth
+		// The aircraft is native world geometry rather than a billboard. Convert its requested
+		// screen size to metres at every zoom so it remains readable. The upper bound only guards
+		// pathological whole-world views; the previous 60 km cap reduced it to a few pixels on the
+		// normal full-flight view.
 		return (metersPerPixel * AIRCRAFT_LENGTH_DP * context.resources.displayMetrics.density)
 			.coerceIn(AIRCRAFT_MINIMUM_LENGTH_METERS, AIRCRAFT_MAXIMUM_LENGTH_METERS)
 	}
@@ -592,18 +596,18 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val POINT_BITMAP_DP = 10f
 		private const val PHOTO_BITMAP_DP = 26f
 		private const val PHOTO_MARKER_CLEARANCE_METERS = 36f
-		private const val AIRCRAFT_LENGTH_DP = 34.0
-		private const val AIRCRAFT_BODY_WIDTH_DP = 3.8
-		private const val AIRCRAFT_WING_WIDTH_DP = 2.6
-		private const val AIRCRAFT_TAIL_WIDTH_DP = 2.2
-		private const val AIRCRAFT_FIN_WIDTH_DP = 2.0
-		private const val AIRCRAFT_SLEEVE_EXTRA_WIDTH_DP = 1.8
+		private const val AIRCRAFT_LENGTH_DP = 52.0
+		private const val AIRCRAFT_BODY_WIDTH_DP = 5.0
+		private const val AIRCRAFT_WING_WIDTH_DP = 3.6
+		private const val AIRCRAFT_TAIL_WIDTH_DP = 3.1
+		private const val AIRCRAFT_FIN_WIDTH_DP = 2.8
+		private const val AIRCRAFT_SLEEVE_EXTRA_WIDTH_DP = 2.2
 		private const val AIRCRAFT_FIN_HEIGHT_RATIO = 0.11
 		private const val AIRCRAFT_MAXIMUM_FIN_HEIGHT_METERS = 1_200.0
-		private const val AIRCRAFT_SCALE_REBUILD_RATIO = 0.08
+		private const val AIRCRAFT_SCALE_REBUILD_RATIO = 0.05
 		private const val AIRCRAFT_SCALE_SAMPLE_PIXELS = 160
 		private const val AIRCRAFT_MINIMUM_LENGTH_METERS = 45.0
-		private const val AIRCRAFT_MAXIMUM_LENGTH_METERS = 60_000.0
+		private const val AIRCRAFT_MAXIMUM_LENGTH_METERS = 6_000_000.0
 		private const val TETHER_WIDTH_DP = 1.7
 		private const val TETHER_HORIZONTAL_OFFSET_METERS = 0.10
 		private const val TETHER_GROUND_CLEARANCE_METERS = 1.5f

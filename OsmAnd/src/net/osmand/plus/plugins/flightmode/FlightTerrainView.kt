@@ -315,8 +315,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			val projection = FloatArray(16)
 			val aspect = surfaceWidth.toFloat() / surfaceHeight
 			val far = max(MINIMUM_FAR_PLANE_METERS, radiusKm * 1_000f * 2.2f)
-			val fieldOfView = (FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / placement.zoom)
-				.coerceIn(MINIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES, MAXIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES)
+			val fieldOfView = placement.verticalFieldOfViewDegrees()
 			Matrix.perspectiveM(projection, 0, fieldOfView, aspect, NEAR_PLANE_METERS, far)
 			return projection
 		}
@@ -673,8 +672,6 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val DEFAULT_FLIGHT_ALTITUDE_METERS = 10_000f
 			private const val MINIMUM_GROUND_CLEARANCE_METERS = 60f
 			private const val DEFAULT_BEARING_DEGREES = 0f
-			private const val MINIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES = 14f
-			private const val MAXIMUM_VERTICAL_FIELD_OF_VIEW_DEGREES = 82f
 			private const val NEAR_PLANE_METERS = 10f
 			private const val MINIMUM_FAR_PLANE_METERS = 750_000f
 			private const val SKY_RED = 0.22f

@@ -26,8 +26,9 @@
 	<string name="flight_mode_shadows">Ombres portées du relief</string>
 	<string name="flight_mode_resume">Reprendre ce voyage après redémarrage</string>
 	<string name="flight_mode_terrain_source">Relief Terrain Tiles + satellite Sentinel-2</string>
-	<string name="flight_mode_preload_terrain">Précharger</string>
-	<string name="flight_mode_preload_current_track">Précharger ce trajet</string>
+	<string name="flight_mode_preload_terrain">Enregistrer hors ligne</string>
+	<string name="flight_mode_preload_current_track">Hors ligne</string>
+	<string name="flight_mode_preload_explanation">Télécharge le relief et le satellite Standard du corridor, puis les rattache au Journal de vol. Haute et Ultra restent des rendus locaux régénérables.</string>
 	<string name="flight_mode_terrain_loading">Chargement…</string>
 	<string name="flight_mode_terrain_attribution">Relief Terrain Tiles © Mapzen · Satellite Sentinel-2 cloudless — s2maps.eu par EOX IT Services GmbH (données Copernicus Sentinel modifiées 2016–2017).</string>
 	<string name="flight_mode_satellite_attribution_short">Satellite : Sentinel-2 cloudless · s2maps.eu / EOX · Copernicus 2016–2017</string>
@@ -138,6 +139,11 @@
 	<string name="flight_mode_photo_matched_point">Point %1$d</string>
 	<string name="flight_mode_photo_not_matched">Non associée</string>
 	<string name="flight_mode_open_photo_window">Revoir ce moment dans Hublot</string>
+	<string name="flight_mode_photo_match_by_time">Associer par l’heure</string>
+	<string name="flight_mode_photo_match_here">Associer ici</string>
+	<string name="flight_mode_photo_open_map">Voir sur la carte</string>
+	<string name="flight_mode_photo_open_window">Voir dans Hublot</string>
+	<string name="flight_mode_photo_unmatch">Dissocier</string>
 	<string name="flight_mode_photo_preview_loading">Chargement de l’aperçu…</string>
 	<string name="flight_mode_photo_preview_unavailable">Aperçu indisponible — les métadonnées restent accessibles</string>
 	<string name="flight_mode_photo_details">Informations associées</string>
@@ -147,6 +153,7 @@
 	<string name="flight_mode_photo_position">Position</string>
 	<string name="flight_mode_photo_timeline">Chronologie</string>
 	<string name="flight_mode_photo_timeline_value">Point %1$d · %2$d %% du trajet</string>
+	<string name="flight_mode_photo_time_offset">Écart photo / GPS</string>
 	<string name="flight_mode_duplicate_gpx_title">⚠ GPX DÉJÀ DANS UN JOURNAL</string>
 	<string name="flight_mode_duplicate_gpx_message">Cette trace correspond exactement à un journal existant. L’importer de nouveau créerait un doublon.</string>
 	<string name="flight_mode_duplicate_gpx_details">%1$d points · %2$d photos · modifié le %3$s</string>
@@ -155,6 +162,7 @@
 	<string name="flight_mode_journeys">Journaux</string>
 	<string name="flight_mode_current_journey">Journal de vol actuel</string>
 	<string name="flight_mode_journey_stats">%1$d points · %2$d photos · %3$d vols définis</string>
+	<string name="flight_mode_journey_offline_assets">Hors ligne · %1$d tuiles relief · %2$d tuiles satellite Standard</string>
 	<string name="flight_mode_save_journey">Enregistrer</string>
 	<string name="flight_mode_journey_saved">Enregistré</string>
 	<string name="flight_mode_export_journey">Exporter</string>
@@ -167,6 +175,8 @@
 	<string name="flight_mode_storage_shared">Tous les journaux et caches</string>
 	<string name="flight_mode_storage_track_data">Trace, capteurs et métadonnées</string>
 	<string name="flight_mode_storage_current_photos">Photos de ce journal</string>
+	<string name="flight_mode_storage_current_terrain">Relief rattaché à ce journal</string>
+	<string name="flight_mode_storage_current_satellite">Satellite Standard rattaché</string>
 	<string name="flight_mode_storage_all_journals">Tous les journaux / GPX intégrés</string>
 	<string name="flight_mode_storage_all_photos">Toutes les photos</string>
 	<string name="flight_mode_storage_terrain">Relief brut Terrarium</string>

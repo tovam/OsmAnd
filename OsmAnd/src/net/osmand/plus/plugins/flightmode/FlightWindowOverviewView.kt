@@ -14,7 +14,6 @@ import android.view.View
 import java.io.File
 import java.util.concurrent.Executors
 import kotlin.math.cos
-import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.sin
 
@@ -29,7 +28,13 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	attributes: AttributeSet? = null
 ) : View(context, attributes) {
 
-	private data class CachedTile(val zoom: Int, val x: Int, val y: Int, val file: File)
+	private data class CachedTile(
+		val zoom: Int,
+		val x: Int,
+		val y: Int,
+		val file: File,
+		val detailLayer: Int
+	)
 
 	private val worker = Executors.newSingleThreadExecutor()
 	private val bitmaps = object : LruCache<String, Bitmap>(BITMAP_CACHE_KIB) {
@@ -37,7 +42,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	}
 	private val queued = mutableSetOf<String>()
 	private val failed = mutableSetOf<String>()
-	private val satellitePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+	private val satellitePaint = Paint(Paint.FILTER_BITMAP_FLAG)
 	private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(18, 30, 38) }
 	private val trackHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
 		color = Color.argb(180, 4, 9, 12)
@@ -76,6 +81,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	private var trip: FlightTrip? = null
 	private var sample: FlightSample? = null
 	private var viewAzimuthDegrees = 0f
+	private var viewConeDegrees = FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES
 	private var quality = FlightSatelliteQuality.HIGH
 	private var cacheKey: String? = null
 	private var tiles: List<CachedTile> = emptyList()
@@ -90,12 +96,14 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		trip: FlightTrip?,
 		sample: FlightSample?,
 		viewAzimuthDegrees: Float,
+		viewConeDegrees: Float,
 		quality: FlightSatelliteQuality,
 		cacheKey: String
 	) {
 		this.trip = trip
 		this.sample = sample
 		this.viewAzimuthDegrees = viewAzimuthDegrees
+		this.viewConeDegrees = viewConeDegrees.coerceIn(8f, 170f)
 		this.quality = quality
 		if (this.cacheKey != cacheKey) {
 			this.cacheKey = cacheKey
@@ -108,14 +116,17 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	private fun reloadTiles() {
 		if (detached) return
 		val generation = ++scanGeneration
-		val directory = FlightSatelliteSource.renderDirectory(quality)
-		val centerLatitude = sample?.latitude
-		val centerLongitude = sample?.longitude
 		worker.execute {
-			val scanned = scan(
-				File(context.applicationContext.filesDir, directory),
-				centerLatitude,
-				centerLongitude
+			val standard = scan(
+				File(context.applicationContext.filesDir, FlightSatelliteSource.CACHE_DIRECTORY),
+				detailLayer = 0
+			)
+			val detailed = if (quality == FlightSatelliteQuality.STANDARD) emptyList() else scan(
+				File(context.applicationContext.filesDir, FlightSatelliteSource.renderDirectory(quality)),
+				detailLayer = 1
+			)
+			val scanned = (standard + detailed).sortedWith(
+				compareBy<CachedTile>({ it.zoom }, { it.detailLayer }, { it.y }, { it.x })
 			)
 			post {
 				if (detached || generation != scanGeneration) return@post
@@ -126,37 +137,23 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		}
 	}
 
-	private fun scan(root: File, latitude: Double?, longitude: Double?): List<CachedTile> {
+	private fun scan(root: File, detailLayer: Int): List<CachedTile> {
 		val groups = root.listFiles().orEmpty().filter(File::isDirectory).mapNotNull { zoomDirectory ->
 			val zoom = zoomDirectory.name.toIntOrNull() ?: return@mapNotNull null
 			zoom to zoomDirectory.listFiles().orEmpty().filter(File::isDirectory).flatMap { xDirectory ->
 				val x = xDirectory.name.toIntOrNull() ?: return@flatMap emptyList()
 				xDirectory.listFiles().orEmpty().mapNotNull { file ->
 					val y = file.nameWithoutExtension.toIntOrNull()
-					if (y != null && file.isFile && file.length() > 0L) CachedTile(zoom, x, y, file) else null
+					if (y != null && file.isFile && file.length() > 0L) {
+						CachedTile(zoom, x, y, file, detailLayer)
+					} else null
 				}
 			}
 		}.filter { it.second.isNotEmpty() }
-		if (latitude != null && longitude != null) {
-			val local = groups.map { group ->
-				val zoom = group.first
-				val centerX = floor(FlightTerrainTilePlanner.longitudeToTileX(longitude, zoom)).toInt()
-				val centerY = floor(FlightTerrainTilePlanner.latitudeToTileY(latitude, zoom)).toInt()
-				val worldWidth = 1 shl zoom
-				val localCount = group.second.count { tile ->
-					val rawDeltaX = kotlin.math.abs(tile.x - centerX)
-					val deltaX = minOf(rawDeltaX, worldWidth - rawDeltaX)
-					deltaX <= 2 && kotlin.math.abs(tile.y - centerY) <= 2
-				}
-				Triple(localCount, zoom, group.second)
-			}.filter { it.first > 0 }
-			if (local.isNotEmpty()) {
-				return local.maxWithOrNull(compareBy<Triple<Int, Int, List<CachedTile>>> { it.first }.thenBy { it.second })
-					?.third.orEmpty()
-			}
-		}
-		return groups.maxWithOrNull(compareBy<Pair<Int, List<CachedTile>>> { it.second.size }.thenBy { it.first })
-			?.second.orEmpty()
+		// Keep every cached level and paint coarse-to-fine. A lower-resolution tile remains under a
+		// missing or still-decoding detailed tile, so replay movement can no longer swap an entire
+		// zoom level for grey squares.
+		return groups.flatMap { it.second }
 	}
 
 	override fun onDraw(canvas: Canvas) {
@@ -182,7 +179,12 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 			val right = centerX + eastMeters(current.longitude, east, current.latitude) * pixelsPerMeter
 			val top = centerY - northMeters(current.latitude, north) * pixelsPerMeter
 			val bottom = centerY - northMeters(current.latitude, south) * pixelsPerMeter
-			val destination = RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+			val destination = RectF(
+				left.toFloat() - TILE_OVERLAP_PIXELS,
+				top.toFloat() - TILE_OVERLAP_PIXELS,
+				right.toFloat() + TILE_OVERLAP_PIXELS,
+				bottom.toFloat() + TILE_OVERLAP_PIXELS
+			)
 			if (!RectF.intersects(destination, RectF(0f, 0f, width.toFloat(), height.toFloat()))) return@forEach
 			val bitmap = bitmaps.get(tile.file.absolutePath)
 			if (bitmap != null) canvas.drawBitmap(bitmap, null, destination, satellitePaint)
@@ -215,7 +217,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	}
 
 	private fun drawGaze(canvas: Canvas, centerX: Float, centerY: Float, length: Float) {
-		val halfAngle = 7f
+		val halfAngle = (viewConeDegrees / 2f).coerceIn(4f, 85f)
 		val left = directionPoint(centerX, centerY, viewAzimuthDegrees - halfAngle, length)
 		val right = directionPoint(centerX, centerY, viewAzimuthDegrees + halfAngle, length)
 		val middle = directionPoint(centerX, centerY, viewAzimuthDegrees, length)
@@ -252,13 +254,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		if (bitmaps.get(key) != null || key in queued || key in failed || queued.size >= MAXIMUM_QUEUED_BITMAPS) return
 		queued += key
 		worker.execute {
-			val bitmap = BitmapFactory.decodeFile(
-				key,
-				BitmapFactory.Options().apply {
-					inPreferredConfig = Bitmap.Config.RGB_565
-					inSampleSize = OVERVIEW_SAMPLE_SIZE
-				}
-			)
+			val bitmap = decodeOverviewBitmap(key)
 			post {
 				queued -= key
 				if (detached) return@post
@@ -266,6 +262,23 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 				invalidate()
 			}
 		}
+	}
+
+	private fun decodeOverviewBitmap(path: String): Bitmap? {
+		val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+		BitmapFactory.decodeFile(path, bounds)
+		if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+		var sampleSize = 1
+		while (max(bounds.outWidth, bounds.outHeight) / sampleSize > MAXIMUM_TILE_DECODE_PIXELS) {
+			sampleSize *= 2
+		}
+		return BitmapFactory.decodeFile(
+			path,
+			BitmapFactory.Options().apply {
+				inPreferredConfig = Bitmap.Config.RGB_565
+				inSampleSize = sampleSize
+			}
+		)
 	}
 
 	private fun eastMeters(referenceLongitude: Double, longitude: Double, latitude: Double): Double {
@@ -299,8 +312,9 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		private const val MINIMUM_SIDE_METERS = 10_000.0
 		private const val DEFAULT_SIDE_METERS = 1_000_000.0
 		private const val MAXIMUM_TRACK_POINTS = 1_200
-		private const val OVERVIEW_SAMPLE_SIZE = 4
-		private const val BITMAP_CACHE_KIB = 8 * 1_024
-		private const val MAXIMUM_QUEUED_BITMAPS = 12
+		private const val MAXIMUM_TILE_DECODE_PIXELS = 64
+		private const val BITMAP_CACHE_KIB = 32 * 1_024
+		private const val MAXIMUM_QUEUED_BITMAPS = 24
+		private const val TILE_OVERLAP_PIXELS = 0.75f
 	}
 }
