@@ -1,6 +1,8 @@
 package net.osmand.plus.plugins.flightmode
 
 import android.graphics.Paint
+import android.net.Uri
+import android.widget.ImageView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,7 +62,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
@@ -81,7 +82,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 import net.osmand.plus.R
+import net.osmand.plus.views.OsmandMapTileView
 import java.text.SimpleDateFormat
+import java.io.File
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
@@ -111,6 +114,7 @@ private enum class SatellitePanel { THREE_D, TILES }
 @Composable
 fun FlightModeScreen(
 	state: FlightUiState,
+	mapView: OsmandMapTileView? = null,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
 	onImportTrip: () -> Unit,
@@ -136,6 +140,7 @@ fun FlightModeScreen(
 	onSetWindowZoom: (Float) -> Unit,
 	onChangeWindowZoom: (Float) -> Unit,
 	onSetCabinTransparent: (Boolean) -> Unit,
+	onSetCabinHidden: (Boolean) -> Unit,
 	onRetryTerrain: () -> Unit,
 	onTerrainRendererError: (String) -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
@@ -147,7 +152,15 @@ fun FlightModeScreen(
 	onSetSatelliteOpacity: (Float) -> Unit,
 	onSetTerrainOpacity: (Float) -> Unit,
 	onSetRecordingPolicy: (FlightRecordingPolicy) -> Unit,
-	onSetPhotoSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit
+	onSetPhotoSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit,
+	onPhotoAction: () -> Unit,
+	onValidatePhotos: () -> Unit,
+	onDiscardPhotos: () -> Unit,
+	onSelectPhoto: (String) -> Unit,
+	onUpdateJourneyName: (String) -> Unit,
+	onSaveJourney: () -> Unit,
+	onExportJourney: () -> Unit,
+	onOpenJourney: (String) -> Unit
 ) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
@@ -217,6 +230,7 @@ fun FlightModeScreen(
 				)
 				FlightPage.MAP -> MapScreen(
 					state = state,
+					mapView = mapView,
 					onClose = onClose,
 					onPageChange = onPageChange,
 					onSeekReplay = onSeekReplay,
@@ -240,6 +254,7 @@ fun FlightModeScreen(
 					onChangeZoom = onChangeWindowZoom,
 					onSetZoom = onSetWindowZoom,
 					onSetCabinTransparent = onSetCabinTransparent,
+					onSetCabinHidden = onSetCabinHidden,
 					onRetryTerrain = onRetryTerrain,
 					onTerrainRendererError = onTerrainRendererError
 				)
@@ -273,7 +288,22 @@ fun FlightModeScreen(
 					state = state,
 					onClose = onClose,
 					onPageChange = onPageChange,
-					onSetSources = onSetPhotoSources
+					onSetSources = onSetPhotoSources,
+					onPhotoAction = onPhotoAction,
+					onValidatePhotos = onValidatePhotos,
+					onDiscardPhotos = onDiscardPhotos,
+					onSelectPhoto = onSelectPhoto
+				)
+				FlightPage.JOURNEYS -> JourneysScreen(
+					state = state,
+					onClose = onClose,
+					onPageChange = onPageChange,
+					onImport = onImportTrip,
+					onSelectInternalTrack = onSelectInternalTrack,
+					onUpdateName = onUpdateJourneyName,
+					onSave = onSaveJourney,
+					onExport = onExportJourney,
+					onOpen = onOpenJourney
 				)
 			}
 
@@ -438,6 +468,7 @@ private fun PrepareScreen(
 @Composable
 private fun MapScreen(
 	state: FlightUiState,
+	mapView: OsmandMapTileView?,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
 	onSeekReplay: (Float) -> Unit,
@@ -450,6 +481,17 @@ private fun MapScreen(
 ) {
 	val sample = state.snapshot?.sample
 	Box(Modifier.fillMaxSize()) {
+		if (mapView != null) {
+			AndroidView(
+				modifier = Modifier.fillMaxSize(),
+				factory = { context ->
+					FlightMapGestureProxyView(context, mapView) { onSetMapFollowing(false) }
+				},
+				update = { proxy ->
+					proxy.update(mapView) { onSetMapFollowing(false) }
+				}
+			)
+		}
 		Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
 			FlightTopBar(routeTitle(state), state.sessionMode, onClose, overlay = true)
 			InstrumentStrip(sample, overlay = true)
@@ -580,6 +622,7 @@ private fun WindowScreen(
 	onChangeZoom: (Float) -> Unit,
 	onSetZoom: (Float) -> Unit,
 	onSetCabinTransparent: (Boolean) -> Unit,
+	onSetCabinHidden: (Boolean) -> Unit,
 	onRetryTerrain: () -> Unit,
 	onTerrainRendererError: (String) -> Unit
 ) {
@@ -638,7 +681,8 @@ private fun WindowScreen(
 							placement = state.windowPlacement,
 							onOpenSetup = { onPageChange(FlightPage.WINDOW_SETUP) },
 							onSetZoom = onSetZoom,
-							onSetCabinTransparent = onSetCabinTransparent
+							onSetCabinTransparent = onSetCabinTransparent,
+							onSetCabinHidden = onSetCabinHidden
 						)
 					}
 				}
@@ -838,19 +882,22 @@ private fun FlightTerrainExplorer(
 	onRendererError: (String) -> Unit,
 	modifier: Modifier = Modifier
 ) {
+	val latestPlacement by rememberUpdatedState(state.windowPlacement)
+	val latestMoveLook by rememberUpdatedState(onMoveLook)
+	val latestChangeZoom by rememberUpdatedState(onChangeZoom)
 	Box(
-		modifier.background(FlightBackground).pointerInput(state.windowPlacement.zoom) {
+		modifier.background(FlightBackground).pointerInput(Unit) {
 			detectTransformGestures { _, pan, zoom, _ ->
 				if (pan != Offset.Zero) {
-					val verticalFov = (FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / state.windowPlacement.zoom)
+					val verticalFov = (FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / latestPlacement.zoom)
 						.coerceIn(14f, 82f)
 					val horizontalFov = verticalFov * size.width.toFloat() / size.height.coerceAtLeast(1)
-					onMoveLook(
+					latestMoveLook(
 						-pan.x / size.width.coerceAtLeast(1) * horizontalFov,
 						pan.y / size.height.coerceAtLeast(1) * verticalFov
 					)
 				}
-				if (abs(zoom - 1f) > 0.002f) onChangeZoom(zoom)
+				if (abs(zoom - 1f) > 0.002f) latestChangeZoom(zoom)
 			}
 		}
 	) {
@@ -936,39 +983,53 @@ private fun SensorsScreen(
 					value = sample?.vibrationHz?.let { "%.1f Hz".format(it) }
 				)
 			}
-			item { SectionTitle(stringResource(R.string.flight_mode_recording).uppercase()) }
 			item {
-				Text(
-					text = if (interval != null && currentSpeed != null) {
-						stringResource(R.string.flight_mode_recording_now, interval, interval * currentSpeed)
-					} else {
-						stringResource(R.string.flight_mode_recording_waiting)
-					},
-					color = FlightGreen,
-					fontSize = 10.sp,
-					modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+				SectionTitle(
+					if (state.sessionMode == FlightSessionMode.LIVE) stringResource(R.string.flight_mode_recording)
+					else stringResource(R.string.flight_mode_recording_finished)
 				)
-				PolicySlider(
-					title = stringResource(R.string.flight_mode_cruise_spacing),
-					valueText = "${state.recordingPolicy.cruisePointDistanceMeters.toInt()} m",
-					value = state.recordingPolicy.cruisePointDistanceMeters,
-					range = 250f..4_000f,
-					onValue = { onSetPolicy(state.recordingPolicy.copy(cruisePointDistanceMeters = it)) }
-				)
-				PolicySlider(
-					title = stringResource(R.string.flight_mode_turn_boost, state.recordingPolicy.turnAcceleration),
-					valueText = "≥ 1°/s",
-					value = state.recordingPolicy.turnAcceleration,
-					range = 1f..5f,
-					onValue = { onSetPolicy(state.recordingPolicy.copy(turnAcceleration = it)) }
-				)
-				PolicySlider(
-					title = stringResource(R.string.flight_mode_deviation_boost, state.recordingPolicy.routeDeviationAcceleration),
-					valueText = "> 5 km",
-					value = state.recordingPolicy.routeDeviationAcceleration,
-					range = 1f..5f,
-					onValue = { onSetPolicy(state.recordingPolicy.copy(routeDeviationAcceleration = it)) }
-				)
+			}
+			item {
+				if (state.sessionMode == FlightSessionMode.LIVE) {
+					Text(
+						text = if (interval != null && currentSpeed != null) {
+							stringResource(R.string.flight_mode_recording_now, interval, interval * currentSpeed)
+						} else {
+							stringResource(R.string.flight_mode_recording_waiting)
+						},
+						color = FlightGreen,
+						fontSize = 10.sp,
+						modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+					)
+					PolicySlider(
+						title = stringResource(R.string.flight_mode_cruise_spacing),
+						valueText = "${state.recordingPolicy.cruisePointDistanceMeters.toInt()} m",
+						value = state.recordingPolicy.cruisePointDistanceMeters,
+						range = 250f..4_000f,
+						onValue = { onSetPolicy(state.recordingPolicy.copy(cruisePointDistanceMeters = it)) }
+					)
+					PolicySlider(
+						title = stringResource(R.string.flight_mode_turn_boost, state.recordingPolicy.turnAcceleration),
+						valueText = "≥ 1°/s",
+						value = state.recordingPolicy.turnAcceleration,
+						range = 1f..5f,
+						onValue = { onSetPolicy(state.recordingPolicy.copy(turnAcceleration = it)) }
+					)
+					PolicySlider(
+						title = stringResource(R.string.flight_mode_deviation_boost, state.recordingPolicy.routeDeviationAcceleration),
+						valueText = "> 5 km",
+						value = state.recordingPolicy.routeDeviationAcceleration,
+						range = 1f..5f,
+						onValue = { onSetPolicy(state.recordingPolicy.copy(routeDeviationAcceleration = it)) }
+					)
+				} else {
+					Text(
+						stringResource(R.string.flight_mode_recording_read_only),
+						color = FlightMuted,
+						fontSize = 11.sp,
+						modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+					)
+				}
 				CompactToggleRow(
 					title = stringResource(R.string.flight_mode_show_points),
 					checked = state.showTrackPoints,
@@ -985,28 +1046,222 @@ private fun PhotoScreen(
 	state: FlightUiState,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
-	onSetSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit
+	onSetSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit,
+	onPhotoAction: () -> Unit,
+	onValidatePhotos: () -> Unit,
+	onDiscardPhotos: () -> Unit,
+	onSelectPhoto: (String) -> Unit
 ) {
+	val selectedPhoto = (state.photos + state.pendingPhotos).firstOrNull { it.id == state.selectedPhotoId }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
-		SectionTitle(stringResource(R.string.flight_mode_photo_composition).uppercase())
-		SourceToggle(stringResource(R.string.flight_mode_main_camera), state.photoMainCamera) { onSetSources(it, null, null, null) }
-		SourceToggle(stringResource(R.string.flight_mode_selfie), state.photoSelfie) { onSetSources(null, it, null, null) }
-		SourceToggle(stringResource(R.string.flight_mode_current_map), state.photoMap) { onSetSources(null, null, it, null) }
-		SourceToggle(stringResource(R.string.flight_mode_current_3d), state.photoScene3d) { onSetSources(null, null, null, it) }
-		Box(
-			Modifier.weight(1f).fillMaxWidth().padding(16.dp).border(1.dp, FlightLine),
-			contentAlignment = Alignment.Center
-		) {
-			Text("APERÇU HORIZONTAL\nphoto · selfie · carte · 3D", color = FlightMuted, textAlign = TextAlign.Center)
+		LazyColumn(Modifier.weight(1f)) {
+			if (state.sessionMode == FlightSessionMode.LIVE) {
+				item { SectionTitle(stringResource(R.string.flight_mode_photo_composition).uppercase()) }
+				item { SourceToggle(stringResource(R.string.flight_mode_main_camera), state.photoMainCamera) { onSetSources(it, null, null, null) } }
+				item { SourceToggle(stringResource(R.string.flight_mode_selfie), state.photoSelfie) { onSetSources(null, it, null, null) } }
+				item { SourceToggle(stringResource(R.string.flight_mode_current_map), state.photoMap) { onSetSources(null, null, it, null) } }
+				item { SourceToggle(stringResource(R.string.flight_mode_current_3d), state.photoScene3d) { onSetSources(null, null, null, it) } }
+				item {
+					Text(
+						stringResource(R.string.flight_mode_live_photo_help),
+						color = FlightMuted,
+						fontSize = 11.sp,
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+					)
+				}
+			} else {
+				item { SectionTitle(stringResource(R.string.flight_mode_replay_photos).uppercase()) }
+				item {
+					Text(
+						stringResource(R.string.flight_mode_replay_photo_help),
+						color = FlightMuted,
+						fontSize = 11.sp,
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+					)
+				}
+			}
+			item {
+				FlatButton(
+					text = if (state.sessionMode == FlightSessionMode.LIVE) {
+						stringResource(R.string.flight_mode_take_photo)
+					} else {
+						stringResource(R.string.flight_mode_add_gallery_photos)
+					},
+					modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+					accent = true,
+					onClick = onPhotoAction
+				)
+			}
+			if (state.pendingPhotos.isNotEmpty()) {
+				item { SectionTitle(stringResource(R.string.flight_mode_photos_to_confirm, state.pendingPhotos.size)) }
+				itemsIndexed(state.pendingPhotos) { _, photo ->
+					FlightPhotoRow(photo, photo.id == state.selectedPhotoId, onSelectPhoto)
+				}
+				item {
+					Row(
+						Modifier.fillMaxWidth().padding(10.dp),
+						horizontalArrangement = Arrangement.spacedBy(8.dp)
+					) {
+						FlatButton(stringResource(R.string.flight_mode_cancel), Modifier.weight(1f), false, onDiscardPhotos)
+						FlatButton(stringResource(R.string.flight_mode_confirm_photos), Modifier.weight(1f), true, onValidatePhotos)
+					}
+				}
+			}
+			if (state.photos.isNotEmpty()) {
+				item { SectionTitle(stringResource(R.string.flight_mode_attached_photos, state.photos.size)) }
+				itemsIndexed(state.photos) { _, photo ->
+					FlightPhotoRow(photo, photo.id == state.selectedPhotoId, onSelectPhoto)
+				}
+			}
+			selectedPhoto?.let { photo ->
+				item {
+					FlightPhotoPreview(photo)
+					if (photo.matchedSampleIndex != null && state.sessionMode == FlightSessionMode.REPLAY) {
+						FlatButton(
+							text = stringResource(R.string.flight_mode_open_photo_window),
+							modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+							accent = false,
+							onClick = {
+								onSelectPhoto(photo.id)
+								onPageChange(FlightPage.WINDOW)
+							}
+						)
+					}
+				}
+			}
+			state.journeyMessage?.let { message ->
+				item { Text(message, color = FlightGreen, fontSize = 11.sp, modifier = Modifier.padding(12.dp)) }
+			}
 		}
-		FlatButton(
-			text = stringResource(R.string.flight_mode_take_photo),
-			modifier = Modifier.fillMaxWidth().padding(12.dp),
-			accent = true,
-			onClick = { }
-		)
 		FlightBottomNavigation(FlightPage.PHOTO, onPageChange)
+	}
+}
+
+@Composable
+private fun FlightPhotoRow(photo: FlightPhotoAttachment, selected: Boolean, onSelect: (String) -> Unit) {
+	Row(
+		Modifier.fillMaxWidth().height(46.dp)
+			.background(if (selected) Color(0x2217BDE3) else Color.Transparent)
+			.clickable { onSelect(photo.id) }
+			.padding(horizontal = 12.dp),
+		verticalAlignment = Alignment.CenterVertically
+	) {
+		Text(photo.fileName, color = FlightText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+		Column(horizontalAlignment = Alignment.End) {
+			Text(photo.timestampMillis?.let(::formatDateTime) ?: stringResource(R.string.flight_mode_photo_without_date), color = FlightMuted, fontSize = 9.sp)
+			Text(
+				photo.matchedSampleIndex?.let { stringResource(R.string.flight_mode_photo_matched_point, it + 1) }
+					?: stringResource(R.string.flight_mode_photo_not_matched),
+				color = if (photo.matchedSampleIndex != null) FlightGreen else FlightWarning,
+				fontSize = 8.sp
+			)
+		}
+	}
+	Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 12.dp).background(FlightLine))
+}
+
+@Composable
+private fun FlightPhotoPreview(photo: FlightPhotoAttachment) {
+	AndroidView(
+		modifier = Modifier.fillMaxWidth().height(220.dp).padding(horizontal = 12.dp).border(1.dp, FlightLine),
+		factory = { context -> ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP } },
+		update = { image -> image.setImageURI(Uri.fromFile(File(photo.localPath))) }
+	)
+}
+
+@Composable
+private fun JourneysScreen(
+	state: FlightUiState,
+	onClose: () -> Unit,
+	onPageChange: (FlightPage) -> Unit,
+	onImport: () -> Unit,
+	onSelectInternalTrack: () -> Unit,
+	onUpdateName: (String) -> Unit,
+	onSave: () -> Unit,
+	onExport: () -> Unit,
+	onOpen: (String) -> Unit
+) {
+	Column(Modifier.fillMaxSize().background(FlightBackground)) {
+		FlightTopBar(stringResource(R.string.flight_mode_journeys), state.sessionMode, onClose)
+		LazyColumn(Modifier.weight(1f)) {
+			item { SectionTitle(stringResource(R.string.flight_mode_current_journey)) }
+			item {
+				BasicTextField(
+					value = state.journeyName,
+					onValueChange = onUpdateName,
+					singleLine = true,
+					textStyle = TextStyle(color = FlightText, fontSize = 16.sp),
+					cursorBrush = Brush.verticalGradient(listOf(FlightOrange, FlightOrange)),
+					modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp, vertical = 12.dp)
+				)
+			}
+			item {
+				Text(
+					stringResource(
+						R.string.flight_mode_journey_stats,
+						state.trip?.samples?.size ?: 0,
+						state.photos.size,
+						state.flightSpans.size
+					),
+					color = FlightMuted,
+					fontSize = 10.sp,
+					modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+				)
+			}
+			item {
+				Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					FlatButton(
+						if (state.journeyDirty) stringResource(R.string.flight_mode_save_journey) else stringResource(R.string.flight_mode_journey_saved),
+						Modifier.weight(1f),
+						state.journeyDirty,
+						onSave
+					)
+					FlatButton(stringResource(R.string.flight_mode_export_journey), Modifier.weight(1f), false, onExport)
+				}
+			}
+			item {
+				Row(
+					Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+					horizontalArrangement = Arrangement.spacedBy(8.dp)
+				) {
+					FlatButton(
+						stringResource(R.string.flight_mode_load_osmand_track),
+						Modifier.weight(1f),
+						false,
+						onSelectInternalTrack
+					)
+					FlatButton(
+						stringResource(R.string.flight_mode_import_journey_or_gpx),
+						Modifier.weight(1f),
+						false,
+						onImport
+					)
+				}
+			}
+			state.journeyMessage?.let { message ->
+				item { Text(message, color = FlightGreen, fontSize = 11.sp, modifier = Modifier.padding(12.dp)) }
+			}
+			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, state.savedJourneys.size)) }
+			if (state.savedJourneys.isEmpty()) {
+				item { Text(stringResource(R.string.flight_mode_no_saved_journey), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
+			} else {
+				itemsIndexed(state.savedJourneys) { _, journey ->
+					Row(
+						Modifier.fillMaxWidth().height(58.dp).clickable { onOpen(journey.id) }.padding(horizontal = 12.dp),
+						verticalAlignment = Alignment.CenterVertically
+					) {
+						Column(Modifier.weight(1f)) {
+							Text(journey.name, color = FlightText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+							Text(formatDateTime(journey.updatedAtMillis), color = FlightMuted, fontSize = 9.sp)
+						}
+						Text("${journey.sampleCount} pts · ${journey.photoCount} photos", color = FlightBlue, fontSize = 9.sp)
+					}
+					Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 12.dp).background(FlightLine))
+				}
+			}
+		}
+		FlightBottomNavigation(FlightPage.JOURNEYS, onPageChange)
 	}
 }
 
@@ -1129,7 +1384,8 @@ private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage
 		FlightPage.WINDOW to stringResource(R.string.flight_mode_window),
 		FlightPage.SATELLITE to stringResource(R.string.flight_mode_satellite_3d),
 		FlightPage.SENSORS to stringResource(R.string.flight_mode_sensors),
-		FlightPage.PHOTO to stringResource(R.string.flight_mode_photo)
+		FlightPage.PHOTO to stringResource(R.string.flight_mode_photo),
+		FlightPage.JOURNEYS to stringResource(R.string.flight_mode_journeys)
 	)
 	Row(
 		Modifier.fillMaxWidth().height(48.dp)
@@ -1145,7 +1401,7 @@ private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage
 				Text(
 					label,
 					color = if (selected == page) FlightText else FlightMuted,
-					fontSize = 10.sp,
+					fontSize = 8.sp,
 					fontWeight = if (selected == page) FontWeight.Bold else FontWeight.Normal,
 					maxLines = 1
 				)
@@ -1477,19 +1733,22 @@ private fun FlightWindowScene(
 	onRendererError: (String) -> Unit,
 	modifier: Modifier = Modifier
 ) {
+	val latestPlacement by rememberUpdatedState(placement)
+	val latestMoveLook by rememberUpdatedState(onMoveLook)
+	val latestChangeZoom by rememberUpdatedState(onChangeZoom)
 	Box(
-		modifier = modifier.background(FlightBackground).pointerInput(placement.zoom) {
+		modifier = modifier.background(FlightBackground).pointerInput(Unit) {
 			detectTransformGestures { _, pan, zoom, _ ->
 				if (pan != Offset.Zero) {
-					val verticalFov = (FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / placement.zoom)
+					val verticalFov = (FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / latestPlacement.zoom)
 						.coerceIn(14f, 82f)
 					val horizontalFov = verticalFov * size.width.toFloat() / size.height.coerceAtLeast(1)
-					onMoveLook(
+					latestMoveLook(
 						-pan.x / size.width.coerceAtLeast(1) * horizontalFov,
 						pan.y / size.height.coerceAtLeast(1) * verticalFov
 					)
 				}
-				if (abs(zoom - 1f) > 0.002f) onChangeZoom(zoom)
+				if (abs(zoom - 1f) > 0.002f) latestChangeZoom(zoom)
 			}
 		}
 	) {
@@ -1505,7 +1764,10 @@ private fun FlightWindowScene(
 			onRendererError = onRendererError,
 			modifier = Modifier.fillMaxSize()
 		)
-		FlightCabinWindowOverlay(placement, look, Modifier.fillMaxSize())
+		if (!placement.cabinHidden) {
+			FlightCabinWindowOverlay(placement, look, Modifier.fillMaxSize())
+		}
+		FlightCompassOverlay(placement, look, sample, Modifier.fillMaxSize())
 		WindowQuickControls(
 			placement = placement,
 			look = look,
@@ -1595,35 +1857,95 @@ private fun FlightCabinWindowOverlay(
 		val aspect = size.width / size.height.coerceAtLeast(1f)
 		val horizontalFieldOfView = 2f * atan(tan(halfFieldOfView) * aspect)
 		val center = Offset(
-			size.width / 2f - tan(Math.toRadians(look.yawDegrees.toDouble())).toFloat() /
-				tan(horizontalFieldOfView / 2f) * size.width / 2f,
-			size.height / 2f + tan(Math.toRadians(look.pitchDegrees.toDouble())).toFloat() /
-				tan(halfFieldOfView) * size.height / 2f
+			size.width / 2f - Math.toRadians(look.yawDegrees.toDouble()).toFloat() /
+				horizontalFieldOfView.coerceAtLeast(0.01f) * size.width,
+			size.height / 2f + Math.toRadians(look.pitchDegrees.toDouble()).toFloat() /
+				(halfFieldOfView * 2f).coerceAtLeast(0.01f) * size.height
 		)
+		val windowVisible = center.x + radiusX >= 0f && center.x - radiusX <= size.width &&
+			center.y + radiusY >= 0f && center.y - radiusY <= size.height
 		val windowPath = Path()
-		for (step in 0..48) {
-			val angle = step / 48f * (Math.PI * 2.0)
-			val cosine = cos(angle).toFloat()
-			val sine = sin(angle).toFloat()
-			val point = Offset(
-				center.x + radiusX * cosine + shear * sine,
-				center.y + radiusY * sine
-			)
-			if (step == 0) windowPath.moveTo(point.x, point.y) else windowPath.lineTo(point.x, point.y)
+		if (windowVisible) {
+			for (step in 0..48) {
+				val angle = step / 48f * (Math.PI * 2.0)
+				val cosine = cos(angle).toFloat()
+				val sine = sin(angle).toFloat()
+				val point = Offset(
+					center.x + radiusX * cosine + shear * sine,
+					center.y + radiusY * sine
+				)
+				if (step == 0) windowPath.moveTo(point.x, point.y) else windowPath.lineTo(point.x, point.y)
+			}
+			windowPath.close()
 		}
-		windowPath.close()
 		val cabinMask = Path().apply {
 			fillType = PathFillType.EvenOdd
 			addRect(Rect(0f, 0f, size.width, size.height))
-			addPath(windowPath)
+			if (windowVisible) addPath(windowPath)
 		}
 		drawPath(
 			path = cabinMask,
 			color = Color(0xFF151C22).copy(alpha = if (placement.cabinTransparent) 0.50f else 0.97f)
 		)
-		drawPath(windowPath, Color(0xFF505B63), style = Stroke(width = 15.dp.toPx(), cap = StrokeCap.Round))
-		drawPath(windowPath, Color(0xFFAAB4BA), style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
-		drawPath(windowPath, Color(0x66000000), style = Stroke(width = 1.dp.toPx(), cap = StrokeCap.Round))
+		if (windowVisible) {
+			drawPath(windowPath, Color(0xFF505B63), style = Stroke(width = 15.dp.toPx(), cap = StrokeCap.Round))
+			drawPath(windowPath, Color(0xFFAAB4BA), style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+			drawPath(windowPath, Color(0x66000000), style = Stroke(width = 1.dp.toPx(), cap = StrokeCap.Round))
+		}
+	}
+}
+
+@Composable
+private fun FlightCompassOverlay(
+	placement: FlightWindowPlacement,
+	look: FlightWindowLook,
+	sample: FlightSample?,
+	modifier: Modifier = Modifier
+) {
+	Canvas(modifier) {
+		val radius = 39.dp.toPx()
+		val center = Offset(50.dp.toPx(), 70.dp.toPx())
+		val bearing = sample?.bearingDegrees
+		val viewAzimuth = placement.viewAzimuthDegrees(bearing ?: 0f, look)
+		drawCircle(Color.Black.copy(alpha = 0.25f), radius, center)
+		drawCircle(Color.Black.copy(alpha = 0.30f), radius, center, style = Stroke(width = 1.dp.toPx()))
+		val labels = listOf(
+			0f to "N", 45f to "NE", 90f to "E", 135f to "SE",
+			180f to "S", 225f to "SO", 270f to "O", 315f to "NO"
+		)
+		val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+			color = android.graphics.Color.argb(77, 0, 0, 0)
+			textSize = 8.dp.toPx()
+			textAlign = Paint.Align.CENTER
+			isFakeBoldText = true
+		}
+		drawIntoCanvas { composeCanvas ->
+			labels.forEach { (azimuth, label) ->
+				val relativeAzimuth = normalizeDegrees(azimuth - viewAzimuth)
+				val angle = Math.toRadians((relativeAzimuth - 90f).toDouble())
+				val x = center.x + cos(angle).toFloat() * radius * 0.72f
+				val y = center.y + sin(angle).toFloat() * radius * 0.72f + labelPaint.textSize * 0.34f
+				composeCanvas.nativeCanvas.drawText(label, x, y, labelPaint)
+			}
+		}
+		fun relativeDirectionEnd(worldAzimuth: Float, length: Float): Offset {
+			val relativeAzimuth = normalizeDegrees(worldAzimuth - viewAzimuth)
+			val angle = Math.toRadians((relativeAzimuth - 90f).toDouble())
+			return Offset(center.x + cos(angle).toFloat() * length, center.y + sin(angle).toFloat() * length)
+		}
+		drawLine(Color.Black.copy(alpha = 0.25f), center, Offset(center.x, center.y - radius * 0.58f), 2.dp.toPx())
+		bearing?.let {
+			drawLine(Color.Black.copy(alpha = 0.30f), center, relativeDirectionEnd(it, radius * 0.88f), 3.dp.toPx())
+		}
+		drawIntoCanvas { composeCanvas ->
+			labelPaint.textSize = 7.dp.toPx()
+			composeCanvas.nativeCanvas.drawText(
+				bearing?.let { "CAP %03d°".format(Math.floorMod(it.roundToInt(), 360)) } ?: "CAP —",
+				center.x,
+				center.y + radius + 10.dp.toPx(),
+				labelPaint
+			)
+		}
 	}
 }
 
@@ -1724,7 +2046,8 @@ private fun WindowViewControls(
 	placement: FlightWindowPlacement,
 	onOpenSetup: () -> Unit,
 	onSetZoom: (Float) -> Unit,
-	onSetCabinTransparent: (Boolean) -> Unit
+	onSetCabinTransparent: (Boolean) -> Unit,
+	onSetCabinHidden: (Boolean) -> Unit
 ) {
 	Column(Modifier.fillMaxWidth().background(FlightPanelStrong).border(1.dp, FlightLine)) {
 		Row(
@@ -1751,6 +2074,13 @@ private fun WindowViewControls(
 		Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
 			Text(stringResource(R.string.flight_mode_transparent_cabin), color = FlightText, fontSize = 10.sp, modifier = Modifier.weight(1f))
 			Switch(checked = placement.cabinTransparent, onCheckedChange = onSetCabinTransparent)
+		}
+		Row(
+			Modifier.fillMaxWidth().height(38.dp).padding(horizontal = 10.dp),
+			verticalAlignment = Alignment.CenterVertically
+		) {
+			Text(stringResource(R.string.flight_mode_hide_cabin), color = FlightText, fontSize = 11.sp, modifier = Modifier.weight(1f))
+			Switch(checked = placement.cabinHidden, onCheckedChange = onSetCabinHidden)
 		}
 	}
 }
@@ -2036,7 +2366,9 @@ private fun SourceToggle(title: String, checked: Boolean, onChecked: (Boolean) -
 }
 
 private fun routeTitle(state: FlightUiState): String {
-	return state.trip?.name ?: state.plan.stops.joinToString(" → ") { it.name }
+	return state.journeyName.takeIf { it.isNotBlank() }
+		?: state.trip?.name
+		?: state.plan.stops.joinToString(" → ") { it.name }
 }
 
 @Composable
@@ -2083,6 +2415,14 @@ private fun formatDataSize(bytes: Long): String = when {
 private fun formatClock(timestampMillis: Long): String =
 	SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timestampMillis))
 
+private fun formatDateTime(timestampMillis: Long): String =
+	SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date(timestampMillis))
+
+private fun normalizeDegrees(value: Float): Float {
+	val normalized = value % 360f
+	return if (normalized < 0f) normalized + 360f else normalized
+}
+
 @Preview(name = "Flight prepare Pixel 8", widthDp = 412, heightDp = 915, showBackground = true)
 @Composable
 private fun PreviewPrepare() {
@@ -2125,10 +2465,12 @@ private fun FlightModePreview(state: FlightUiState) {
 		onAddStop = {}, onRemoveStop = {}, onUpdatePlan = {}, onPreloadTerrain = {},
 		onSeekReplay = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapState = { _, _, _ -> },
 		onSetWindowAltitudeOverride = {}, onMoveWindow = { _, _ -> }, onSaveWindowPlacement = {}, onSetWindowSide = {},
-		onMoveWindowLook = { _, _ -> }, onRecenterWindowLook = {}, onSetWindowZoom = {}, onChangeWindowZoom = {}, onSetCabinTransparent = {},
+		onMoveWindowLook = { _, _ -> }, onRecenterWindowLook = {}, onSetWindowZoom = {}, onChangeWindowZoom = {}, onSetCabinTransparent = {}, onSetCabinHidden = {},
 		onRetryTerrain = {}, onTerrainRendererError = {}, onSetMapFollowing = {}, onShowTrackPoints = {},
 		onMarkFlightStart = {}, onMarkFlightEnd = {}, onCancelFlightStart = {}, onRemoveFlightSpan = {},
 		onSetSatelliteOpacity = {}, onSetTerrainOpacity = {},
-		onSetRecordingPolicy = {}, onSetPhotoSources = { _, _, _, _ -> }
+		onSetRecordingPolicy = {}, onSetPhotoSources = { _, _, _, _ -> },
+		onPhotoAction = {}, onValidatePhotos = {}, onDiscardPhotos = {}, onSelectPhoto = {},
+		onUpdateJourneyName = {}, onSaveJourney = {}, onExportJourney = {}, onOpenJourney = {}
 	)
 }

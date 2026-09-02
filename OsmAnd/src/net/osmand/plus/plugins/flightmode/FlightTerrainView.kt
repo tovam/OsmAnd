@@ -223,7 +223,10 @@ class FlightTerrainView @JvmOverloads constructor(
 			}
 
 			val lightMvp = createLightMvp(currentScene, sun)
-			val shadowsActive = shadingEnabled && shadowAvailable && sun.up > MINIMUM_SHADOW_SUN_UP
+			val shadowStrength = if (shadingEnabled && shadowAvailable) {
+				((sun.up - MINIMUM_SHADOW_SUN_UP) / SHADOW_FADE_SUN_RANGE).coerceIn(0f, 1f)
+			} else 0f
+			val shadowsActive = shadowStrength > 0f
 			if (shadowsActive && shouldUpdateShadowMap(currentScene, sun)) {
 				renderShadowMap(lightMvp)
 				lightMvp.copyInto(shadowLightMvp)
@@ -243,10 +246,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			val camera = coordinates.toLocal(latitude, longitude, altitude.toDouble())
 			val bearing = currentSample?.bearingDegrees ?: DEFAULT_BEARING_DEGREES
 			val geometry = currentWindowPlacement.geometry()
-			val viewAzimuth = Math.toRadians(bearing.toDouble()) + geometry.relativeAzimuthRadians +
-				Math.toRadians(currentWindowLook.yawDegrees.toDouble())
+			val viewAzimuth = Math.toRadians(
+				currentWindowPlacement.viewAzimuthDegrees(bearing, currentWindowLook).toDouble()
+			)
 			val viewElevation = (geometry.elevationRadians + Math.toRadians(currentWindowLook.pitchDegrees.toDouble()))
-				.coerceIn(Math.toRadians(-85.0), Math.toRadians(85.0))
+				.coerceIn(Math.toRadians(-89.0), Math.toRadians(45.0))
 			val horizontalDirection = cos(viewElevation)
 			val directionX = (sin(viewAzimuth) * horizontalDirection).toFloat()
 			val directionY = sin(viewElevation).toFloat()
@@ -281,7 +285,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUniform1f(daylightLocation, daylight)
 			GLES20.glUniform1f(satelliteOpacityLocation, satelliteOpacity)
 			GLES20.glUniform1f(terrainOpacityLocation, terrainOpacity)
-			GLES20.glUniform1f(shadowsEnabledLocation, if (shadowsActive) 1f else 0f)
+			GLES20.glUniform1f(shadowsEnabledLocation, shadowStrength)
 			GLES20.glUniform2f(
 				shadowTexelSizeLocation,
 				if (shadowMapSize > 0) 1f / shadowMapSize else 0f,
@@ -610,12 +614,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val PREFERRED_SHADOW_MAP_SIZE = 2_048
 			private const val MINIMUM_SHADOW_MAP_SIZE = 512
 			private const val MINIMUM_SHADOW_EXTENT_METERS = 20_000f
-			private const val SHADOW_EXTENT_MULTIPLIER = 1.35f
+			private const val SHADOW_EXTENT_MULTIPLIER = 2.0f
 			private const val SHADOW_LIGHT_DISTANCE_MULTIPLIER = 2.6f
-			private const val SHADOW_DEPTH_MULTIPLIER = 1.7f
+			private const val SHADOW_DEPTH_MULTIPLIER = 2.2f
 			private const val SHADOW_POLYGON_OFFSET_FACTOR = 2f
 			private const val SHADOW_POLYGON_OFFSET_UNITS = 4f
 			private const val MINIMUM_SHADOW_SUN_UP = 0.015f
+			private const val SHADOW_FADE_SUN_RANGE = 0.10f
 			private const val SHADOW_DIRECTION_EPSILON_SQUARED = 1e-7f
 			private const val DEFAULT_FLIGHT_ALTITUDE_METERS = 10_000f
 			private const val MINIMUM_GROUND_CLEARANCE_METERS = 60f
@@ -699,7 +704,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				}
 
 				float shadowVisibility() {
-					if (uShadowsEnabled < 0.5) return 1.0;
+					if (uShadowsEnabled <= 0.001) return 1.0;
 					vec3 projected = vShadowPosition.xyz / vShadowPosition.w;
 					projected = projected * 0.5 + 0.5;
 					if (projected.x <= 0.0 || projected.x >= 1.0 ||
@@ -715,7 +720,16 @@ class FlightTerrainView @JvmOverloads constructor(
 							visible += step(currentDepth, storedDepth);
 						}
 					}
-					return mix(0.34, 1.0, visible / 9.0);
+					float realShadow = mix(0.38, 1.0, visible / 9.0);
+					float edgeDistance = min(
+						min(
+							min(projected.x, 1.0 - projected.x),
+							min(projected.y, 1.0 - projected.y)
+						),
+						min(projected.z, 1.0 - projected.z)
+					);
+					float edgeBlend = smoothstep(0.015, 0.065, edgeDistance);
+					return mix(1.0, mix(1.0, realShadow, edgeBlend), clamp(uShadowsEnabled, 0.0, 1.0));
 				}
 
 				void main() {

@@ -10,6 +10,10 @@ import static net.osmand.plus.settings.enums.CompassVisibility.VISIBLE_IF_MAP_RO
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
 import android.view.GestureDetector.SimpleOnGestureListener;
@@ -34,17 +38,21 @@ import net.osmand.plus.utils.AndroidUtils;
 import net.osmand.plus.utils.ColorUtilities;
 import net.osmand.plus.views.mapwidgets.configure.buttons.CompassButtonState;
 import net.osmand.plus.views.mapwidgets.configure.buttons.MapButtonState;
+import net.osmand.util.MapUtils;
 
 import org.jetbrains.annotations.NotNull;
 
 public class CompassButton extends MapButton {
 
 	private static final int HIDE_DELAY_MS = 5000;
+	private static final float ROTATION_TEXT_SIZE_SP = 7f;
 
 	private final CompassButtonState buttonState;
+	private final Paint rotationPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 	private ViewPropertyAnimatorCompat hideAnimator;
 
 	private boolean forceHideCompass;
+	private int displayedRotationDegrees = -1;
 
 	public CompassButton(@NonNull Context context) {
 		this(context, null);
@@ -57,6 +65,10 @@ public class CompassButton extends MapButton {
 	public CompassButton(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
 		super(context, attrs, defStyleAttr);
 		buttonState = app.getMapButtonsHelper().getCompassButtonState();
+		rotationPaint.setTextAlign(Paint.Align.CENTER);
+		rotationPaint.setTextSize(AndroidUtils.spToPxF(context, ROTATION_TEXT_SIZE_SP));
+		rotationPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+		rotationPaint.setShadowLayer(AndroidUtils.dpToPxF(context, 1), 0, 0, Color.argb(180, 0, 0, 0));
 	}
 
 	@Nullable
@@ -76,6 +88,11 @@ public class CompassButton extends MapButton {
 	public void update() {
 		super.update();
 		float mapRotation = mapActivity.getMapRotate();
+		int rotationDegrees = Math.round(MapUtils.unifyRotationTo360(mapRotation)) % 360;
+		if (displayedRotationDegrees != rotationDegrees) {
+			displayedRotationDegrees = rotationDegrees;
+			invalidate();
+		}
 		if (imageView.getDrawable() instanceof CompassDrawable drawable) {
 			if (drawable.getMapRotation() != mapRotation) {
 				drawable.setMapRotation(mapRotation);
@@ -88,8 +105,21 @@ public class CompassButton extends MapButton {
 
 	@Override
 	protected void updateColors(boolean nightMode) {
+		rotationPaint.setColor(ColorUtilities.getMapButtonIconColor(getContext(), nightMode));
 		setBackgroundColors(ColorUtilities.getMapButtonBackgroundColor(getContext(), nightMode),
 				ColorUtilities.getMapButtonBackgroundPressedColor(getContext(), nightMode));
+	}
+
+	@Override
+	protected void dispatchDraw(@NonNull Canvas canvas) {
+		super.dispatchDraw(canvas);
+		if (displayedRotationDegrees < 0) {
+			return;
+		}
+		// Keep the baseline safely inside the circular image rather than on the
+		// outer frame/shadow, including when the user customises the button size.
+		float baseline = getHeight() / 2f + getImageSize() / 2f - AndroidUtils.dpToPxF(getContext(), 4);
+		canvas.drawText(displayedRotationDegrees + "°", getWidth() / 2f, baseline, rotationPaint);
 	}
 
 	@Override

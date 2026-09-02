@@ -12,7 +12,8 @@ enum class FlightPage {
 	WINDOW_SETUP,
 	SATELLITE,
 	SENSORS,
-	PHOTO
+	PHOTO,
+	JOURNEYS
 }
 
 enum class FlightSessionMode {
@@ -31,7 +32,8 @@ data class FlightWindowPlacement(
 	val forwardOffsetMeters: Float = 0f,
 	val verticalOffsetMeters: Float = 0f,
 	val zoom: Float = 1f,
-	val cabinTransparent: Boolean = false
+	val cabinTransparent: Boolean = false,
+	val cabinHidden: Boolean = false
 ) {
 	fun clamped(): FlightWindowPlacement = copy(
 		forwardOffsetMeters = forwardOffsetMeters.coerceIn(MIN_FORWARD_OFFSET_METERS, MAX_FORWARD_OFFSET_METERS),
@@ -57,15 +59,20 @@ data class FlightWindowLook(
 	val pitchDegrees: Float = 0f
 ) {
 	fun clamped(): FlightWindowLook = copy(
-		yawDegrees = yawDegrees.coerceIn(MIN_YAW_DEGREES, MAX_YAW_DEGREES),
+		yawDegrees = normalizeYaw(yawDegrees),
 		pitchDegrees = pitchDegrees.coerceIn(MIN_PITCH_DEGREES, MAX_PITCH_DEGREES)
 	)
 
 	companion object {
-		const val MIN_YAW_DEGREES = -120f
-		const val MAX_YAW_DEGREES = 120f
-		const val MIN_PITCH_DEGREES = -70f
-		const val MAX_PITCH_DEGREES = 70f
+		const val MIN_PITCH_DEGREES = -89f
+		const val MAX_PITCH_DEGREES = 45f
+
+		fun normalizeYaw(value: Float): Float {
+			var normalized = value % 360f
+			if (normalized >= 180f) normalized -= 360f
+			if (normalized < -180f) normalized += 360f
+			return normalized
+		}
 	}
 }
 
@@ -97,6 +104,16 @@ fun FlightWindowPlacement.geometry(): FlightWindowGeometry {
 		horizontalIncidence = FlightWindowPlacement.WALL_DISTANCE_METERS / horizontalDistance,
 		verticalIncidence = horizontalDistance / eyeToWindowDistance
 	)
+}
+
+fun FlightWindowPlacement.viewAzimuthDegrees(
+	aircraftBearingDegrees: Float,
+	look: FlightWindowLook
+): Float {
+	val windowAzimuthDegrees = Math.toDegrees(geometry().relativeAzimuthRadians.toDouble()).toFloat()
+	val value = aircraftBearingDegrees + windowAzimuthDegrees + look.yawDegrees
+	val normalized = value % 360f
+	return if (normalized < 0f) normalized + 360f else normalized
 }
 
 data class FlightStop(
@@ -235,6 +252,37 @@ data class FlightSpan(
 	}
 }
 
+data class FlightPhotoAttachment(
+	val id: String,
+	val fileName: String,
+	val localPath: String,
+	val timestampMillis: Long?,
+	val matchedSampleIndex: Int?,
+	val includeMainCamera: Boolean = true,
+	val includeSelfie: Boolean = false,
+	val includeMap: Boolean = true,
+	val includeScene3d: Boolean = true
+)
+
+data class FlightJourney(
+	val id: String,
+	val name: String,
+	val createdAtMillis: Long,
+	val updatedAtMillis: Long,
+	val plan: FlightPlan,
+	val trip: FlightTrip,
+	val flightSpans: List<FlightSpan>,
+	val photos: List<FlightPhotoAttachment>
+)
+
+data class FlightJourneySummary(
+	val id: String,
+	val name: String,
+	val updatedAtMillis: Long,
+	val sampleCount: Int,
+	val photoCount: Int
+)
+
 data class FlightRecordingPolicy(
 	val cruisePointDistanceMeters: Float = 1_000f,
 	val maximumStraightIntervalSeconds: Float = 20f,
@@ -285,6 +333,15 @@ data class FlightUiState(
 	val showTrackPoints: Boolean = false,
 	val flightSpans: List<FlightSpan> = emptyList(),
 	val pendingFlightStartProgress: Float? = null,
+	val journeyId: String? = null,
+	val journeyName: String = "",
+	val journeyCreatedAtMillis: Long? = null,
+	val journeyDirty: Boolean = false,
+	val savedJourneys: List<FlightJourneySummary> = emptyList(),
+	val photos: List<FlightPhotoAttachment> = emptyList(),
+	val pendingPhotos: List<FlightPhotoAttachment> = emptyList(),
+	val selectedPhotoId: String? = null,
+	val journeyMessage: String? = null,
 	val photoMainCamera: Boolean = true,
 	val photoSelfie: Boolean = false,
 	val photoMap: Boolean = true,

@@ -6,11 +6,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import net.osmand.data.RotatedTileBox
+import net.osmand.plus.utils.NativeUtilities
 import net.osmand.plus.views.layers.base.OsmandMapLayer
 import kotlin.math.ceil
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
 
 /** Draws replay-only information without making native map objects clickable. */
 class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
@@ -67,18 +65,24 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val step = ceil(samples.size / MAXIMUM_DRAWN_POINTS.toDouble()).toInt().coerceAtLeast(1)
 		for (index in samples.indices step step) {
 			val sample = samples[index]
-			if (!tileBox.containsLatLon(sample.latitude, sample.longitude)) continue
-			val x = tileBox.getPixXFromLatLon(sample.latitude, sample.longitude)
-			val y = tileBox.getPixYFromLatLon(sample.latitude, sample.longitude)
+			if (!NativeUtilities.containsLatLon(getMapRenderer(), tileBox, sample.latitude, sample.longitude)) continue
+			val pixel = NativeUtilities.getElevatedPixelFromLatLon(
+				getMapRenderer(), tileBox, sample.latitude, sample.longitude
+			)
+			val x = pixel.x
+			val y = pixel.y
 			canvas.drawCircle(x, y, 3.1f * scale, pointHaloPaint)
 			canvas.drawCircle(x, y, 1.65f * scale, pointPaint)
 		}
 	}
 
 	private fun drawPlane(canvas: Canvas, tileBox: RotatedTileBox, trip: FlightTrip?, sample: FlightSample) {
-		if (!tileBox.containsLatLon(sample.latitude, sample.longitude)) return
-		val x = tileBox.getPixXFromLatLon(sample.latitude, sample.longitude)
-		val y = tileBox.getPixYFromLatLon(sample.latitude, sample.longitude)
+		if (!NativeUtilities.containsLatLon(getMapRenderer(), tileBox, sample.latitude, sample.longitude)) return
+		val pixel = NativeUtilities.getElevatedPixelFromLatLon(
+			getMapRenderer(), tileBox, sample.latitude, sample.longitude
+		)
+		val x = pixel.x
+		val y = pixel.y
 		val scale = density.coerceAtLeast(1f)
 		val path = Path().apply {
 			moveTo(0f, -18f * scale)
@@ -101,7 +105,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		}
 		canvas.save()
 		canvas.translate(x, y)
-		canvas.rotate((sample.bearingDegrees ?: estimateBearing(trip, sample) ?: 0f) - tileBox.rotate)
+		val projectedRotation = projectedTrackRotation(tileBox, trip, sample, x, y)
+		val fallbackRotation = (sample.bearingDegrees ?: estimateBearing(trip, sample) ?: 0f) - tileBox.rotate
+		canvas.rotate(projectedRotation ?: fallbackRotation)
 		canvas.drawCircle(0f, 0f, 21f * scale, planeHaloPaint)
 		canvas.drawPath(path, planePaint)
 		planeOutlinePaint.strokeWidth = 1.4f * scale
@@ -109,13 +115,50 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		canvas.restore()
 	}
 
+	private fun projectedTrackRotation(
+		tileBox: RotatedTileBox,
+		trip: FlightTrip?,
+		sample: FlightSample,
+		currentX: Float,
+		currentY: Float
+	): Float? {
+		val samples = trip?.samples ?: return null
+		if (samples.size < 2) return null
+		val index = findSamplePosition(samples, sample)
+		val next = (index + 1..samples.lastIndex)
+			.firstOrNull { position ->
+				samples[position].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[position])
+			}
+			?.let(samples::get)
+		if (next != null) {
+			val nextPixel = NativeUtilities.getElevatedPixelFromLatLon(
+				getMapRenderer(), tileBox, next.latitude, next.longitude
+			)
+			return screenDirectionDegrees(nextPixel.x - currentX, nextPixel.y - currentY)
+		}
+		val previous = (index - 1 downTo 0)
+			.firstOrNull { position ->
+				samples[position].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[position])
+			}
+			?.let(samples::get)
+			?: return null
+		val previousPixel = NativeUtilities.getElevatedPixelFromLatLon(
+			getMapRenderer(), tileBox, previous.latitude, previous.longitude
+		)
+		return screenDirectionDegrees(currentX - previousPixel.x, currentY - previousPixel.y)
+	}
+
+	private fun screenDirectionDegrees(deltaX: Float, deltaY: Float): Float? {
+		if (kotlin.math.abs(deltaX) < 0.01f && kotlin.math.abs(deltaY) < 0.01f) return null
+		// The plane path points upward at zero degrees. atan2 describes a vector
+		// pointing right at zero degrees, hence the +90° conversion.
+		return Math.toDegrees(kotlin.math.atan2(deltaY.toDouble(), deltaX.toDouble())).toFloat() + 90f
+	}
+
 	private fun estimateBearing(trip: FlightTrip?, sample: FlightSample): Float? {
 		val samples = trip?.samples ?: return null
 		if (samples.size < 2) return null
-		var index = sample.index.coerceIn(0, samples.lastIndex)
-		if (samples[index].index != sample.index) {
-			index = samples.indexOfFirst { it.index >= sample.index }.takeIf { it >= 0 } ?: index
-		}
+		val index = findSamplePosition(samples, sample)
 		val next = (index + 1..samples.lastIndex)
 			.firstOrNull { position -> !samePosition(samples[index], samples[position]) }
 			?.let(samples::get)
@@ -124,12 +167,15 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			?.let(samples::get)
 		val from = if (next != null) samples[index] else previous ?: return null
 		val to = next ?: samples[index]
-		val latitude1 = Math.toRadians(from.latitude)
-		val latitude2 = Math.toRadians(to.latitude)
-		val longitudeDelta = Math.toRadians(to.longitude - from.longitude)
-		val y = sin(longitudeDelta) * cos(latitude2)
-		val x = cos(latitude1) * sin(latitude2) - sin(latitude1) * cos(latitude2) * cos(longitudeDelta)
-		return ((Math.toDegrees(atan2(y, x)) + 360.0) % 360.0).toFloat()
+		return FlightTrackMath.bearingBetween(from, to)
+	}
+
+	private fun findSamplePosition(samples: List<FlightSample>, sample: FlightSample): Int {
+		var index = sample.index.coerceIn(0, samples.lastIndex)
+		if (samples[index].index != sample.index) {
+			index = samples.indexOfFirst { it.index >= sample.index }.takeIf { it >= 0 } ?: index
+		}
+		return index
 	}
 
 	private fun samePosition(first: FlightSample, second: FlightSample): Boolean =

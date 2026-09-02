@@ -15,7 +15,8 @@ class FlightWindowPlacementStore(context: Context) {
 			forwardOffsetMeters = preferences.getFloat(KEY_FORWARD_OFFSET, 0f),
 			verticalOffsetMeters = preferences.getFloat(KEY_VERTICAL_OFFSET, 0f),
 			zoom = preferences.getFloat(KEY_ZOOM, 1f),
-			cabinTransparent = preferences.getBoolean(KEY_CABIN_TRANSPARENT, false)
+			cabinTransparent = preferences.getBoolean(KEY_CABIN_TRANSPARENT, false),
+			cabinHidden = preferences.getBoolean(KEY_CABIN_HIDDEN, false)
 		).clamped()
 	}
 
@@ -27,6 +28,7 @@ class FlightWindowPlacementStore(context: Context) {
 			.putFloat(KEY_VERTICAL_OFFSET, safePlacement.verticalOffsetMeters)
 			.putFloat(KEY_ZOOM, safePlacement.zoom)
 			.putBoolean(KEY_CABIN_TRANSPARENT, safePlacement.cabinTransparent)
+			.putBoolean(KEY_CABIN_HIDDEN, safePlacement.cabinHidden)
 			.apply()
 	}
 
@@ -37,5 +39,6 @@ class FlightWindowPlacementStore(context: Context) {
 		const val KEY_VERTICAL_OFFSET = "window_vertical_offset_m"
 		const val KEY_ZOOM = "window_view_zoom"
 		const val KEY_CABIN_TRANSPARENT = "window_cabin_transparent"
+		const val KEY_CABIN_HIDDEN = "window_cabin_hidden"
 	}
 }

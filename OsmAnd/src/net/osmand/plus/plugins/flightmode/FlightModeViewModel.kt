@@ -17,6 +17,9 @@ import net.osmand.Location
 import net.osmand.plus.OsmAndLocationProvider.GPSInfo
 import net.osmand.plus.OsmandApplication
 import net.osmand.shared.gpx.GpxFile
+import java.io.File
+import java.util.UUID
+import kotlin.math.abs
 
 class FlightModeViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -24,14 +27,22 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private val windowPlacementStore = FlightWindowPlacementStore(application)
 	private val terrainRepository = FlightTerrainRepository(app)
 	private val citySearch = FlightCitySearch(app)
+	private val journeyStore = FlightJourneyStore(application)
 	private var replayEngine: FlightReplayEngine? = null
 	private var terrainJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var requestedTerrainCenter: Pair<Double, Double>? = null
+	private val liveSamples = mutableListOf<FlightSample>()
+	private var liveDistanceMeters = 0.0
+	private var liveSequence = 0
+	private var pendingCaptureFile: File? = null
+	private var pendingCaptureTimestampMillis: Long = 0L
+	private var latestEnvironmentReading = FlightEnvironmentReading()
 
 	var uiState by mutableStateOf(
 		FlightUiState(
-			windowPlacement = windowPlacementStore.load()
+			windowPlacement = windowPlacementStore.load(),
+			savedJourneys = journeyStore.list()
 		)
 	)
 		private set
@@ -99,7 +110,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun updatePlan(plan: FlightPlan) {
-		uiState = uiState.copy(plan = plan, profile = FlightProfilePlanner.build(plan))
+		uiState = uiState.copy(
+			plan = plan,
+			profile = if (uiState.trip != null) uiState.profile else FlightProfilePlanner.build(plan),
+			journeyDirty = uiState.journeyDirty || uiState.trip != null
+		)
 	}
 
 	private fun searchCitiesForStop(index: Int, name: String) {
@@ -137,6 +152,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun startLive() {
 		replayEngine = null
+		liveSamples.clear()
+		liveDistanceMeters = 0.0
+		liveSequence = 0
+		latestEnvironmentReading = FlightEnvironmentReading()
+		val journeyName = uiState.plan.stops.map { it.name.trim() }.filter { it.isNotEmpty() }
+			.joinToString(" → ").ifBlank { "Nouveau journal de vol" }
 		uiState = uiState.copy(
 			page = FlightPage.MAP,
 			sessionMode = FlightSessionMode.LIVE,
@@ -146,13 +167,40 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			replayProgress = 0f,
 			tripLoadError = null,
 			flightSpans = emptyList(),
-			pendingFlightStartProgress = null
+			pendingFlightStartProgress = null,
+			journeyId = null,
+			journeyName = journeyName,
+			journeyCreatedAtMillis = System.currentTimeMillis(),
+			journeyDirty = true,
+			photos = emptyList(),
+			pendingPhotos = emptyList(),
+			selectedPhotoId = null,
+			journeyMessage = null
 		)
 	}
 
-	fun loadTrip(uri: Uri) {
-		loadTrip { FlightTripLoader.load(app, uri) }
+	fun loadSource(uri: Uri) {
+		uiState = uiState.copy(loadingTrip = true, tripLoadError = null, journeyMessage = null)
+		viewModelScope.launch {
+			val result = runCatching {
+				withContext(Dispatchers.IO) {
+					if (journeyStore.isJourneyArchive(uri)) {
+						LoadedSource.Journey(journeyStore.importArchive(uri))
+					} else {
+						LoadedSource.Trip(FlightTripLoader.load(app, uri))
+					}
+				}
+			}
+			result.onSuccess { source ->
+				when (source) {
+					is LoadedSource.Journey -> applyJourney(source.journey)
+					is LoadedSource.Trip -> applyImportedTrip(source.trip)
+				}
+			}.onFailure(::showTripLoadFailure)
+		}
 	}
+
+	fun loadTrip(uri: Uri) = loadSource(uri)
 
 	fun loadTrip(gpxFile: GpxFile) {
 		loadTrip { FlightTripLoader.load(gpxFile) }
@@ -165,30 +213,85 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				withContext(Dispatchers.IO) { loader() }
 			}
 			result.onSuccess { trip ->
-				replayEngine = FlightReplayEngine(trip)
-				val firstSnapshot = replayEngine?.snapshotAt(0f)
-				uiState = uiState.copy(
-					page = FlightPage.MAP,
-					sessionMode = FlightSessionMode.REPLAY,
-					mapFollowing = true,
-					trip = trip,
-					profile = FlightProfilePlanner.fromTrip(trip),
-					snapshot = firstSnapshot,
-					replayProgress = 0f,
-					replayPlaying = false,
-					flightSpans = emptyList(),
-					pendingFlightStartProgress = null,
-					loadingTrip = false,
-					tripLoadError = null
-				)
-				firstSnapshot?.sample?.let(::requestTerrain)
-			}.onFailure { error ->
-				uiState = uiState.copy(
-					loadingTrip = false,
-					tripLoadError = error.message ?: "Impossible de charger ce trajet"
-				)
-			}
+				applyImportedTrip(trip)
+			}.onFailure(::showTripLoadFailure)
 		}
+	}
+
+	private fun applyImportedTrip(trip: FlightTrip) {
+		applyReplayTrip(
+			trip = trip,
+			journeyId = null,
+			journeyName = trip.name,
+			journeyCreatedAtMillis = System.currentTimeMillis(),
+			flightSpans = emptyList(),
+			photos = emptyList(),
+			dirty = true,
+			message = "GPX importé · enregistre-le comme Journal de vol"
+		)
+	}
+
+	private fun applyJourney(journey: FlightJourney) {
+		uiState = uiState.copy(plan = journey.plan)
+		applyReplayTrip(
+			trip = journey.trip,
+			journeyId = journey.id,
+			journeyName = journey.name,
+			journeyCreatedAtMillis = journey.createdAtMillis,
+			flightSpans = journey.flightSpans,
+			photos = journey.photos,
+			dirty = false,
+			message = "Journal de vol chargé"
+		)
+	}
+
+	private fun applyReplayTrip(
+		trip: FlightTrip,
+		journeyId: String?,
+		journeyName: String,
+		journeyCreatedAtMillis: Long,
+		flightSpans: List<FlightSpan>,
+		photos: List<FlightPhotoAttachment>,
+		dirty: Boolean,
+		message: String?
+	) {
+		// A GPX heading is optional. Resolve it once here for every replay source
+		// (plain GPX, OsmAnd track or saved Flight Journal) so every screen uses
+		// the direction from the current point to the next point in the same leg.
+		val resolvedTrip = trip.copy(samples = FlightTrackMath.fillMissingBearings(trip.samples))
+		replayEngine = FlightReplayEngine(resolvedTrip)
+		val firstSnapshot = replayEngine?.snapshotAt(0f)
+		uiState = uiState.copy(
+			page = FlightPage.MAP,
+			sessionMode = FlightSessionMode.REPLAY,
+			mapFollowing = true,
+			trip = resolvedTrip,
+			profile = FlightProfilePlanner.fromTrip(resolvedTrip),
+			snapshot = firstSnapshot,
+			replayProgress = 0f,
+			replayPlaying = false,
+			flightSpans = flightSpans,
+			pendingFlightStartProgress = null,
+			journeyId = journeyId,
+			journeyName = journeyName,
+			journeyCreatedAtMillis = journeyCreatedAtMillis,
+			journeyDirty = dirty,
+			photos = photos,
+			pendingPhotos = emptyList(),
+			selectedPhotoId = photos.firstOrNull()?.id,
+			journeyMessage = message,
+			loadingTrip = false,
+			tripLoadError = null,
+			savedJourneys = journeyStore.list()
+		)
+		firstSnapshot?.sample?.let(::requestTerrain)
+	}
+
+	private fun showTripLoadFailure(error: Throwable) {
+		uiState = uiState.copy(
+			loadingTrip = false,
+			tripLoadError = error.message ?: "Impossible de charger ce trajet"
+		)
 	}
 
 	fun clearTripLoadError() {
@@ -228,10 +331,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun updateLiveLocation(location: Location, gpsInfo: GPSInfo) {
 		if (uiState.sessionMode != FlightSessionMode.LIVE) return
-		val sample = FlightSample(
-			index = (uiState.snapshot?.sample?.index ?: -1) + 1,
+		val previous = uiState.snapshot?.sample
+		val timestamp = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
+		val rawSample = FlightSample(
+			index = liveSequence++,
 			legIndex = 0,
-			timestampMillis = location.time,
+			timestampMillis = timestamp,
 			latitude = location.latitude,
 			longitude = location.longitude,
 			altitudeMeters = location.altitude.takeIf { location.hasAltitude() },
@@ -239,10 +344,90 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			bearingDegrees = location.bearing.takeIf { location.hasBearing() },
 			horizontalAccuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
 			satellitesUsed = gpsInfo.usedSatellites,
-			satellitesFound = gpsInfo.foundSatellites
+			satellitesFound = gpsInfo.foundSatellites,
+			soundDb = latestEnvironmentReading.soundDb,
+			soundSpectrum = latestEnvironmentReading.soundSpectrum,
+			vibrationHz = latestEnvironmentReading.vibrationHz
 		)
+		val sample = if (rawSample.bearingDegrees == null && previous != null) {
+			rawSample.copy(bearingDegrees = FlightTrackMath.bearingBetween(previous, rawSample))
+		} else rawSample
+		if (shouldRecordLiveSample(sample)) appendLiveSample(sample)
 		uiState = uiState.copy(snapshot = FlightSnapshot(sample, progress = 0f))
 		requestTerrain(sample)
+	}
+
+	fun updateEnvironment(reading: FlightEnvironmentReading) {
+		if (uiState.sessionMode != FlightSessionMode.LIVE) return
+		latestEnvironmentReading = reading
+		val snapshot = uiState.snapshot ?: return
+		uiState = uiState.copy(
+			snapshot = snapshot.copy(
+				sample = snapshot.sample.copy(
+					soundDb = reading.soundDb,
+					soundSpectrum = reading.soundSpectrum,
+					vibrationHz = reading.vibrationHz
+				)
+			)
+		)
+	}
+
+	private fun shouldRecordLiveSample(sample: FlightSample): Boolean {
+		val previous = liveSamples.lastOrNull() ?: return true
+		val deltaSeconds = ((sample.timestampMillis - previous.timestampMillis).coerceAtLeast(0L) / 1_000f)
+		val bearingDelta = if (sample.bearingDegrees != null && previous.bearingDegrees != null) {
+			angularDifference(sample.bearingDegrees, previous.bearingDegrees)
+		} else 0f
+		val turnRate = if (deltaSeconds > 0f) bearingDelta / deltaSeconds else 0f
+		val interval = uiState.recordingPolicy.intervalSeconds(
+			speedMetersPerSecond = sample.speedMetersPerSecond ?: 0f,
+			turnRateDegreesPerSecond = turnRate
+		)
+		return deltaSeconds >= interval
+	}
+
+	private fun appendLiveSample(sample: FlightSample) {
+		val recorded = sample.copy(index = liveSamples.size)
+		liveSamples.lastOrNull()?.let { previous ->
+			val result = FloatArray(1)
+			Location.distanceBetween(previous.latitude, previous.longitude, recorded.latitude, recorded.longitude, result)
+			liveDistanceMeters += result[0]
+		}
+		liveSamples += recorded
+		publishLiveTrip(recorded)
+	}
+
+	private fun publishLiveTrip(lastSample: FlightSample) {
+		val first = liveSamples.first()
+		val trip = FlightTrip(
+			name = uiState.journeyName.ifBlank { "Journal de vol" },
+			samples = liveSamples.toList(),
+			legs = listOf(
+				FlightLeg(
+					index = 0,
+					name = "",
+					startSampleIndex = 0,
+					endSampleIndex = liveSamples.lastIndex,
+					distanceMeters = liveDistanceMeters,
+					startTimeMillis = first.timestampMillis,
+					endTimeMillis = lastSample.timestampMillis
+				)
+			),
+			hasUsableTimestamps = liveSamples.size > 1 && lastSample.timestampMillis > first.timestampMillis,
+			totalDistanceMeters = liveDistanceMeters,
+			sourceDescription = "Enregistrement Suivi de vol"
+		)
+		uiState = uiState.copy(
+			trip = trip,
+			profile = FlightProfilePlanner.fromTrip(trip),
+			journeyDirty = true
+		)
+	}
+
+	private fun angularDifference(first: Float, second: Float): Float {
+		var difference = abs(first - second) % 360f
+		if (difference > 180f) difference = 360f - difference
+		return difference
 	}
 
 	fun preloadTerrain() {
@@ -355,7 +540,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			longitude = longitude,
 			altitudeMeters = 10_000.0,
 			speedMetersPerSecond = 230f,
-			bearingDegrees = if (to?.latitude != null && to.longitude != null) 90f else null,
+			bearingDegrees = if (to?.latitude != null && to.longitude != null) {
+				FlightTrackMath.bearingBetween(latitude, longitude, to.latitude, to.longitude)
+			} else null,
 			horizontalAccuracyMeters = null
 		)
 	}
@@ -417,6 +604,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		setWindowPlacement(uiState.windowPlacement.copy(cabinTransparent = transparent))
 	}
 
+	fun setCabinHidden(hidden: Boolean) {
+		setWindowPlacement(uiState.windowPlacement.copy(cabinHidden = hidden))
+	}
+
 	private fun setWindowPlacement(placement: FlightWindowPlacement, persist: Boolean = true) {
 		val safePlacement = placement.clamped()
 		if (persist) windowPlacementStore.save(safePlacement)
@@ -444,7 +635,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (span.endProgress - span.startProgress < MINIMUM_FLIGHT_SPAN_PROGRESS) return
 		uiState = uiState.copy(
 			flightSpans = (uiState.flightSpans + span).sortedBy { it.startProgress },
-			pendingFlightStartProgress = null
+			pendingFlightStartProgress = null,
+			journeyDirty = true
 		)
 	}
 
@@ -455,7 +647,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun removeFlightSpan(index: Int) {
 		if (index !in uiState.flightSpans.indices) return
 		uiState = uiState.copy(
-			flightSpans = uiState.flightSpans.toMutableList().apply { removeAt(index) }
+			flightSpans = uiState.flightSpans.toMutableList().apply { removeAt(index) },
+			journeyDirty = true
 		)
 	}
 
@@ -471,6 +664,162 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(recordingPolicy = policy)
 	}
 
+	fun updateJourneyName(name: String) {
+		if (uiState.journeyName != name) {
+			uiState = uiState.copy(journeyName = name, journeyDirty = true, journeyMessage = null)
+		}
+	}
+
+	fun saveJourney() {
+		flushLatestLiveSample()
+		val trip = uiState.trip
+		if (trip == null || trip.samples.isEmpty()) {
+			uiState = uiState.copy(journeyMessage = "Aucun point à enregistrer")
+			return
+		}
+		val now = System.currentTimeMillis()
+		val journey = FlightJourney(
+			id = uiState.journeyId ?: UUID.randomUUID().toString(),
+			name = uiState.journeyName.trim().ifBlank { trip.name.ifBlank { "Journal de vol" } },
+			createdAtMillis = uiState.journeyCreatedAtMillis ?: now,
+			updatedAtMillis = now,
+			plan = uiState.plan,
+			trip = trip,
+			flightSpans = uiState.flightSpans,
+			photos = uiState.photos
+		)
+		viewModelScope.launch {
+			val result = runCatching { withContext(Dispatchers.IO) { journeyStore.save(journey) } }
+			result.onSuccess { saved ->
+				uiState = uiState.copy(
+					journeyId = saved.id,
+					journeyName = saved.name,
+					journeyCreatedAtMillis = saved.createdAtMillis,
+					journeyDirty = false,
+					savedJourneys = journeyStore.list(),
+					journeyMessage = "Journal de vol enregistré"
+				)
+			}.onFailure { error ->
+				uiState = uiState.copy(journeyMessage = error.message ?: "Enregistrement impossible")
+			}
+		}
+	}
+
+	fun openJourney(id: String) {
+		uiState = uiState.copy(loadingTrip = true, journeyMessage = null)
+		viewModelScope.launch {
+			val result = runCatching { withContext(Dispatchers.IO) { journeyStore.load(id) } }
+			result.onSuccess(::applyJourney).onFailure(::showTripLoadFailure)
+		}
+	}
+
+	fun suggestedExportName(): String {
+		val base = uiState.journeyName.trim().ifBlank { "voyage-aerien" }
+			.replace(Regex("[^A-Za-z0-9._-]"), "-")
+			.trim('-')
+			.take(80)
+			.ifBlank { "voyage-aerien" }
+		return "$base.${FlightJourneyStore.ARCHIVE_EXTENSION}"
+	}
+
+	fun exportJourney(uri: Uri) {
+		flushLatestLiveSample()
+		val trip = uiState.trip
+		if (trip == null || trip.samples.isEmpty()) {
+			uiState = uiState.copy(journeyMessage = "Aucun voyage à exporter")
+			return
+		}
+		val now = System.currentTimeMillis()
+		val journey = FlightJourney(
+			id = uiState.journeyId ?: UUID.randomUUID().toString(),
+			name = uiState.journeyName.trim().ifBlank { trip.name },
+			createdAtMillis = uiState.journeyCreatedAtMillis ?: now,
+			updatedAtMillis = now,
+			plan = uiState.plan,
+			trip = trip,
+			flightSpans = uiState.flightSpans,
+			photos = uiState.photos
+		)
+		viewModelScope.launch {
+			val result = runCatching { withContext(Dispatchers.IO) { journeyStore.exportArchive(journey, uri) } }
+			uiState = uiState.copy(
+				journeyMessage = result.fold(
+					onSuccess = { "Archive exportée : GPX + capteurs + photos" },
+					onFailure = { it.message ?: "Export impossible" }
+				)
+			)
+		}
+	}
+
+	fun stageReplayPhotos(uris: List<Uri>) {
+		if (uris.isEmpty()) return
+		viewModelScope.launch {
+			val photos = withContext(Dispatchers.IO) { journeyStore.importPhotos(uris, uiState.trip) }
+			uiState = uiState.copy(
+				pendingPhotos = uiState.pendingPhotos + photos,
+				journeyMessage = if (photos.isEmpty()) "Aucune photo lisible" else "${photos.size} photo(s) à valider"
+			)
+		}
+	}
+
+	fun validatePendingPhotos() {
+		if (uiState.pendingPhotos.isEmpty()) return
+		val accepted = uiState.pendingPhotos
+		uiState = uiState.copy(
+			photos = uiState.photos + accepted,
+			pendingPhotos = emptyList(),
+			selectedPhotoId = accepted.first().id,
+			journeyDirty = true,
+			journeyMessage = "Photos associées par leur heure"
+		)
+	}
+
+	fun discardPendingPhotos() {
+		val discarded = uiState.pendingPhotos
+		if (discarded.isEmpty()) return
+		uiState = uiState.copy(pendingPhotos = emptyList(), journeyMessage = null)
+		viewModelScope.launch(Dispatchers.IO) { journeyStore.discardPhotos(discarded) }
+	}
+
+	fun preparePhotoCapture(): File {
+		pendingCaptureFile?.let { previous -> if (previous.isFile) previous.delete() }
+		return journeyStore.createCaptureFile().also { file ->
+			pendingCaptureFile = file
+			pendingCaptureTimestampMillis = System.currentTimeMillis()
+		}
+	}
+
+	fun finishPhotoCapture(success: Boolean) {
+		val file = pendingCaptureFile ?: return
+		pendingCaptureFile = null
+		if (!success || !file.isFile || file.length() == 0L) {
+			if (file.isFile) file.delete()
+			return
+		}
+		val photo = journeyStore.capturedPhoto(
+			file = file,
+			fallbackTimestampMillis = pendingCaptureTimestampMillis,
+			trip = uiState.trip,
+			includeMainCamera = uiState.photoMainCamera,
+			includeSelfie = uiState.photoSelfie,
+			includeMap = uiState.photoMap,
+			includeScene3d = uiState.photoScene3d
+		)
+		uiState = uiState.copy(
+			photos = uiState.photos + photo,
+			selectedPhotoId = photo.id,
+			journeyDirty = true,
+			journeyMessage = "Photo enregistrée à ${photo.timestampMillis ?: pendingCaptureTimestampMillis}"
+		)
+	}
+
+	fun selectPhoto(id: String) {
+		val photo = (uiState.photos + uiState.pendingPhotos).firstOrNull { it.id == id } ?: return
+		uiState = uiState.copy(selectedPhotoId = id)
+		val sample = photo.matchedSampleIndex?.let { index -> uiState.trip?.samples?.firstOrNull { it.index == index } }
+		if (sample != null) seekReplay(uiState.trip?.progressFor(sample) ?: return)
+	}
+
 	fun setPhotoSources(main: Boolean? = null, selfie: Boolean? = null, map: Boolean? = null, scene3d: Boolean? = null) {
 		uiState = uiState.copy(
 			photoMainCamera = main ?: uiState.photoMainCamera,
@@ -480,10 +829,28 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 	}
 
+	private fun flushLatestLiveSample() {
+		if (uiState.sessionMode != FlightSessionMode.LIVE) return
+		val latest = uiState.snapshot?.sample ?: return
+		val recorded = liveSamples.lastOrNull()
+		if (recorded?.timestampMillis == latest.timestampMillis) {
+			val replacement = latest.copy(index = liveSamples.lastIndex)
+			liveSamples[liveSamples.lastIndex] = replacement
+			publishLiveTrip(replacement)
+		} else {
+			appendLiveSample(latest)
+		}
+	}
+
 	override fun onCleared() {
 		terrainJob?.cancel()
 		citySearchJob?.cancel()
 		super.onCleared()
+	}
+
+	private sealed interface LoadedSource {
+		data class Trip(val trip: FlightTrip) : LoadedSource
+		data class Journey(val journey: FlightJourney) : LoadedSource
 	}
 
 	companion object {

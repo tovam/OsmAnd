@@ -1,6 +1,7 @@
 package net.osmand.test.junit
 
 import net.osmand.plus.plugins.flightmode.FlightLeg
+import net.osmand.plus.plugins.flightmode.FlightCabinSide
 import net.osmand.plus.plugins.flightmode.FlightPlan
 import net.osmand.plus.plugins.flightmode.FlightProfilePlanner
 import net.osmand.plus.plugins.flightmode.FlightRecordingPolicy
@@ -12,9 +13,12 @@ import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
 import net.osmand.plus.plugins.flightmode.FlightTerrainMeshBuilder
 import net.osmand.plus.plugins.flightmode.FlightTerrainTilePlanner
+import net.osmand.plus.plugins.flightmode.FlightTrackMath
 import net.osmand.plus.plugins.flightmode.FlightTrip
+import net.osmand.plus.plugins.flightmode.FlightWindowLook
 import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
 import net.osmand.plus.plugins.flightmode.geometry
+import net.osmand.plus.plugins.flightmode.viewAzimuthDegrees
 import net.osmand.plus.plugins.flightmode.TerrainTileId
 import net.osmand.plus.plugins.flightmode.TerrainTilePlan
 import net.osmand.plus.plugins.flightmode.TerrariumCodec
@@ -105,6 +109,59 @@ class FlightModeLogicTest {
 		assertEquals(FlightWindowPlacement.MAX_FORWARD_OFFSET_METERS, placement.forwardOffsetMeters, 0f)
 		assertEquals(FlightWindowPlacement.MIN_VERTICAL_OFFSET_METERS, placement.verticalOffsetMeters, 0f)
 		assertEquals(FlightWindowPlacement.MAX_ZOOM, placement.zoom, 0f)
+	}
+
+	@Test
+	fun windowLookWrapsHorizontallyAndOnlyLimitsTheVerticalView() {
+		val look = FlightWindowLook(yawDegrees = 450f, pitchDegrees = 80f).clamped()
+		assertEquals(90f, look.yawDegrees, 0f)
+		assertEquals(45f, look.pitchDegrees, 0f)
+		assertEquals(-90f, FlightWindowLook(yawDegrees = -450f).clamped().yawDegrees, 0f)
+	}
+
+	@Test
+	fun missingGpxBearingsAreDerivedFromTheTrack() {
+		val eastbound = listOf(
+			sample(0, 0L, 48.0, 2.0).copy(bearingDegrees = null),
+			sample(1, 1_000L, 48.0, 2.1).copy(bearingDegrees = null)
+		)
+		val resolved = FlightTrackMath.fillMissingBearings(eastbound)
+		assertEquals(90f, resolved.first().bearingDegrees ?: -1f, 0.2f)
+		assertEquals(90f, resolved.last().bearingDegrees ?: -1f, 0.2f)
+	}
+
+	@Test
+	fun missingHeadingPointsToTheNextPointWithoutCrossingFlightLegs() {
+		val samples = listOf(
+			sample(0, 0L, 48.0, 2.0).copy(legIndex = 0, bearingDegrees = null),
+			sample(1, 1_000L, 48.1, 2.0).copy(legIndex = 0, bearingDegrees = null),
+			sample(2, 2_000L, 48.1, 3.0).copy(legIndex = 1, bearingDegrees = null),
+			sample(3, 3_000L, 48.1, 3.1).copy(legIndex = 1, bearingDegrees = null)
+		)
+
+		val resolved = FlightTrackMath.fillMissingBearings(samples)
+
+		assertEquals(0f, resolved[0].bearingDegrees ?: -1f, 0.2f)
+		assertEquals(0f, resolved[1].bearingDegrees ?: -1f, 0.2f)
+		assertEquals(90f, resolved[2].bearingDegrees ?: -1f, 0.2f)
+		assertEquals(90f, resolved[3].bearingDegrees ?: -1f, 0.2f)
+	}
+
+	@Test
+	fun windowViewUsesAircraftHeadingAndCabinSideConsistently() {
+		val eastbound = 90f
+		assertEquals(
+			0f,
+			FlightWindowPlacement(side = FlightCabinSide.LEFT)
+				.viewAzimuthDegrees(eastbound, FlightWindowLook()),
+			0.001f
+		)
+		assertEquals(
+			180f,
+			FlightWindowPlacement(side = FlightCabinSide.RIGHT)
+				.viewAzimuthDegrees(eastbound, FlightWindowLook()),
+			0.001f
+		)
 	}
 
 	@Test

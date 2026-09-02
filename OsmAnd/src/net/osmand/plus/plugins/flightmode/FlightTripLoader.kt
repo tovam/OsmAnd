@@ -86,13 +86,14 @@ object FlightTripLoader {
 		}
 
 		if (samples.isEmpty()) throw IOException("Ce GPX ne contient aucun point de trace")
-		val timestamps = samples.map { it.timestampMillis }
+		val resolvedSamples = FlightTrackMath.fillMissingBearings(samples)
+		val timestamps = resolvedSamples.map { it.timestampMillis }
 		val hasUsableTimestamps = timestamps.count { it > 0L } == timestamps.size &&
 			timestamps.zipWithNext().all { (before, after) -> after >= before } &&
 			timestamps.last() > timestamps.first()
 		return FlightTrip(
 			name = displayName.removeSuffix(".gpx").removeSuffix(".GPX"),
-			samples = samples,
+			samples = resolvedSamples,
 			legs = legs,
 			hasUsableTimestamps = hasUsableTimestamps,
 			totalDistanceMeters = totalDistance,

@@ -1,15 +1,18 @@
 package net.osmand.plus.plugins.flightmode
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.ViewGroup
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.ViewModelProvider
 import net.osmand.Location
@@ -19,7 +22,6 @@ import net.osmand.plus.base.BaseFullScreenFragment
 import net.osmand.plus.track.SelectTrackTabsFragment
 import net.osmand.plus.utils.AndroidUtils
 import net.osmand.plus.utils.InsetTargetsCollection
-import net.osmand.plus.views.OsmandMapTileView
 
 class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
@@ -29,28 +31,30 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var lastMapRefreshMillis = 0L
 	private var mapInteractionBlockerLayer: FlightMapInteractionBlockerLayer? = null
 	private var replayMapLayer: FlightReplayMapLayer? = null
-	private var mapTouchDownX = 0f
-	private var mapTouchDownY = 0f
-	private val mapTouchSlop by lazy { ViewConfiguration.get(requireContext()).scaledTouchSlop.toFloat() }
-	private val mapTouchListener = OsmandMapTileView.TouchListener { event ->
-		when (event.actionMasked) {
-			MotionEvent.ACTION_DOWN -> {
-				mapTouchDownX = event.x
-				mapTouchDownY = event.y
-			}
-			MotionEvent.ACTION_POINTER_DOWN -> viewModel.setMapFollowing(false)
-			MotionEvent.ACTION_MOVE -> {
-				val deltaX = event.x - mapTouchDownX
-				val deltaY = event.y - mapTouchDownY
-				if (event.pointerCount > 1 || deltaX * deltaX + deltaY * deltaY >= mapTouchSlop * mapTouchSlop) {
-					viewModel.setMapFollowing(false)
-				}
-			}
+	private var environmentRecorder: FlightEnvironmentRecorder? = null
+	private var locationUpdatesRegistered = false
+	private var externalPhotoCaptureInProgress = false
+	private val microphonePermissionLauncher = registerForActivityResult(
+		ActivityResultContracts.RequestPermission()
+	) { granted ->
+		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
+			restartEnvironmentRecorder(recordMicrophone = granted)
 		}
 	}
-
 	private val openTripLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-		if (uri != null) viewModel.loadTrip(uri)
+		if (uri != null) viewModel.loadSource(uri)
+	}
+	private val openPhotosLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+		viewModel.stageReplayPhotos(uris)
+	}
+	private val takePhotoLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+		externalPhotoCaptureInProgress = false
+		viewModel.finishPhotoCapture(success)
+	}
+	private val exportJourneyLauncher = registerForActivityResult(
+		ActivityResultContracts.CreateDocument("application/zip")
+	) { uri ->
+		if (uri != null) viewModel.exportJourney(uri)
 	}
 
 	private val backPressedCallback = object : OnBackPressedCallback(true) {
@@ -60,7 +64,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					viewModel.saveWindowPlacement()
 					viewModel.showPage(FlightPage.WINDOW)
 				}
-				FlightPage.WINDOW, FlightPage.SATELLITE, FlightPage.SENSORS, FlightPage.PHOTO -> viewModel.showPage(FlightPage.MAP)
+				FlightPage.WINDOW, FlightPage.SATELLITE, FlightPage.SENSORS, FlightPage.PHOTO,
+				FlightPage.JOURNEYS -> viewModel.showPage(FlightPage.MAP)
 				FlightPage.MAP, FlightPage.PREPARE -> close()
 			}
 		}
@@ -78,12 +83,14 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 			setContent {
 				FlightModeScreen(
 					state = viewModel.uiState,
+					mapView = app.osmandMap.mapView,
 					onClose = ::close,
 					onPageChange = viewModel::showPage,
 					onImportTrip = {
 						openTripLauncher.launch(
 							arrayOf(
 								"application/gpx+xml",
+								"application/zip",
 								"application/xml",
 								"text/xml",
 								"application/octet-stream"
@@ -96,6 +103,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 						app.locationProvider.lastKnownLocation?.let {
 							viewModel.updateLiveLocation(it, app.locationProvider.gpsInfo)
 						}
+						startEnvironmentRecorder(requestPermission = true)
 					},
 					onUpdateStop = viewModel::updateStop,
 					onSelectCity = viewModel::selectCity,
@@ -117,6 +125,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onSetWindowZoom = viewModel::setWindowZoom,
 					onChangeWindowZoom = viewModel::changeWindowZoom,
 					onSetCabinTransparent = viewModel::setCabinTransparent,
+					onSetCabinHidden = viewModel::setCabinHidden,
 					onRetryTerrain = viewModel::retryTerrain,
 					onTerrainRendererError = viewModel::setTerrainRendererError,
 					onSetMapFollowing = viewModel::setMapFollowing,
@@ -128,9 +137,27 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onSetSatelliteOpacity = viewModel::setSatelliteOpacity,
 					onSetTerrainOpacity = viewModel::setTerrainOpacity,
 					onSetRecordingPolicy = viewModel::setRecordingPolicy,
-					onSetPhotoSources = viewModel::setPhotoSources
+					onSetPhotoSources = viewModel::setPhotoSources,
+					onPhotoAction = ::handlePhotoAction,
+					onValidatePhotos = viewModel::validatePendingPhotos,
+					onDiscardPhotos = viewModel::discardPendingPhotos,
+					onSelectPhoto = viewModel::selectPhoto,
+					onUpdateJourneyName = viewModel::updateJourneyName,
+					onSaveJourney = viewModel::saveJourney,
+					onExportJourney = { exportJourneyLauncher.launch(viewModel.suggestedExportName()) },
+					onOpenJourney = viewModel::openJourney
 				)
 			}
+		}
+	}
+
+	private fun handlePhotoAction() {
+		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
+			val file = viewModel.preparePhotoCapture()
+			externalPhotoCaptureInProgress = true
+			takePhotoLauncher.launch(AndroidUtils.getUriForFile(requireContext(), file))
+		} else {
+			openPhotosLauncher.launch(arrayOf("image/*"))
 		}
 	}
 
@@ -143,13 +170,20 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		hud.visibility = View.GONE
 		captureMapState()
 		installMapInteractionGuard()
-		app.locationProvider.addLocationListener(this)
+		startLocationUpdates()
+		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
+			startEnvironmentRecorder(requestPermission = false)
+		}
 		activity.refreshMap()
 	}
 
 	override fun onPause() {
-		app.locationProvider.removeLocationListener(this)
+		if (!externalPhotoCaptureInProgress) {
+			stopLocationUpdates()
+			environmentRecorder?.stop()
+		}
 		viewModel.saveWindowPlacement()
+		cancelNativeMapGesture()
 		removeMapInteractionGuard()
 		restoreMapState()
 		val activity = requireMapActivity()
@@ -157,6 +191,22 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		activity.enableDrawer()
 		activity.refreshMap()
 		super.onPause()
+	}
+
+	override fun onDestroyView() {
+		// onPause normally performs this cleanup. Repeating it here is deliberate:
+		// a fragment transaction or activity recreation must never leave a flight
+		// layer or an unfinished gesture attached to OsmAnd's shared map view.
+		cancelNativeMapGesture()
+		removeMapInteractionGuard()
+		restoreMapState()
+		super.onDestroyView()
+	}
+
+	override fun onDestroy() {
+		stopLocationUpdates()
+		environmentRecorder?.stop()
+		super.onDestroy()
 	}
 
 	override fun updateLocation(location: Location?) {
@@ -168,6 +218,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	override fun getInsetTargets(): InsetTargetsCollection = InsetTargetsCollection()
 
 	private fun showReplayStateOnMap(trip: FlightTrip?, sample: FlightSample?, showPoints: Boolean) {
+		if (viewModel.uiState.sessionMode != FlightSessionMode.LIVE) environmentRecorder?.stop()
 		replayMapLayer?.update(trip, sample, showPoints)
 		if (sample == null || viewModel.uiState.page != FlightPage.MAP || !viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
@@ -189,7 +240,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	private fun installMapInteractionGuard() {
 		val mapView = app.osmandMap.mapView
-		mapView.addTouchListener(mapTouchListener)
 		if (mapInteractionBlockerLayer == null) {
 			FlightMapInteractionBlockerLayer(requireContext()).also { layer ->
 				mapView.addLayer(layer, MAP_INTERACTION_BLOCKER_Z_ORDER)
@@ -208,11 +258,20 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	private fun removeMapInteractionGuard() {
 		val mapView = app.osmandMap.mapView
-		mapView.removeTouchListener(mapTouchListener)
 		mapInteractionBlockerLayer?.let(mapView::removeLayer)
 		mapInteractionBlockerLayer = null
 		replayMapLayer?.let(mapView::removeLayer)
 		replayMapLayer = null
+	}
+
+	private fun cancelNativeMapGesture() {
+		val now = SystemClock.uptimeMillis()
+		val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+		try {
+			app.osmandMap.mapView.onTouchEvent(cancel)
+		} finally {
+			cancel.recycle()
+		}
 	}
 
 	private fun captureMapState() {
@@ -240,6 +299,34 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	private fun close() {
 		parentFragmentManager.popBackStack()
+	}
+
+	private fun startEnvironmentRecorder(requestPermission: Boolean) {
+		val granted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) ==
+			PackageManager.PERMISSION_GRANTED
+		restartEnvironmentRecorder(recordMicrophone = granted)
+		if (requestPermission && !granted) microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+	}
+
+	private fun restartEnvironmentRecorder(recordMicrophone: Boolean) {
+		val recorder = environmentRecorder ?: FlightEnvironmentRecorder(requireContext(), viewModel::updateEnvironment)
+			.also { environmentRecorder = it }
+		recorder.stop()
+		recorder.start(recordMicrophone)
+	}
+
+	private fun startLocationUpdates() {
+		if (!locationUpdatesRegistered) {
+			app.locationProvider.addLocationListener(this)
+			locationUpdatesRegistered = true
+		}
+	}
+
+	private fun stopLocationUpdates() {
+		if (locationUpdatesRegistered) {
+			app.locationProvider.removeLocationListener(this)
+			locationUpdatesRegistered = false
+		}
 	}
 
 	private data class MapState(
