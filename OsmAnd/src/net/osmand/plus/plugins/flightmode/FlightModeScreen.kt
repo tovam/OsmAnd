@@ -20,15 +20,20 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -38,9 +43,15 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -55,6 +66,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -62,9 +74,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 import net.osmand.plus.R
 import java.text.SimpleDateFormat
@@ -77,6 +91,7 @@ import kotlin.math.sin
 private val FlightBackground = Color(0xFF0A0F13)
 private val FlightPanel = Color(0xF211181E)
 private val FlightPanelStrong = Color(0xFF11181E)
+private val FlightHudPanel = Color(0xB80A0F13)
 private val FlightLine = Color(0xFF2A3842)
 private val FlightMuted = Color(0xFFA5B0B8)
 private val FlightText = Color(0xFFF4F7F8)
@@ -93,6 +108,8 @@ fun FlightModeScreen(
 	onImportTrip: () -> Unit,
 	onStartLive: () -> Unit,
 	onUpdateStop: (Int, String) -> Unit,
+	onSelectCity: (Int, FlightCitySuggestion) -> Unit,
+	onDismissCitySuggestions: (Int) -> Unit,
 	onAddStop: () -> Unit,
 	onRemoveStop: (Int) -> Unit,
 	onUpdatePlan: (FlightPlan) -> Unit,
@@ -153,6 +170,8 @@ fun FlightModeScreen(
 					onImportTrip = onImportTrip,
 					onStartLive = onStartLive,
 					onUpdateStop = onUpdateStop,
+					onSelectCity = onSelectCity,
+					onDismissCitySuggestions = onDismissCitySuggestions,
 					onAddStop = onAddStop,
 					onRemoveStop = onRemoveStop,
 					onUpdatePlan = onUpdatePlan,
@@ -215,21 +234,55 @@ private fun PrepareScreen(
 	onImportTrip: () -> Unit,
 	onStartLive: () -> Unit,
 	onUpdateStop: (Int, String) -> Unit,
+	onSelectCity: (Int, FlightCitySuggestion) -> Unit,
+	onDismissCitySuggestions: (Int) -> Unit,
 	onAddStop: () -> Unit,
 	onRemoveStop: (Int) -> Unit,
 	onUpdatePlan: (FlightPlan) -> Unit,
 	onPreloadTerrain: () -> Unit
 ) {
+	val focusManager = LocalFocusManager.current
+	val focusRequesters = remember(state.plan.stops.size) {
+		List(state.plan.stops.size) { FocusRequester() }
+	}
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_prepare), FlightSessionMode.PREPARE, onClose)
 		LazyColumn(Modifier.weight(1f)) {
 			item { SectionTitle(stringResource(R.string.flight_mode_route)) }
 			itemsIndexed(state.plan.stops) { index, stop ->
+				val submitCity = {
+					val suggestion = state.citySuggestions.firstOrNull()
+						.takeIf { state.citySearchStopIndex == index }
+					if (suggestion != null) {
+						onSelectCity(index, suggestion)
+					} else {
+						onDismissCitySuggestions(index)
+					}
+					if (index < state.plan.stops.lastIndex) {
+						focusRequesters[index + 1].requestFocus()
+					} else {
+						focusManager.clearFocus()
+					}
+				}
 				FlightStopRow(
 					index = index,
 					count = state.plan.stops.size,
 					name = stop.name,
+					focusRequester = focusRequesters[index],
+					searchActive = state.citySearchStopIndex == index,
+					searchLoading = state.citySearchStopIndex == index && state.citySearchLoading,
+					suggestions = if (state.citySearchStopIndex == index) state.citySuggestions else emptyList(),
 					onNameChange = { onUpdateStop(index, it) },
+					onSubmit = submitCity,
+					onSuggestionSelected = { suggestion ->
+						onSelectCity(index, suggestion)
+						if (index < state.plan.stops.lastIndex) {
+							focusRequesters[index + 1].requestFocus()
+						} else {
+							focusManager.clearFocus()
+						}
+					},
+					onDismissSuggestions = { onDismissCitySuggestions(index) },
 					onRemove = { onRemoveStop(index) }
 				)
 			}
@@ -318,37 +371,55 @@ private fun MapScreen(
 	onToggleReplay: () -> Unit
 ) {
 	val sample = state.snapshot?.sample
-	Column(Modifier.fillMaxSize()) {
-		FlightTopBar(routeTitle(state), state.sessionMode, onClose)
-		InstrumentStrip(sample)
-		Box(Modifier.weight(1f).fillMaxWidth()) {
-			Column(
-				modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).background(FlightPanel).border(1.dp, FlightLine)
-			) {
-				Text("SUIVI 3D", color = FlightOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-					modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
-				Text("relief ±${state.plan.terrainCorridorKm} km", color = FlightMuted, fontSize = 11.sp,
-					modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp))
-			}
+	Box(Modifier.fillMaxSize()) {
+		if (state.sessionMode == FlightSessionMode.LIVE) {
+			Box(
+				Modifier
+					.matchParentSize()
+					.pointerInput(Unit) {
+						awaitPointerEventScope {
+							while (true) {
+								awaitPointerEvent().changes.forEach { it.consume() }
+							}
+						}
+					}
+			)
+		}
+
+		Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+			FlightTopBar(routeTitle(state), state.sessionMode, onClose, overlay = true)
+			InstrumentStrip(sample, overlay = true)
+		}
+
+		Column(
+			modifier = Modifier.align(Alignment.CenterEnd).padding(10.dp).background(FlightHudPanel).border(1.dp, FlightLine)
+		) {
+			Text("SUIVI 3D", color = FlightOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+				modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
+			Text("relief ±${state.plan.terrainCorridorKm} km", color = FlightMuted, fontSize = 11.sp,
+				modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp))
+		}
+
+		Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
 			if (state.snapshot?.dataGap == true) {
 				Text(
 					stringResource(R.string.flight_mode_gap),
 					color = FlightWarning,
 					fontSize = 12.sp,
-					modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xE31A1510)).padding(9.dp),
+					modifier = Modifier.fillMaxWidth().background(Color(0xE31A1510)).padding(9.dp),
 					textAlign = TextAlign.Center
 				)
 			}
+			FlightProfileView(
+				profile = state.profile,
+				progress = state.replayProgress.takeIf { state.sessionMode == FlightSessionMode.REPLAY },
+				modifier = Modifier.fillMaxWidth().height(122.dp).background(FlightHudPanel).padding(horizontal = 8.dp, vertical = 4.dp)
+			)
+			if (state.sessionMode == FlightSessionMode.REPLAY) {
+				ReplayBar(state, onSeekReplay, onToggleReplay)
+			}
+			FlightBottomNavigation(FlightPage.MAP, onPageChange, overlay = true)
 		}
-		FlightProfileView(
-			profile = state.profile,
-			progress = state.replayProgress.takeIf { state.sessionMode == FlightSessionMode.REPLAY },
-			modifier = Modifier.fillMaxWidth().height(122.dp).background(FlightPanelStrong).padding(horizontal = 8.dp, vertical = 4.dp)
-		)
-		if (state.sessionMode == FlightSessionMode.REPLAY) {
-			ReplayBar(state, onSeekReplay, onToggleReplay)
-		}
-		FlightBottomNavigation(FlightPage.MAP, onPageChange)
 	}
 }
 
@@ -500,9 +571,11 @@ private fun PhotoScreen(
 }
 
 @Composable
-private fun FlightTopBar(title: String, mode: FlightSessionMode, onClose: () -> Unit) {
+private fun FlightTopBar(title: String, mode: FlightSessionMode, onClose: () -> Unit, overlay: Boolean = false) {
 	Row(
-		modifier = Modifier.fillMaxWidth().height(54.dp).background(FlightPanelStrong).border(1.dp, FlightLine),
+		modifier = Modifier.fillMaxWidth().height(54.dp)
+			.background(if (overlay) FlightHudPanel else FlightPanelStrong)
+			.border(1.dp, FlightLine),
 		verticalAlignment = Alignment.CenterVertically
 	) {
 		Box(
@@ -545,9 +618,11 @@ private fun FlightTopBar(title: String, mode: FlightSessionMode, onClose: () -> 
 }
 
 @Composable
-private fun InstrumentStrip(sample: FlightSample?) {
+private fun InstrumentStrip(sample: FlightSample?, overlay: Boolean = false) {
 	Row(
-		modifier = Modifier.fillMaxWidth().height(66.dp).background(FlightPanel).border(1.dp, FlightLine),
+		modifier = Modifier.fillMaxWidth().height(66.dp)
+			.background(if (overlay) FlightHudPanel else FlightPanel)
+			.border(1.dp, FlightLine),
 		verticalAlignment = Alignment.CenterVertically
 	) {
 		InstrumentCell(stringResource(R.string.flight_mode_altitude), sample?.altitudeMeters?.let { "%.0f".format(it) } ?: "—", "m", Modifier.weight(1f))
@@ -608,14 +683,18 @@ private fun ReplayBar(state: FlightUiState, onSeek: (Float) -> Unit, onToggle: (
 }
 
 @Composable
-private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage) -> Unit) {
+private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage) -> Unit, overlay: Boolean = false) {
 	val pages = listOf(
 		FlightPage.MAP to stringResource(R.string.flight_mode_map),
 		FlightPage.WINDOW to stringResource(R.string.flight_mode_window),
 		FlightPage.SENSORS to stringResource(R.string.flight_mode_sensors),
 		FlightPage.PHOTO to stringResource(R.string.flight_mode_photo)
 	)
-	Row(Modifier.fillMaxWidth().height(48.dp).background(FlightPanelStrong).border(1.dp, FlightLine)) {
+	Row(
+		Modifier.fillMaxWidth().height(48.dp)
+			.background(if (overlay) FlightHudPanel else FlightPanelStrong)
+			.border(1.dp, FlightLine)
+	) {
 		pages.forEach { (page, label) ->
 			Box(
 				modifier = Modifier.weight(1f).fillMaxHeight().clickable { onSelected(page) },
@@ -629,7 +708,23 @@ private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage
 }
 
 @Composable
-private fun FlightStopRow(index: Int, count: Int, name: String, onNameChange: (String) -> Unit, onRemove: () -> Unit) {
+private fun FlightStopRow(
+	index: Int,
+	count: Int,
+	name: String,
+	focusRequester: FocusRequester,
+	searchActive: Boolean,
+	searchLoading: Boolean,
+	suggestions: List<FlightCitySuggestion>,
+	onNameChange: (String) -> Unit,
+	onSubmit: () -> Unit,
+	onSuggestionSelected: (FlightCitySuggestion) -> Unit,
+	onDismissSuggestions: () -> Unit,
+	onRemove: () -> Unit
+) {
+	var focused by remember(index) { mutableStateOf(false) }
+	val showSuggestions = focused && searchActive && name.trim().length >= 2
+	val placeholder = stringResource(R.string.flight_mode_city_placeholder)
 	Row(
 		modifier = Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 16.dp),
 		verticalAlignment = Alignment.CenterVertically
@@ -643,19 +738,101 @@ private fun FlightStopRow(index: Int, count: Int, name: String, onNameChange: (S
 					.border(2.dp, FlightOrange, RoundedCornerShape(50))
 			)
 		}
-		BasicTextField(
-			value = name,
-			onValueChange = onNameChange,
-			singleLine = true,
-			textStyle = TextStyle(color = FlightText, fontSize = 16.sp),
-			cursorBrush = Brush.verticalGradient(listOf(FlightOrange, FlightOrange)),
-			modifier = Modifier.weight(1f).padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 12.dp)
-		)
+		Box(Modifier.weight(1f)) {
+			BasicTextField(
+				value = name,
+				onValueChange = onNameChange,
+				singleLine = true,
+				textStyle = TextStyle(color = FlightText, fontSize = 16.sp),
+				cursorBrush = Brush.verticalGradient(listOf(FlightOrange, FlightOrange)),
+				keyboardOptions = KeyboardOptions(
+					imeAction = if (index < count - 1) ImeAction.Next else ImeAction.Done
+				),
+				keyboardActions = KeyboardActions(
+					onNext = { onSubmit() },
+					onDone = { onSubmit() }
+				),
+				decorationBox = { innerTextField ->
+					if (name.isBlank()) {
+						Text(placeholder, color = FlightMuted, fontSize = 16.sp)
+					}
+					innerTextField()
+				},
+				modifier = Modifier
+					.fillMaxWidth()
+					.focusRequester(focusRequester)
+					.onFocusChanged {
+						if (focused && !it.isFocused) onDismissSuggestions()
+						focused = it.isFocused
+					}
+					.padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 12.dp)
+			)
+			DropdownMenu(
+				expanded = showSuggestions,
+				onDismissRequest = onDismissSuggestions,
+				modifier = Modifier.widthIn(min = 240.dp, max = 330.dp).background(FlightPanelStrong),
+				properties = PopupProperties(focusable = false)
+			) {
+				when {
+					searchLoading -> {
+						Row(
+							Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(10.dp)
+						) {
+							CircularProgressIndicator(color = FlightOrange, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+							Text(stringResource(R.string.flight_mode_city_searching), color = FlightMuted, fontSize = 12.sp)
+						}
+					}
+					suggestions.isEmpty() -> {
+						Text(
+							stringResource(R.string.flight_mode_city_no_result),
+							color = FlightMuted,
+							fontSize = 12.sp,
+							modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+						)
+					}
+					else -> suggestions.forEach { suggestion ->
+						Column(
+							Modifier.fillMaxWidth().clickable { onSuggestionSelected(suggestion) }
+								.padding(horizontal = 14.dp, vertical = 9.dp)
+						) {
+							Text(suggestion.name, color = FlightText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+							Text(
+								citySuggestionSubtitle(suggestion),
+								color = FlightMuted,
+								fontSize = 11.sp,
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis
+							)
+						}
+					}
+				}
+			}
+		}
 		if (count > 2 && index > 0 && index < count - 1) {
 			Text("×", color = FlightMuted, fontSize = 22.sp, modifier = Modifier.size(36.dp).clickable(onClick = onRemove), textAlign = TextAlign.Center)
 		}
 	}
-	Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 52.dp).background(FlightLine))
+	Box(Modifier.fillMaxWidth().height(1.dp)) {
+		Box(Modifier.fillMaxSize().padding(start = 52.dp).background(FlightLine))
+		if (index < count - 1) {
+			Box(
+				Modifier.padding(start = 29.dp).width(2.dp).fillMaxHeight().background(FlightOrange)
+			)
+		}
+	}
+}
+
+@Composable
+private fun citySuggestionSubtitle(suggestion: FlightCitySuggestion): String {
+	val kind = when (suggestion.subType) {
+		"city" -> stringResource(R.string.flight_mode_city_type_city)
+		"town" -> stringResource(R.string.flight_mode_city_type_town)
+		"village" -> stringResource(R.string.flight_mode_city_type_village)
+		else -> stringResource(R.string.flight_mode_city_type_place)
+	}
+	return listOfNotNull(kind, suggestion.regionName).joinToString(" · ")
 }
 
 @Composable
@@ -974,8 +1151,8 @@ private fun SensorGrid(sample: FlightSample?) {
 @Composable
 private fun SensorCell(label: String, value: String, modifier: Modifier) {
 	Column(modifier.height(54.dp).border(0.5.dp, FlightLine).padding(horizontal = 12.dp, vertical = 7.dp)) {
-		Text(label.uppercase(), color = FlightMuted, fontSize = 9.sp)
-		Text(value, color = FlightText, fontSize = 16.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+		Text(label.uppercase(), color = FlightMuted, fontSize = 8.sp)
+		Text(value, color = FlightText, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
 	}
 }
 
@@ -1079,7 +1256,8 @@ private fun FlightModePreview(state: FlightUiState) {
 	FlightModeScreen(
 		state = state,
 		onClose = {}, onPageChange = {}, onImportTrip = {}, onStartLive = {},
-		onUpdateStop = { _, _ -> }, onAddStop = {}, onRemoveStop = {}, onUpdatePlan = {}, onPreloadTerrain = {},
+		onUpdateStop = { _, _ -> }, onSelectCity = { _, _ -> }, onDismissCitySuggestions = {},
+		onAddStop = {}, onRemoveStop = {}, onUpdatePlan = {}, onPreloadTerrain = {},
 		onSeekReplay = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapSample = {},
 		onMoveHead = { _, _, _ -> }, onSetHeadDistance = {}, onSetHeadCalibration = {},
 		onSaveNeutralHead = {}, onRecenterHead = {}, onRetryTerrain = {}, onTerrainRendererError = {}, onShowTrackPoints = {},

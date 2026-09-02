@@ -68,6 +68,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 						}
 					},
 					onUpdateStop = viewModel::updateStop,
+					onSelectCity = viewModel::selectCity,
+					onDismissCitySuggestions = viewModel::dismissCitySuggestions,
 					onAddStop = viewModel::addStop,
 					onRemoveStop = viewModel::removeStop,
 					onUpdatePlan = viewModel::updatePlan,

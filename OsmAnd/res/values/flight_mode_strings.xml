@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="flight_mode_name">Mode avion</string>
+	<string name="flight_mode_name">Suivi de vol</string>
 	<string name="flight_mode_description">Enregistrement continu, instruments, vue hublot et relecture d’un vol.</string>
 	<string name="flight_mode_prepare">Préparer le vol</string>
 	<string name="flight_mode_live">Direct</string>
@@ -9,6 +9,13 @@
 	<string name="flight_mode_start_live">Démarrer le vol</string>
 	<string name="flight_mode_add_stop">Ajouter une escale / arrivée</string>
 	<string name="flight_mode_route">Trajet</string>
+	<string name="flight_mode_city_placeholder">Saisir une ville</string>
+	<string name="flight_mode_city_searching">Recherche dans les cartes hors ligne…</string>
+	<string name="flight_mode_city_no_result">Aucune ville trouvée dans les cartes installées</string>
+	<string name="flight_mode_city_type_city">Ville</string>
+	<string name="flight_mode_city_type_town">Petite ville</string>
+	<string name="flight_mode_city_type_village">Village</string>
+	<string name="flight_mode_city_type_place">Localité</string>
 	<string name="flight_mode_expected_profile">Profil théorique</string>
 	<string name="flight_mode_profile_stopover_hint">Chaque escale redescend au sol avant le décollage suivant.</string>
 	<string name="flight_mode_preload">Préchargement</string>
@@ -58,5 +65,5 @@
 	<string name="flight_mode_current_3d">Vue 3D actuelle</string>
 	<string name="flight_mode_take_photo">Prendre et composer</string>
 	<string name="flight_mode_importing">Lecture du GPX…</string>
-	<string name="flight_mode_close">Fermer le mode avion</string>
+	<string name="flight_mode_close">Fermer le suivi de vol</string>
 </resources>

@@ -647,14 +647,14 @@ class FlightTerrainView @JvmOverloads constructor(
 				varying vec2 vTexCoord;
 				varying vec4 vShadowPosition;
 
-				float unpackDepth(vec4 packedDepth) {
+				float unpackDepth(vec4 encodedDepth) {
 					const vec4 bitShift = vec4(
 						1.0 / 16777216.0,
 						1.0 / 65536.0,
 						1.0 / 256.0,
 						1.0
 					);
-					return dot(packedDepth, bitShift);
+					return dot(encodedDepth, bitShift);
 				}
 
 				float shadowVisibility() {
@@ -714,9 +714,9 @@ class FlightTerrainView @JvmOverloads constructor(
 				vec4 packDepth(float depth) {
 					const vec4 bitShift = vec4(16777216.0, 65536.0, 256.0, 1.0);
 					const vec4 bitMask = vec4(0.0, 1.0 / 256.0, 1.0 / 256.0, 1.0 / 256.0);
-					vec4 packed = fract(min(depth, 0.999999) * bitShift);
-					packed -= packed.xxyz * bitMask;
-					return packed;
+					vec4 encodedDepth = fract(min(depth, 0.999999) * bitShift);
+					encodedDepth -= encodedDepth.xxyz * bitMask;
+					return encodedDepth;
 				}
 				void main() {
 					gl_FragColor = packDepth(gl_FragCoord.z);

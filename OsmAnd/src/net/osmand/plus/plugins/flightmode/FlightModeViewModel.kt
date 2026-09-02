@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.osmand.Location
@@ -21,8 +22,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private val app = application as OsmandApplication
 	private val headPoseStore = FlightHeadPoseStore(application)
 	private val terrainRepository = FlightTerrainRepository(app)
+	private val citySearch = FlightCitySearch(app)
 	private var replayEngine: FlightReplayEngine? = null
 	private var terrainJob: Job? = null
+	private var citySearchJob: Job? = null
 	private var requestedTerrainCenter: Pair<Double, Double>? = null
 
 	var uiState by mutableStateOf(
@@ -40,24 +43,96 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun updateStop(index: Int, name: String) {
 		val stops = uiState.plan.stops.toMutableList()
 		if (index !in stops.indices) return
-		stops[index] = stops[index].copy(name = name)
+		if (stops[index].name == name) return
+		stops[index] = FlightStop(name = name)
 		updatePlan(uiState.plan.copy(stops = stops))
+		searchCitiesForStop(index, name)
+	}
+
+	fun selectCity(index: Int, suggestion: FlightCitySuggestion) {
+		val stops = uiState.plan.stops.toMutableList()
+		if (index !in stops.indices) return
+		citySearchJob?.cancel()
+		stops[index] = FlightStop(
+			name = suggestion.name,
+			latitude = suggestion.latitude,
+			longitude = suggestion.longitude
+		)
+		val plan = uiState.plan.copy(stops = stops)
+		uiState = uiState.copy(
+			plan = plan,
+			profile = FlightProfilePlanner.build(plan),
+			citySearchStopIndex = null,
+			citySuggestions = emptyList(),
+			citySearchLoading = false
+		)
+	}
+
+	fun dismissCitySuggestions(index: Int) {
+		if (uiState.citySearchStopIndex != index) return
+		citySearchJob?.cancel()
+		uiState = uiState.copy(
+			citySearchStopIndex = null,
+			citySuggestions = emptyList(),
+			citySearchLoading = false
+		)
 	}
 
 	fun addStop() {
 		val stops = uiState.plan.stops.toMutableList()
-		stops += FlightStop("Nouvelle arrivée")
+		stops += FlightStop("")
 		updatePlan(uiState.plan.copy(stops = stops))
 	}
 
 	fun removeStop(index: Int) {
 		if (uiState.plan.stops.size <= 2 || index !in uiState.plan.stops.indices) return
+		citySearchJob?.cancel()
 		val stops = uiState.plan.stops.toMutableList().apply { removeAt(index) }
-		updatePlan(uiState.plan.copy(stops = stops))
+		val plan = uiState.plan.copy(stops = stops)
+		uiState = uiState.copy(
+			plan = plan,
+			profile = FlightProfilePlanner.build(plan),
+			citySearchStopIndex = null,
+			citySuggestions = emptyList(),
+			citySearchLoading = false
+		)
 	}
 
 	fun updatePlan(plan: FlightPlan) {
 		uiState = uiState.copy(plan = plan, profile = FlightProfilePlanner.build(plan))
+	}
+
+	private fun searchCitiesForStop(index: Int, name: String) {
+		citySearchJob?.cancel()
+		val query = name.trim()
+		if (query.length < MINIMUM_CITY_QUERY_LENGTH) {
+			uiState = uiState.copy(
+				citySearchStopIndex = null,
+				citySuggestions = emptyList(),
+				citySearchLoading = false
+			)
+			return
+		}
+
+		uiState = uiState.copy(
+			citySearchStopIndex = index,
+			citySuggestions = emptyList(),
+			citySearchLoading = true
+		)
+		citySearchJob = viewModelScope.launch {
+			delay(CITY_SEARCH_DEBOUNCE_MILLIS)
+			val runningJob = coroutineContext[Job]
+			val suggestions = withContext(Dispatchers.IO) {
+				citySearch.search(query) { runningJob?.isActive != true }
+			}
+			val currentStop = uiState.plan.stops.getOrNull(index)
+			if (uiState.citySearchStopIndex == index && currentStop?.name == name) {
+				uiState = uiState.copy(
+					citySuggestions = suggestions,
+					citySearchLoading = false
+				)
+			}
+		}
 	}
 
 	fun startLive() {
@@ -320,10 +395,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	override fun onCleared() {
 		terrainJob?.cancel()
+		citySearchJob?.cancel()
 		super.onCleared()
 	}
 
 	companion object {
+		private const val MINIMUM_CITY_QUERY_LENGTH = 2
+		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
 		private const val TERRAIN_RELOAD_RADIUS_FRACTION = 0.32
 		private const val MINIMUM_RELOAD_DISTANCE_KM = 20.0
 	}

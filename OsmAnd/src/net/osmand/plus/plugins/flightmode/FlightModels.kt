@@ -23,6 +23,14 @@ data class FlightStop(
 	val longitude: Double? = null
 )
 
+data class FlightCitySuggestion(
+	val name: String,
+	val latitude: Double,
+	val longitude: Double,
+	val subType: String,
+	val regionName: String? = null
+)
+
 data class FlightPlan(
 	val stops: List<FlightStop>,
 	val terrainCorridorKm: Int = 300,
@@ -162,6 +170,9 @@ data class FlightUiState(
 	val sessionMode: FlightSessionMode = FlightSessionMode.PREPARE,
 	val plan: FlightPlan = FlightPlan.preview(),
 	val profile: FlightProfile = FlightProfilePlanner.build(FlightPlan.preview()),
+	val citySearchStopIndex: Int? = null,
+	val citySuggestions: List<FlightCitySuggestion> = emptyList(),
+	val citySearchLoading: Boolean = false,
 	val trip: FlightTrip? = null,
 	val snapshot: FlightSnapshot? = null,
 	val replayProgress: Float = 0f,
