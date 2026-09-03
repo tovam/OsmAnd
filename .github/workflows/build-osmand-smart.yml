@@ -87,7 +87,11 @@ jobs:
           if [ ! -f "${RUNNER_TEMP}/osmand-core-build.log" ]; then
             exit 0
           fi
-          details="$(tail -n 35 "${RUNNER_TEMP}/osmand-core-build.log")"
+          details="$(
+            grep -nEi -C 3 '(fatal error|error:|no space left|killed|failed|not found|cannot|CMake Error|make(\[[0-9]+\])?: \*\*\*)' "${RUNNER_TEMP}/osmand-core-build.log" | tail -n 70 | cut -c1-500 || true
+            echo '--- final lines ---'
+            tail -n 12 "${RUNNER_TEMP}/osmand-core-build.log" | cut -c1-500
+          )"
           details="${details//'%'/'%25'}"
           details="${details//$'\r'/'%0D'}"
           details="${details//$'\n'/'%0A'}"
