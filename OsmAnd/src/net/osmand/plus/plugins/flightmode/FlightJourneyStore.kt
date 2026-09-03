@@ -439,6 +439,7 @@ class FlightJourneyStore(private val context: Context) {
 					put("includeSelfie", photo.includeSelfie)
 					put("includeMap", photo.includeMap)
 					put("includeScene3d", photo.includeScene3d)
+					putOptional("windowAlignment", photo.windowAlignment?.let(::photoWindowAlignmentToJson))
 				})
 			}
 		})
@@ -472,7 +473,8 @@ class FlightJourneyStore(private val context: Context) {
 					includeMainCamera = json.optBoolean("includeMainCamera", true),
 					includeSelfie = json.optBoolean("includeSelfie", false),
 					includeMap = json.optBoolean("includeMap", true),
-					includeScene3d = json.optBoolean("includeScene3d", true)
+					includeScene3d = json.optBoolean("includeScene3d", true),
+					windowAlignment = photoWindowAlignmentFromJson(json.optJSONObject("windowAlignment"))
 				)
 			}
 		}
@@ -498,6 +500,58 @@ class FlightJourneyStore(private val context: Context) {
 	private fun offlineAssetsToJson(assets: FlightOfflineAssets): JSONObject = JSONObject().apply {
 		put("terrainTiles", tilesToJson(assets.terrainTiles))
 		put("standardSatelliteTiles", tilesToJson(assets.standardSatelliteTiles))
+	}
+
+	private fun photoWindowAlignmentToJson(alignment: FlightPhotoWindowAlignment): JSONObject {
+		val safe = alignment.clamped()
+		return JSONObject().apply {
+			put("opacity", safe.opacity)
+			put("scale", safe.scale)
+			put("offsetXFraction", safe.offsetXFraction)
+			put("offsetYFraction", safe.offsetYFraction)
+			putOptional("altitudeOverrideMeters", safe.altitudeOverrideMeters)
+			put("windowPlacement", JSONObject().apply {
+				put("side", safe.windowPlacement.side.name)
+				put("forwardOffsetMeters", safe.windowPlacement.forwardOffsetMeters)
+				put("verticalOffsetMeters", safe.windowPlacement.verticalOffsetMeters)
+				put("zoom", safe.windowPlacement.zoom)
+				put("cabinTransparent", safe.windowPlacement.cabinTransparent)
+				put("cabinHidden", safe.windowPlacement.cabinHidden)
+			})
+			put("windowLook", JSONObject().apply {
+				put("yawDegrees", safe.windowLook.yawDegrees)
+				put("pitchDegrees", safe.windowLook.pitchDegrees)
+			})
+		}
+	}
+
+	private fun photoWindowAlignmentFromJson(json: JSONObject?): FlightPhotoWindowAlignment? {
+		if (json == null) return null
+		val placementJson = json.optJSONObject("windowPlacement") ?: JSONObject()
+		val lookJson = json.optJSONObject("windowLook") ?: JSONObject()
+		val side = placementJson.optString("side")
+			.takeIf(String::isNotBlank)
+			?.let { saved -> FlightCabinSide.entries.firstOrNull { it.name == saved } }
+			?: FlightCabinSide.LEFT
+		return FlightPhotoWindowAlignment(
+			opacity = json.optDouble("opacity", 0.55).toFloat(),
+			scale = json.optDouble("scale", 1.0).toFloat(),
+			offsetXFraction = json.optDouble("offsetXFraction", 0.0).toFloat(),
+			offsetYFraction = json.optDouble("offsetYFraction", 0.0).toFloat(),
+			windowPlacement = FlightWindowPlacement(
+				side = side,
+				forwardOffsetMeters = placementJson.optDouble("forwardOffsetMeters", 0.0).toFloat(),
+				verticalOffsetMeters = placementJson.optDouble("verticalOffsetMeters", 0.0).toFloat(),
+				zoom = placementJson.optDouble("zoom", 1.0).toFloat(),
+				cabinTransparent = placementJson.optBoolean("cabinTransparent", false),
+				cabinHidden = placementJson.optBoolean("cabinHidden", false)
+			),
+			windowLook = FlightWindowLook(
+				yawDegrees = lookJson.optDouble("yawDegrees", 0.0).toFloat(),
+				pitchDegrees = lookJson.optDouble("pitchDegrees", 0.0).toFloat()
+			),
+			altitudeOverrideMeters = json.optNullableDouble("altitudeOverrideMeters")?.toFloat()
+		).clamped()
 	}
 
 	private fun tilesToJson(tiles: List<TerrainTileId>): JSONArray = JSONArray().apply {
@@ -920,7 +974,7 @@ class FlightJourneyStore(private val context: Context) {
 
 	companion object {
 		const val ARCHIVE_EXTENSION = "osmandflight"
-		private const val SCHEMA_VERSION = 4
+		private const val SCHEMA_VERSION = 5
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"

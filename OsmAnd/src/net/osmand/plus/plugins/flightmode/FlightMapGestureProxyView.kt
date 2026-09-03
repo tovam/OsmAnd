@@ -6,6 +6,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import net.osmand.plus.views.OsmandMapTileView
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.hypot
 
 /**
  * The flight HUD lives in a full-screen ComposeView above OsmAnd's map. This view
@@ -18,7 +21,8 @@ class FlightMapGestureProxyView(
 	private var onExplorationGesture: () -> Unit
 ) : View(context) {
 
-	private val touchSlopSquared = (ViewConfiguration.get(context).scaledTouchSlop * 1.5f).let { it * it }
+	private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop * 1.5f
+	private val touchSlopSquared = touchSlop * touchSlop
 	private val sourceLocation = IntArray(2)
 	private val targetLocation = IntArray(2)
 	private var downX = 0f
@@ -26,6 +30,15 @@ class FlightMapGestureProxyView(
 	private var explorationReported = false
 	private var targetGestureActive = false
 	private var gestureTargetView: View? = null
+	private var tiltCandidate = false
+	private var tiltOverrideActive = false
+	private var tiltStartX1 = 0f
+	private var tiltStartY1 = 0f
+	private var tiltStartX2 = 0f
+	private var tiltStartY2 = 0f
+	private var tiltStartDistance = 0f
+	private var tiltStartAngle = 0f
+	private var tiltStartElevation = 0f
 
 	init {
 		isClickable = true
@@ -43,6 +56,8 @@ class FlightMapGestureProxyView(
 			MotionEvent.ACTION_DOWN -> {
 				gestureTargetView = target.view
 				targetGestureActive = true
+				tiltCandidate = false
+				tiltOverrideActive = false
 				downX = event.x
 				downY = event.y
 				explorationReported = false
@@ -57,6 +72,11 @@ class FlightMapGestureProxyView(
 				}
 			}
 			MotionEvent.ACTION_POINTER_DOWN -> {
+				if (event.pointerCount == 2) {
+					beginTiltCandidate(event)
+				} else {
+					tiltCandidate = false
+				}
 				if (!explorationReported) {
 					explorationReported = true
 					reportExploration = true
@@ -73,14 +93,13 @@ class FlightMapGestureProxyView(
 			finishGestureIfNeeded(event)
 			return true
 		}
-		targetView.getLocationOnScreen(targetLocation)
-		val forwarded = MotionEvent.obtain(event)
-		forwarded.offsetLocation(
-			(sourceLocation[0] - targetLocation[0]).toFloat(),
-			(sourceLocation[1] - targetLocation[1]).toFloat()
-		)
-		targetView.dispatchTouchEvent(forwarded)
-		forwarded.recycle()
+		if (handleTiltOverride(event, targetView)) {
+			if (reportExploration) onExplorationGesture()
+			finishGestureIfNeeded(event)
+			return true
+		}
+
+		dispatchToMap(targetView, event)
 		// Changing follow mode causes a Compose update. Do it only after OsmAnd has
 		// received the current event, never halfway through forwarding that event.
 		if (reportExploration) onExplorationGesture()
@@ -88,10 +107,99 @@ class FlightMapGestureProxyView(
 		return true
 	}
 
+	private fun beginTiltCandidate(event: MotionEvent) {
+		tiltStartX1 = event.getX(0)
+		tiltStartY1 = event.getY(0)
+		tiltStartX2 = event.getX(1)
+		tiltStartY2 = event.getY(1)
+		tiltStartDistance = hypot(tiltStartX2 - tiltStartX1, tiltStartY2 - tiltStartY1)
+		tiltStartAngle = atan2(tiltStartY2 - tiltStartY1, tiltStartX2 - tiltStartX1)
+		tiltStartElevation = target.elevationAngle
+		tiltCandidate = tiltStartDistance > 0f
+	}
+
+	private fun handleTiltOverride(event: MotionEvent, targetView: View): Boolean {
+		if (tiltOverrideActive) {
+			if (event.actionMasked == MotionEvent.ACTION_MOVE && event.pointerCount >= 2) {
+				applyTilt(event)
+			}
+			return true
+		}
+		if (!tiltCandidate || event.actionMasked != MotionEvent.ACTION_MOVE || event.pointerCount != 2) {
+			return false
+		}
+
+		val dx1 = event.getX(0) - tiltStartX1
+		val dy1 = event.getY(0) - tiltStartY1
+		val dx2 = event.getX(1) - tiltStartX2
+		val dy2 = event.getY(1) - tiltStartY2
+		val verticalTravel = (abs(dy1) + abs(dy2)) / 2f
+		val currentDistance = hypot(event.getX(1) - event.getX(0), event.getY(1) - event.getY(0))
+		val distanceChange = abs(currentDistance / tiltStartDistance - 1f)
+		val currentAngle = atan2(event.getY(1) - event.getY(0), event.getX(1) - event.getX(0))
+		val angleChange = abs(normalizeRadians(currentAngle - tiltStartAngle))
+		val sameVerticalDirection = dy1 * dy2 > 0f
+		val mostlyVertical = abs(dx1) <= abs(dy1) * MAX_HORIZONTAL_TO_VERTICAL_RATIO + touchSlop &&
+			abs(dx2) <= abs(dy2) * MAX_HORIZONTAL_TO_VERTICAL_RATIO + touchSlop
+		val stableSpacing = distanceChange <= MAX_TILT_DISTANCE_CHANGE && angleChange <= MAX_TILT_ANGLE_CHANGE_RADIANS
+
+		if (verticalTravel < touchSlop || !sameVerticalDirection || !mostlyVertical || !stableSpacing) {
+			return false
+		}
+
+		// OsmAnd's stock recognizer deliberately requires an almost perfectly horizontal
+		// initial finger line. Once our more tolerant tilt is unambiguous, cancel that
+		// native stream so it cannot turn the same movement into a late pinch/rotation.
+		dispatchToMap(targetView, event, MotionEvent.ACTION_CANCEL)
+		tiltOverrideActive = true
+		applyTilt(event)
+		return true
+	}
+
+	private fun applyTilt(event: MotionEvent) {
+		val averageDeltaY = ((event.getY(0) - tiltStartY1) + (event.getY(1) - tiltStartY2)) / 2f
+		target.setElevationAngle(tiltStartElevation + averageDeltaY / PIXELS_PER_TILT_DEGREE)
+	}
+
+	private fun dispatchToMap(targetView: View, event: MotionEvent, forcedAction: Int? = null) {
+		targetView.getLocationOnScreen(targetLocation)
+		// A one-pointer CANCEL is intentional: OsmAnd's MultiTouchSupport only clears
+		// its internal zoom/tilt mode after CANCEL when fewer than two pointers remain.
+		val forwarded = if (forcedAction == MotionEvent.ACTION_CANCEL) {
+			MotionEvent.obtain(
+				event.downTime,
+				event.eventTime,
+				MotionEvent.ACTION_CANCEL,
+				event.x,
+				event.y,
+				event.metaState
+			)
+		} else {
+			MotionEvent.obtain(event).also { copy ->
+				if (forcedAction != null) copy.action = forcedAction
+			}
+		}
+		forwarded.offsetLocation(
+			(sourceLocation[0] - targetLocation[0]).toFloat(),
+			(sourceLocation[1] - targetLocation[1]).toFloat()
+		)
+		targetView.dispatchTouchEvent(forwarded)
+		forwarded.recycle()
+	}
+
+	private fun normalizeRadians(angle: Float): Float {
+		var normalized = angle
+		while (normalized > PI_RADIANS) normalized -= FULL_TURN_RADIANS
+		while (normalized < -PI_RADIANS) normalized += FULL_TURN_RADIANS
+		return normalized
+	}
+
 	private fun finishGestureIfNeeded(event: MotionEvent) {
 		if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
 			targetGestureActive = false
 			gestureTargetView = null
+			tiltCandidate = false
+			tiltOverrideActive = false
 			parent?.requestDisallowInterceptTouchEvent(false)
 		}
 	}
@@ -104,8 +212,19 @@ class FlightMapGestureProxyView(
 			cancel.recycle()
 			targetGestureActive = false
 			gestureTargetView = null
+			tiltCandidate = false
+			tiltOverrideActive = false
 			parent?.requestDisallowInterceptTouchEvent(false)
 		}
 		super.onDetachedFromWindow()
+	}
+
+	private companion object {
+		const val MAX_HORIZONTAL_TO_VERTICAL_RATIO = 0.65f
+		const val MAX_TILT_DISTANCE_CHANGE = 0.12f
+		const val MAX_TILT_ANGLE_CHANGE_RADIANS = 0.18f
+		const val PIXELS_PER_TILT_DEGREE = 8f
+		const val PI_RADIANS = 3.1415927f
+		const val FULL_TURN_RADIANS = PI_RADIANS * 2f
 	}
 }

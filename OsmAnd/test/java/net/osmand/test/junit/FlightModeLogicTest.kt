@@ -4,6 +4,7 @@ import net.osmand.plus.plugins.flightmode.FlightLeg
 import net.osmand.plus.plugins.flightmode.FlightCabinSide
 import net.osmand.plus.plugins.flightmode.FlightPlan
 import net.osmand.plus.plugins.flightmode.FlightPhotoTimestampParser
+import net.osmand.plus.plugins.flightmode.FlightPhotoWindowAlignment
 import net.osmand.plus.plugins.flightmode.FlightProfilePlanner
 import net.osmand.plus.plugins.flightmode.FlightRecordingPolicy
 import net.osmand.plus.plugins.flightmode.FlightReplayEngine
@@ -24,6 +25,7 @@ import net.osmand.plus.plugins.flightmode.FlightWindowGestureTarget
 import net.osmand.plus.plugins.flightmode.FlightWindowPhotoOverlay
 import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
 import net.osmand.plus.plugins.flightmode.geometry
+import net.osmand.plus.plugins.flightmode.dampedFlightPinchFactor
 import net.osmand.plus.plugins.flightmode.viewAzimuthDegrees
 import net.osmand.plus.plugins.flightmode.TerrainTileId
 import net.osmand.plus.plugins.flightmode.TerrainTilePlan
@@ -247,6 +249,45 @@ class FlightModeLogicTest {
 		assertEquals(-FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION, overlay.offsetXFraction, 0f)
 		assertEquals(FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION, overlay.offsetYFraction, 0f)
 		assertEquals(FlightWindowGestureTarget.PHOTO, overlay.gestureTarget)
+	}
+
+	@Test
+	fun photoWindowAlignmentKeepsTheCompleteReproducibleViewBounded() {
+		val alignment = FlightPhotoWindowAlignment(
+			opacity = 2f,
+			scale = 20f,
+			offsetXFraction = -4f,
+			offsetYFraction = 4f,
+			windowPlacement = FlightWindowPlacement(
+				side = FlightCabinSide.RIGHT,
+				forwardOffsetMeters = 4f,
+				verticalOffsetMeters = -4f,
+				zoom = 12f,
+				cabinTransparent = true,
+				cabinHidden = true
+			),
+			windowLook = FlightWindowLook(yawDegrees = 450f, pitchDegrees = 80f),
+			altitudeOverrideMeters = 30_000f
+		).clamped()
+
+		assertEquals(1f, alignment.opacity, 0f)
+		assertEquals(FlightWindowPhotoOverlay.MAX_SCALE, alignment.scale, 0f)
+		assertEquals(-FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION, alignment.offsetXFraction, 0f)
+		assertEquals(FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION, alignment.offsetYFraction, 0f)
+		assertEquals(FlightCabinSide.RIGHT, alignment.windowPlacement.side)
+		assertTrue(alignment.windowPlacement.cabinTransparent)
+		assertTrue(alignment.windowPlacement.cabinHidden)
+		assertEquals(FlightWindowPlacement.MAX_ZOOM, alignment.windowPlacement.zoom, 0f)
+		assertEquals(90f, alignment.windowLook.yawDegrees, 0f)
+		assertEquals(45f, alignment.windowLook.pitchDegrees, 0f)
+		assertEquals(FlightPhotoWindowAlignment.MAX_ALTITUDE_OVERRIDE_METERS, alignment.altitudeOverrideMeters ?: 0f, 0f)
+	}
+
+	@Test
+	fun hublotPinchUsesHalfTheLogarithmicZoomMovement() {
+		assertEquals(2f, dampedFlightPinchFactor(4f), 0.0001f)
+		assertEquals(0.5f, dampedFlightPinchFactor(0.25f), 0.0001f)
+		assertEquals(1f, dampedFlightPinchFactor(Float.NaN), 0f)
 	}
 
 	@Test

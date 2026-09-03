@@ -5,6 +5,7 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 import kotlin.math.tan
 
 enum class FlightPage {
@@ -298,7 +299,8 @@ data class FlightPhotoAttachment(
 	val includeMainCamera: Boolean = true,
 	val includeSelfie: Boolean = false,
 	val includeMap: Boolean = true,
-	val includeScene3d: Boolean = true
+	val includeScene3d: Boolean = true,
+	val windowAlignment: FlightPhotoWindowAlignment? = null
 )
 
 enum class FlightWindowGestureTarget {
@@ -327,6 +329,58 @@ data class FlightWindowPhotoOverlay(
 		const val MAX_OFFSET_FRACTION = 2f
 	}
 }
+
+/**
+ * Everything required to reopen a photo over the exact same Hublot camera view.
+ * The photo rotation itself remains on [FlightPhotoAttachment] because it is also
+ * used by the gallery.
+ */
+data class FlightPhotoWindowAlignment(
+	val opacity: Float = 0.55f,
+	val scale: Float = 1f,
+	val offsetXFraction: Float = 0f,
+	val offsetYFraction: Float = 0f,
+	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
+	val windowLook: FlightWindowLook = FlightWindowLook(),
+	val altitudeOverrideMeters: Float? = null
+) {
+	fun clamped(): FlightPhotoWindowAlignment {
+		val safeOverlay = FlightWindowPhotoOverlay(
+			opacity = opacity.takeIf(Float::isFinite) ?: 0.55f,
+			scale = scale.takeIf(Float::isFinite) ?: 1f,
+			offsetXFraction = offsetXFraction.takeIf(Float::isFinite) ?: 0f,
+			offsetYFraction = offsetYFraction.takeIf(Float::isFinite) ?: 0f
+		).clamped()
+		val safePlacement = windowPlacement.copy(
+			forwardOffsetMeters = windowPlacement.forwardOffsetMeters.takeIf(Float::isFinite) ?: 0f,
+			verticalOffsetMeters = windowPlacement.verticalOffsetMeters.takeIf(Float::isFinite) ?: 0f,
+			zoom = windowPlacement.zoom.takeIf(Float::isFinite) ?: 1f
+		).clamped()
+		val safeLook = windowLook.copy(
+			yawDegrees = windowLook.yawDegrees.takeIf(Float::isFinite) ?: 0f,
+			pitchDegrees = windowLook.pitchDegrees.takeIf(Float::isFinite) ?: 0f
+		).clamped()
+		return copy(
+			opacity = safeOverlay.opacity,
+			scale = safeOverlay.scale,
+			offsetXFraction = safeOverlay.offsetXFraction,
+			offsetYFraction = safeOverlay.offsetYFraction,
+			windowPlacement = safePlacement,
+			windowLook = safeLook,
+			altitudeOverrideMeters = altitudeOverrideMeters?.takeIf(Float::isFinite)
+				?.coerceIn(MIN_ALTITUDE_OVERRIDE_METERS, MAX_ALTITUDE_OVERRIDE_METERS)
+		)
+	}
+
+	companion object {
+		const val MIN_ALTITUDE_OVERRIDE_METERS = -500f
+		const val MAX_ALTITUDE_OVERRIDE_METERS = 15_000f
+	}
+}
+
+/** Halves a pinch's logarithmic zoom delta, symmetrically for zoom-in and zoom-out. */
+fun dampedFlightPinchFactor(rawFactor: Float): Float =
+	if (rawFactor.isFinite() && rawFactor > 0f) sqrt(rawFactor) else 1f
 
 data class FlightOfflineAssets(
 	val terrainTiles: List<TerrainTileId> = emptyList(),

@@ -693,6 +693,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				MAXIMUM_WINDOW_ALTITUDE_METERS
 			)
 		)
+		storeActiveWindowPhotoAlignment()
 	}
 
 	fun moveWindow(forwardDeltaMeters: Float, verticalDeltaMeters: Float) {
@@ -723,11 +724,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				pitchDegrees = current.pitchDegrees + pitchDeltaDegrees
 			).clamped()
 		)
+		storeActiveWindowPhotoAlignment()
 	}
 
 	fun recenterWindowLook() {
 		if (uiState.windowLook != FlightWindowLook()) {
 			uiState = uiState.copy(windowLook = FlightWindowLook())
+			storeActiveWindowPhotoAlignment()
 		}
 	}
 
@@ -736,7 +739,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun changeWindowZoom(factor: Float) {
-		setWindowZoom(uiState.windowPlacement.zoom * factor.coerceIn(0.75f, 1.35f))
+		setWindowZoom(
+			uiState.windowPlacement.zoom * dampedFlightPinchFactor(factor).coerceIn(0.75f, 1.35f)
+		)
 	}
 
 	fun setCabinTransparent(transparent: Boolean) {
@@ -751,6 +756,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val safePlacement = placement.clamped()
 		if (persist) windowPlacementStore.save(safePlacement)
 		uiState = uiState.copy(windowPlacement = safePlacement)
+		storeActiveWindowPhotoAlignment()
 	}
 
 	fun setMapFollowing(following: Boolean) {
@@ -1082,14 +1088,32 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun openPhotoInWindow(id: String) {
+		val photo = findPhoto(id) ?: return
 		selectPhoto(id)
-		if (findPhoto(id)?.matchedSamplePosition != null) {
+		if (photo.matchedSamplePosition != null) {
+			val savedAlignment = photo.windowAlignment?.clamped()
 			uiState = uiState.copy(
 				page = FlightPage.WINDOW,
-				windowPhotoOverlay = FlightWindowPhotoOverlay(
+				windowPhotoOverlay = savedAlignment?.let { alignment ->
+					FlightWindowPhotoOverlay(
+						photoId = id,
+						opacity = alignment.opacity,
+						scale = alignment.scale,
+						offsetXFraction = alignment.offsetXFraction,
+						offsetYFraction = alignment.offsetYFraction,
+						gestureTarget = FlightWindowGestureTarget.PHOTO
+					).clamped()
+				} ?: FlightWindowPhotoOverlay(
 					photoId = id,
 					gestureTarget = FlightWindowGestureTarget.PHOTO
-				)
+				),
+				windowPlacement = savedAlignment?.windowPlacement ?: uiState.windowPlacement,
+				windowLook = savedAlignment?.windowLook ?: uiState.windowLook,
+				windowAltitudeOverrideMeters = if (savedAlignment != null) {
+					savedAlignment.altitudeOverrideMeters
+				} else {
+					uiState.windowAltitudeOverrideMeters
+				}
 			)
 		}
 	}
@@ -1098,6 +1122,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(
 			windowPhotoOverlay = uiState.windowPhotoOverlay.copy(opacity = opacity).clamped()
 		)
+		storeActiveWindowPhotoAlignment()
 	}
 
 	fun setWindowGestureTarget(target: FlightWindowGestureTarget) {
@@ -1112,11 +1137,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (current.photoId == null) return
 		uiState = uiState.copy(
 			windowPhotoOverlay = current.copy(
-				scale = current.scale * zoomFactor.coerceIn(0.70f, 1.45f),
+				scale = current.scale * dampedFlightPinchFactor(zoomFactor).coerceIn(0.70f, 1.45f),
 				offsetXFraction = current.offsetXFraction + panXFraction,
 				offsetYFraction = current.offsetYFraction + panYFraction
 			).clamped()
 		)
+		storeActiveWindowPhotoAlignment()
 	}
 
 	fun resetWindowPhotoTransform() {
@@ -1124,6 +1150,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(
 			windowPhotoOverlay = current.copy(scale = 1f, offsetXFraction = 0f, offsetYFraction = 0f)
 		)
+		storeActiveWindowPhotoAlignment()
 		current.photoId?.let(::findPhoto)?.takeIf { it.rotationDegrees != 0f }?.let { photo ->
 			replacePhoto(photo.copy(rotationDegrees = 0f), "Position et rotation de la photo réinitialisées")
 		}
@@ -1136,7 +1163,24 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private fun findPhoto(id: String): FlightPhotoAttachment? =
 		(uiState.photos + uiState.pendingPhotos).firstOrNull { it.id == id }
 
-	private fun replacePhoto(photo: FlightPhotoAttachment, message: String) {
+	private fun storeActiveWindowPhotoAlignment() {
+		val overlay = uiState.windowPhotoOverlay
+		val photo = overlay.photoId?.let(::findPhoto) ?: return
+		val alignment = FlightPhotoWindowAlignment(
+			opacity = overlay.opacity,
+			scale = overlay.scale,
+			offsetXFraction = overlay.offsetXFraction,
+			offsetYFraction = overlay.offsetYFraction,
+			windowPlacement = uiState.windowPlacement,
+			windowLook = uiState.windowLook,
+			altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters
+		).clamped()
+		if (photo.windowAlignment != alignment) {
+			replacePhoto(photo.copy(windowAlignment = alignment), message = null)
+		}
+	}
+
+	private fun replacePhoto(photo: FlightPhotoAttachment, message: String?) {
 		val attached = uiState.photos.any { it.id == photo.id }
 		uiState = uiState.copy(
 			photos = uiState.photos.map { if (it.id == photo.id) photo else it }.sortedWith(PHOTO_TIME_COMPARATOR),
@@ -1144,7 +1188,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				.sortedWith(PHOTO_TIME_COMPARATOR),
 			selectedPhotoId = photo.id,
 			journeyDirty = uiState.journeyDirty || attached,
-			journeyMessage = message
+			journeyMessage = message ?: uiState.journeyMessage
 		)
 		if (attached) schedulePhotoPersistence()
 	}
