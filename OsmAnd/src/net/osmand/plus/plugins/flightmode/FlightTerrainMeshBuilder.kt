@@ -82,7 +82,8 @@ object FlightTerrainMeshBuilder {
 		val projection = FlightTerrainCoordinates(coordinateOriginLatitude, coordinateOriginLongitude)
 		val sampler = TileElevationSampler(plan.zoom, tiles)
 		val meshes = plan.tiles.mapNotNull { tileId ->
-			val terrainAvailable = tiles.containsKey(tileId)
+			val sourceTile = tiles[tileId]
+			val terrainAvailable = sourceTile != null
 			val gridQuads = geometryQuadsByTile[tileId]
 				?.coerceIn(DEFAULT_GRID_QUADS, MAXIMUM_GRID_QUADS)
 				?: DEFAULT_GRID_QUADS
@@ -93,9 +94,8 @@ object FlightTerrainMeshBuilder {
 				gridQuads
 			)
 			val geometry = cachedOrBuildGeometry(geometryCache, geometryCacheKey) {
-				val tile = tiles[tileId]
 				when {
-					tile != null -> buildTileGeometry(tile, sampler, projection, gridQuads)
+					sourceTile != null -> buildTileGeometry(sourceTile, sampler, projection, gridQuads)
 					includePlaceholders -> buildPlaceholderGeometry(tileId, projection)
 					else -> null
 				}
@@ -106,6 +106,12 @@ object FlightTerrainMeshBuilder {
 				indices = geometry.indices,
 				refinementLevel = 0,
 				terrainAvailable = terrainAvailable,
+				gridQuads = if (terrainAvailable) gridQuads else 1,
+				sourceWidthPixels = sourceTile?.width ?: 0,
+				sourceHeightPixels = sourceTile?.height ?: 0,
+				minimumElevationMeters = geometry.minimumElevationMeters,
+				maximumElevationMeters = geometry.maximumElevationMeters,
+				boundarySourceZoom = tileId.zoom,
 				satelliteTexturePath = satelliteTexturePaths[tileId],
 				standardSatelliteTexturePath = standardSatelliteTexturePaths[tileId],
 				satelliteTextureTier = satelliteTextureTiers[tileId]
@@ -201,6 +207,13 @@ object FlightTerrainMeshBuilder {
 				indices = geometry.indices,
 				refinementLevel = (tileId.zoom - baseZoom).coerceAtLeast(1),
 				terrainAvailable = true,
+				gridQuads = gridQuads,
+				sourceWidthPixels = tile.width,
+				sourceHeightPixels = tile.height,
+				minimumElevationMeters = geometry.minimumElevationMeters,
+				maximumElevationMeters = geometry.maximumElevationMeters,
+				edgeMorphMask = boundaryMask,
+				boundarySourceZoom = boundaryZoom,
 				satelliteTexturePath = baseSatelliteTexturePaths[textureTile],
 				standardSatelliteTexturePath = baseStandardSatelliteTexturePaths[textureTile],
 				satelliteTextureTier = baseSatelliteTextureTiers[textureTile]
@@ -257,7 +270,9 @@ object FlightTerrainMeshBuilder {
 		}
 		return FlightTerrainGeometry(
 			vertices = vertices,
-			indices = shortArrayOf(0, 2, 1, 1, 2, 3)
+			indices = shortArrayOf(0, 2, 1, 1, 2, 3),
+			minimumElevationMeters = 0f,
+			maximumElevationMeters = 0f
 		)
 	}
 
@@ -273,6 +288,8 @@ object FlightTerrainMeshBuilder {
 		val resolvedTextureTransform = textureTransform ?: TextureTransform(tile.id, 0f, 0f, 1f)
 		val gridSize = gridQuads + 1
 		val vertices = FloatArray(gridSize * gridSize * VERTEX_COMPONENTS)
+		var minimumElevation = Float.POSITIVE_INFINITY
+		var maximumElevation = Float.NEGATIVE_INFINITY
 		for (row in 0 until gridSize) {
 			val tileY = tile.id.y + row.toDouble() / gridQuads
 			val latitude = FlightTerrainTilePlanner.tileYToLatitude(tileY, tile.id.zoom)
@@ -285,6 +302,8 @@ object FlightTerrainMeshBuilder {
 					val coarseElevation = boundarySampler.elevationAtLocation(latitude, longitude)
 					detailedElevation + ((coarseElevation ?: detailedElevation) - detailedElevation) * (1f - edgeBlend)
 				} else detailedElevation
+				minimumElevation = minOf(minimumElevation, elevation)
+				maximumElevation = maxOf(maximumElevation, elevation)
 				val position = projection.toLocal(latitude, longitude, elevation.toDouble())
 				val offset = (row * gridSize + column) * VERTEX_COMPONENTS
 				vertices[offset] = position[0]
@@ -317,7 +336,9 @@ object FlightTerrainMeshBuilder {
 		}
 		return FlightTerrainGeometry(
 			vertices = vertices,
-			indices = indices
+			indices = indices,
+			minimumElevationMeters = minimumElevation.takeIf { it.isFinite() } ?: 0f,
+			maximumElevationMeters = maximumElevation.takeIf { it.isFinite() } ?: 0f
 		)
 	}
 

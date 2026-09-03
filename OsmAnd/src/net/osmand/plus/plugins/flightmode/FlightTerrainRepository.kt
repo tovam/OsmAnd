@@ -370,8 +370,29 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				previousScene.coordinateOriginLatitude == built.coordinateOriginLatitude &&
 				previousScene.coordinateOriginLongitude == built.coordinateOriginLongitude
 			) {
-				val present = built.meshes.mapTo(hashSetOf()) { it.tileId }
-				built.copy(meshes = built.meshes + previousScene.meshes.filter { it.tileId !in present })
+				val previousByLayer = previousScene.meshes.associateBy { it.tileId to it.refinementLevel }
+				val retainedMeshes = built.meshes.map { current ->
+					val previous = previousByLayer[current.tileId to current.refinementLevel]
+					if (!current.terrainAvailable && previous?.terrainAvailable == true) {
+						// Never replace a real resident surface with the zero-metre loading plane.
+						// Keep any newly available texture handles while retaining the old geometry.
+						previous.copy(
+							satelliteTexturePath = current.satelliteTexturePath ?: previous.satelliteTexturePath,
+							standardSatelliteTexturePath = current.standardSatelliteTexturePath
+								?: previous.standardSatelliteTexturePath,
+							satelliteTextureTier = if (current.satelliteTexturePath != null) {
+								current.satelliteTextureTier
+							} else previous.satelliteTextureTier,
+							nativeMapTexturePath = current.nativeMapTexturePath ?: previous.nativeMapTexturePath
+						)
+					} else current
+				}
+				val presentLayers = retainedMeshes.mapTo(hashSetOf()) { it.tileId to it.refinementLevel }
+				built.copy(
+					meshes = retainedMeshes + previousScene.meshes.filter {
+						(it.tileId to it.refinementLevel) !in presentLayers
+					}
+				)
 			} else built
 			lastScenePublishNanos = now
 			lastPublishedVisualUpdates = visualUpdates

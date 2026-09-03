@@ -3,6 +3,8 @@ package net.osmand.test.junit
 import net.osmand.plus.plugins.flightmode.FlightLeg
 import net.osmand.plus.plugins.flightmode.FlightCabinSide
 import net.osmand.plus.plugins.flightmode.FlightPlan
+import net.osmand.plus.plugins.flightmode.FlightPhotoColorMatrix
+import net.osmand.plus.plugins.flightmode.FlightPhotoImageAdjustments
 import net.osmand.plus.plugins.flightmode.FlightPhotoPerspective
 import net.osmand.plus.plugins.flightmode.FlightPhotoTimestampParser
 import net.osmand.plus.plugins.flightmode.FlightPhotoWindowAlignment
@@ -43,6 +45,7 @@ import net.osmand.plus.plugins.flightmode.TerrainTileId
 import net.osmand.plus.plugins.flightmode.TerrainTilePlan
 import net.osmand.plus.plugins.flightmode.TerrariumCodec
 import net.osmand.plus.plugins.flightmode.TerrariumTile
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -53,6 +56,38 @@ import java.util.Date
 import java.util.Locale
 
 class FlightModeLogicTest {
+
+	@Test
+	fun neutralPhotoAdjustmentsProduceIdentityColorMatrix() {
+		assertArrayEquals(
+			floatArrayOf(
+				1f, 0f, 0f, 0f, 0f,
+				0f, 1f, 0f, 0f, 0f,
+				0f, 0f, 1f, 0f, 0f,
+				0f, 0f, 0f, 1f, 0f
+			),
+			FlightPhotoColorMatrix.values(FlightPhotoImageAdjustments()),
+			0f
+		)
+	}
+
+	@Test
+	fun photoAdjustmentsAreFiniteAndClampedBeforeRendering() {
+		val safe = FlightPhotoImageAdjustments(
+			brightness = 2f,
+			contrast = -2f,
+			temperature = Float.NaN,
+			tint = Float.POSITIVE_INFINITY,
+			saturation = 0.4f
+		).clamped()
+
+		assertEquals(1f, safe.brightness, 0f)
+		assertEquals(-1f, safe.contrast, 0f)
+		assertEquals(0f, safe.temperature, 0f)
+		assertEquals(0f, safe.tint, 0f)
+		assertEquals(0.4f, safe.saturation, 0f)
+		assertTrue(FlightPhotoColorMatrix.values(safe).all(Float::isFinite))
+	}
 
 	@Test
 	fun androidCameraFileNamesExposeTheirCaptureTime() {
@@ -550,8 +585,14 @@ class FlightModeLogicTest {
 			tiles = mapOf(tileId to tile)
 		)
 		assertEquals(1, scene.meshes.size)
-		assertEquals(33 * 33 * FlightTerrainMeshBuilder.VERTEX_COMPONENTS, scene.meshes.single().vertices.size)
-		assertEquals(32 * 32 * 6, scene.meshes.single().indices.size)
+		val mesh = scene.meshes.single()
+		assertEquals(33 * 33 * FlightTerrainMeshBuilder.VERTEX_COMPONENTS, mesh.vertices.size)
+		assertEquals(32 * 32 * 6, mesh.indices.size)
+		assertEquals(32, mesh.gridQuads)
+		assertEquals(256, mesh.sourceWidthPixels)
+		assertEquals(256, mesh.sourceHeightPixels)
+		assertEquals(120f, mesh.minimumElevationMeters, 0f)
+		assertEquals(120f, mesh.maximumElevationMeters, 0f)
 	}
 
 	@Test
@@ -800,6 +841,11 @@ class FlightModeLogicTest {
 		assertEquals(1, scene.meshes.size)
 		assertEquals(4 * FlightTerrainMeshBuilder.VERTEX_COMPONENTS, scene.meshes.single().vertices.size)
 		assertEquals(6, scene.meshes.single().indices.size)
+		assertFalse(scene.meshes.single().terrainAvailable)
+		assertEquals(1, scene.meshes.single().gridQuads)
+		assertEquals(0, scene.meshes.single().sourceWidthPixels)
+		assertEquals(0f, scene.meshes.single().minimumElevationMeters, 0f)
+		assertEquals(0f, scene.meshes.single().maximumElevationMeters, 0f)
 		assertEquals(0, scene.loadedTiles)
 		assertEquals(1, scene.missingTiles)
 	}

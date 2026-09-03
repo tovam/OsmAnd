@@ -90,6 +90,13 @@ data class FlightTerrainMesh(
 	val indices: ShortArray,
 	val refinementLevel: Int = 0,
 	val terrainAvailable: Boolean = true,
+	val gridQuads: Int = FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS,
+	val sourceWidthPixels: Int = 0,
+	val sourceHeightPixels: Int = 0,
+	val minimumElevationMeters: Float = 0f,
+	val maximumElevationMeters: Float = 0f,
+	val edgeMorphMask: Int = 0,
+	val boundarySourceZoom: Int = tileId.zoom,
 	val satelliteTexturePath: String? = null,
 	val standardSatelliteTexturePath: String? = null,
 	val satelliteTextureTier: FlightTerrainTextureTier = FlightTerrainTextureTier.OVERVIEW,
@@ -98,7 +105,9 @@ data class FlightTerrainMesh(
 
 data class FlightTerrainGeometry(
 	val vertices: FloatArray,
-	val indices: ShortArray
+	val indices: ShortArray,
+	val minimumElevationMeters: Float,
+	val maximumElevationMeters: Float
 )
 
 data class FlightTerrainGeometryCacheKey(

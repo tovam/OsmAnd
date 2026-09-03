@@ -1230,6 +1230,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		replacePhoto(photo.copy(rotationDegrees = rotation), "Rotation de la photo enregistrée")
 	}
 
+	fun setPhotoImageAdjustments(id: String, adjustments: FlightPhotoImageAdjustments) {
+		val photo = findPhoto(id) ?: return
+		val safe = adjustments.clamped()
+		if (photo.imageAdjustments == safe) return
+		replacePhoto(photo.copy(imageAdjustments = safe), message = null)
+	}
+
 	fun openPhotoOnMap(id: String) {
 		selectPhoto(id)
 		if (findPhoto(id)?.matchedSamplePosition != null) {

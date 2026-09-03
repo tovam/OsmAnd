@@ -305,12 +305,115 @@ data class FlightPhotoAttachment(
 	/** Vertical camera field of view inferred from EXIF, after applying EXIF orientation. */
 	val cameraVerticalFieldOfViewDegrees: Float? = null,
 	val rotationDegrees: Float = 0f,
+	val imageAdjustments: FlightPhotoImageAdjustments = FlightPhotoImageAdjustments(),
 	val includeMainCamera: Boolean = true,
 	val includeSelfie: Boolean = false,
 	val includeMap: Boolean = true,
 	val includeScene3d: Boolean = true,
 	val windowAlignment: FlightPhotoWindowAlignment? = null
 )
+
+/** Non-destructive colour adjustments stored beside the original photo. */
+data class FlightPhotoImageAdjustments(
+	val brightness: Float = 0f,
+	val contrast: Float = 0f,
+	/** Blue (-1) to warm/orange (+1). */
+	val temperature: Float = 0f,
+	/** Green (-1) to magenta (+1). */
+	val tint: Float = 0f,
+	val saturation: Float = 0f
+) {
+	fun clamped(): FlightPhotoImageAdjustments = copy(
+		brightness = brightness.finiteUnitValue(),
+		contrast = contrast.finiteUnitValue(),
+		temperature = temperature.finiteUnitValue(),
+		tint = tint.finiteUnitValue(),
+		saturation = saturation.finiteUnitValue()
+	)
+
+	fun isNeutral(): Boolean = this == FlightPhotoImageAdjustments()
+
+	private fun Float.finiteUnitValue(): Float = takeIf(Float::isFinite)?.coerceIn(-1f, 1f) ?: 0f
+}
+
+/** Builds the 4×5 colour matrix consumed directly by the GPU-backed Compose image layer. */
+object FlightPhotoColorMatrix {
+
+	fun values(adjustments: FlightPhotoImageAdjustments): FloatArray {
+		val safe = adjustments.clamped()
+		val saturation = 1f + safe.saturation
+		val inverseSaturation = 1f - saturation
+		var result = floatArrayOf(
+			LUMA_RED * inverseSaturation + saturation,
+			LUMA_GREEN * inverseSaturation,
+			LUMA_BLUE * inverseSaturation,
+			0f,
+			0f,
+			LUMA_RED * inverseSaturation,
+			LUMA_GREEN * inverseSaturation + saturation,
+			LUMA_BLUE * inverseSaturation,
+			0f,
+			0f,
+			LUMA_RED * inverseSaturation,
+			LUMA_GREEN * inverseSaturation,
+			LUMA_BLUE * inverseSaturation + saturation,
+			0f,
+			0f,
+			0f, 0f, 0f, 1f, 0f
+		)
+
+		val redScale = (1f + 0.20f * safe.temperature + 0.08f * safe.tint).coerceIn(0.65f, 1.35f)
+		val greenScale = (1f - 0.04f * kotlin.math.abs(safe.temperature) - 0.16f * safe.tint)
+			.coerceIn(0.65f, 1.35f)
+		val blueScale = (1f - 0.20f * safe.temperature + 0.08f * safe.tint).coerceIn(0.65f, 1.35f)
+		result = multiply(
+			floatArrayOf(
+				redScale, 0f, 0f, 0f, 0f,
+				0f, greenScale, 0f, 0f, 0f,
+				0f, 0f, blueScale, 0f, 0f,
+				0f, 0f, 0f, 1f, 0f
+			),
+			result
+		)
+
+		val contrastScale = 1f + safe.contrast * 0.75f
+		val offset = 128f * (1f - contrastScale) + safe.brightness * 96f
+		return multiply(
+			floatArrayOf(
+				contrastScale, 0f, 0f, 0f, offset,
+				0f, contrastScale, 0f, 0f, offset,
+				0f, 0f, contrastScale, 0f, offset,
+				0f, 0f, 0f, 1f, 0f
+			),
+			result
+		)
+	}
+
+	/** Returns [after] × [before], including the constant fifth column. */
+	private fun multiply(after: FloatArray, before: FloatArray): FloatArray {
+		val result = FloatArray(MATRIX_VALUES)
+		for (row in 0 until 4) {
+			for (column in 0 until 4) {
+				var value = 0f
+				for (index in 0 until 4) {
+					value += after[row * 5 + index] * before[index * 5 + column]
+				}
+				result[row * 5 + column] = value
+			}
+			var offset = after[row * 5 + 4]
+			for (index in 0 until 4) {
+				offset += after[row * 5 + index] * before[index * 5 + 4]
+			}
+			result[row * 5 + 4] = offset
+		}
+		return result
+	}
+
+	private const val MATRIX_VALUES = 20
+	private const val LUMA_RED = 0.213f
+	private const val LUMA_GREEN = 0.715f
+	private const val LUMA_BLUE = 0.072f
+}
 
 enum class FlightWindowGestureTarget {
 	VIEW,

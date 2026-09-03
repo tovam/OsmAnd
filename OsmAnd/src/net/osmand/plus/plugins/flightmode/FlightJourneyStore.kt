@@ -441,6 +441,7 @@ class FlightJourneyStore(private val context: Context) {
 					putOptional("matchedSamplePosition", photo.matchedSamplePosition)
 					putOptional("cameraVerticalFieldOfViewDegrees", photo.cameraVerticalFieldOfViewDegrees)
 					put("rotationDegrees", normalizePhotoRotation(photo.rotationDegrees))
+					put("imageAdjustments", photoImageAdjustmentsToJson(photo.imageAdjustments))
 					put("includeMainCamera", photo.includeMainCamera)
 					put("includeSelfie", photo.includeSelfie)
 					put("includeMap", photo.includeMap)
@@ -483,6 +484,7 @@ class FlightJourneyStore(private val context: Context) {
 							FlightWindowPlacement.MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
 						),
 					rotationDegrees = normalizePhotoRotation(json.optDouble("rotationDegrees", 0.0).toFloat()),
+					imageAdjustments = photoImageAdjustmentsFromJson(json.optJSONObject("imageAdjustments")),
 					includeMainCamera = json.optBoolean("includeMainCamera", true),
 					includeSelfie = json.optBoolean("includeSelfie", false),
 					includeMap = json.optBoolean("includeMap", true),
@@ -537,6 +539,28 @@ class FlightJourneyStore(private val context: Context) {
 			})
 			putOptional("spatialPose", safe.spatialPose?.let(::photoSpatialPoseToJson))
 		}
+	}
+
+	private fun photoImageAdjustmentsToJson(adjustments: FlightPhotoImageAdjustments): JSONObject {
+		val safe = adjustments.clamped()
+		return JSONObject().apply {
+			put("brightness", safe.brightness)
+			put("contrast", safe.contrast)
+			put("temperature", safe.temperature)
+			put("tint", safe.tint)
+			put("saturation", safe.saturation)
+		}
+	}
+
+	private fun photoImageAdjustmentsFromJson(json: JSONObject?): FlightPhotoImageAdjustments {
+		if (json == null) return FlightPhotoImageAdjustments()
+		return FlightPhotoImageAdjustments(
+			brightness = json.optDouble("brightness", 0.0).toFloat(),
+			contrast = json.optDouble("contrast", 0.0).toFloat(),
+			temperature = json.optDouble("temperature", 0.0).toFloat(),
+			tint = json.optDouble("tint", 0.0).toFloat(),
+			saturation = json.optDouble("saturation", 0.0).toFloat()
+		).clamped()
 	}
 
 	private fun photoSpatialPoseToJson(pose: FlightPhotoSpatialPose): JSONObject = JSONObject().apply {
@@ -1031,7 +1055,7 @@ class FlightJourneyStore(private val context: Context) {
 
 	companion object {
 		const val ARCHIVE_EXTENSION = "osmandflight"
-		private const val SCHEMA_VERSION = 8
+		private const val SCHEMA_VERSION = 9
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"

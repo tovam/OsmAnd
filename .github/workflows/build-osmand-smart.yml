@@ -1,4 +1,5 @@
 name: Build OsmAnd Smart APK
+run-name: "5.4.0#smart${{ github.run_number }}.${{ github.run_attempt }} — Build OsmAnd Smart APK"
 
 on:
   workflow_dispatch:
