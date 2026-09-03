@@ -63,25 +63,56 @@ jobs:
         with:
           java-version: "17"
           distribution: adopt
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Apply flight altitude support to OsmAnd core
         run: |
           git -C core apply --check ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
           git -C core apply ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
 
-      - name: Build patched OsmAnd core for ARM64
+      - name: Resolve patched core cache identity
+        id: patched-core-identity
+        run: |
+          echo "core_sha=$(git -C core rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "build_sha=$(git -C build rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          ndk_path="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-unknown}}"
+          echo "ndk_revision=$(basename "${ndk_path}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore stripped patched OsmAnd core
+        id: patched-core-cache
+        uses: actions/cache@v5
+        with:
+          path: binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
+          key: patched-osmand-core-arm64-debug-stripped-v1-${{ runner.os }}-api35-${{ steps.patched-core-identity.outputs.ndk_revision }}-${{ steps.patched-core-identity.outputs.core_sha }}-${{ steps.patched-core-identity.outputs.build_sha }}-${{ hashFiles('android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch') }}
+
+      - name: Build and strip patched OsmAnd core for ARM64
+        if: steps.patched-core-cache.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           export ANDROID_SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           export ANDROID_NDK="${ANDROID_NDK_ROOT:-${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}}"
           export ANDROID_API_VERSION=android-35
           export ANDROID_SDK_BUILD_TOOLS_REVISION=35.0.0
-          export OSMAND_BUILD_CPU_CORES_NUM=2
+          export OSMAND_BUILD_CPU_CORES_NUM=4
           test -d "${ANDROID_SDK}"
           test -d "${ANDROID_NDK}"
           bash build/arm64-v8a-android-clang.sh debug 2>&1 | tee "${RUNNER_TEMP}/osmand-core-build.log"
-          cmake --build baked/arm64-v8a-android-clang-debug.make --target OsmAndCoreWithJNI --parallel 2 2>&1 | tee -a "${RUNNER_TEMP}/osmand-core-build.log"
-          test -s binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
+          cmake --build baked/arm64-v8a-android-clang-debug.make --target OsmAndCoreWithJNI --parallel 4 2>&1 | tee -a "${RUNNER_TEMP}/osmand-core-build.log"
+          core_library="binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so"
+          strip_tool="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          test -s "${core_library}"
+          test -x "${strip_tool}"
+          size_before="$(stat -c '%s' "${core_library}")"
+          "${strip_tool}" --strip-unneeded "${core_library}"
+          size_after="$(stat -c '%s' "${core_library}")"
+          test "${size_after}" -gt 0
+          echo "OsmAndCore ARM64: ${size_before} bytes before strip, ${size_after} bytes after strip" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Validate patched OsmAnd core input
+        run: test -s binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
 
       - name: Publish OsmAnd core failure details
         if: failure()
@@ -117,8 +148,7 @@ jobs:
           export APK_NUMBER_VERSION=$((6000000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
           export APK_VERSION_SUFFIX="#smart${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           echo "Building update-compatible versionCode ${APK_NUMBER_VERSION}"
-          ./gradlew -PusePatchedOsmAndCoreNative=true :OsmAnd:compileAndroidFullOpenglArm64DebugKotlin 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
-          ./gradlew -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug 2>&1 | tee -a "${RUNNER_TEMP}/gradle-build.log"
+          ./gradlew --build-cache -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
 
       - name: Verify patched native core is packaged
         run: |
@@ -167,4 +197,6 @@ jobs:
           name: osmand-smart-android-full-opengl-arm64-debug
           path: android/OsmAnd/build/outputs/apk/**/*.apk
           if-no-files-found: error
-          retention-days: 90
+          # This artifact is only the hand-off to the release workflow. The public
+          # release asset remains downloadable independently of this retention.
+          retention-days: 1
