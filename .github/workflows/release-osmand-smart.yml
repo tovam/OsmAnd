@@ -8,7 +8,7 @@ on:
       - completed
 
 permissions:
-  actions: read
+  actions: write
   contents: write
 
 jobs:
@@ -54,3 +54,30 @@ jobs:
             --title "${RELEASE_TITLE}" \
             --notes "Debug ARM64 OpenGL CPU build for testing. Application ID: com.tovam.osmandsmart. Signed with the repository's stable test key, with a monotonically increasing versionCode so later APKs install as updates." \
             --prerelease
+
+      - name: Delete temporary Actions artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          artifact_ids_file="${RUNNER_TEMP}/osmand-smart-artifact-ids.txt"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.name == "osmand-smart-android-full-opengl-arm64-debug") | .id' \
+            > "${artifact_ids_file}"
+
+          mapfile -t artifact_ids < "${artifact_ids_file}"
+          if (( ${#artifact_ids[@]} != 1 )); then
+            echo "Expected exactly one temporary APK artifact, found ${#artifact_ids[@]}" >&2
+            exit 1
+          fi
+
+          artifact_id="${artifact_ids[0]}"
+          if [[ ! "${artifact_id}" =~ ^[0-9]+$ ]]; then
+            echo "Refusing to delete an invalid artifact id" >&2
+            exit 1
+          fi
+
+          gh api --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
