@@ -1,9 +1,10 @@
-name: Sync OsmAnd upstream weekly
+name: Sync OsmAnd upstream every 6 days
 
 on:
   schedule:
-    # Monday morning. GitHub schedules use UTC; using :17 avoids the busy top of the hour.
-    - cron: "17 5 * * 1"
+    # Cron has no exact "every 6 days" expression: */6 resets at each month boundary.
+    # Run a tiny daily gate instead; the real sync runs on one UTC day out of six.
+    - cron: "17 5 * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,8 +16,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sync:
+  cadence:
     if: github.repository == 'tovam/OsmAnd'
+    runs-on: ubuntu-slim
+    outputs:
+      due: ${{ steps.cadence.outputs.due }}
+
+    steps:
+      - name: Select one UTC day out of every six
+        id: cadence
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
+            echo "due=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          epoch_day=$(( $(date -u +%s) / 86400 ))
+          if (( epoch_day % 6 == 0 )); then
+            echo "due=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "due=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+  sync:
+    needs: cadence
+    if: github.repository == 'tovam/OsmAnd' && needs.cadence.outputs.due == 'true'
     runs-on: ubuntu-latest
 
     steps:
