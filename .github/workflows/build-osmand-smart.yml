@@ -84,10 +84,7 @@ jobs:
           if [ ! -f "${RUNNER_TEMP}/osmand-core-build.log" ]; then
             exit 0
           fi
-          details="$(grep -nE '(CMake Error|error:|FAILED:|undefined reference|ninja:|make(\[[0-9]+\])?: \*\*\*)' "${RUNNER_TEMP}/osmand-core-build.log" | tail -n 120 || true)"
-          if [ -z "${details}" ]; then
-            details="$(tail -n 120 "${RUNNER_TEMP}/osmand-core-build.log")"
-          fi
+          details="$(tail -n 120 "${RUNNER_TEMP}/osmand-core-build.log")"
           details="${details//'%'/'%25'}"
           details="${details//$'\r'/'%0D'}"
           details="${details//$'\n'/'%0A'}"
