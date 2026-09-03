@@ -199,7 +199,7 @@ object FlightTerrainMeshBuilder {
 					boundarySampler = boundarySampler,
 					boundaryMask = boundaryMask
 				)
-			}
+			} ?: return@mapNotNull null
 			val textureTile = textureTransform.textureTile
 			FlightTerrainMesh(
 				tileId = tileId,
