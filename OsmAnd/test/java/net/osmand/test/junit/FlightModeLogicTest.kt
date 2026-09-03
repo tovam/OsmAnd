@@ -15,7 +15,11 @@ import net.osmand.plus.plugins.flightmode.FlightSatelliteQuality
 import net.osmand.plus.plugins.flightmode.FlightStop
 import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
+import net.osmand.plus.plugins.flightmode.FlightTerrainGeometry
+import net.osmand.plus.plugins.flightmode.FlightTerrainGeometryCacheKey
+import net.osmand.plus.plugins.flightmode.FlightTerrainLodPolicy
 import net.osmand.plus.plugins.flightmode.FlightTerrainMeshBuilder
+import net.osmand.plus.plugins.flightmode.FlightTerrainTextureTier
 import net.osmand.plus.plugins.flightmode.FlightTerrainTilePlanner
 import net.osmand.plus.plugins.flightmode.FlightTrackMath
 import net.osmand.plus.plugins.flightmode.FlightTrip
@@ -33,6 +37,7 @@ import net.osmand.plus.plugins.flightmode.TerrariumCodec
 import net.osmand.plus.plugins.flightmode.TerrariumTile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.text.SimpleDateFormat
@@ -428,6 +433,103 @@ class FlightModeLogicTest {
 		val lastVertexOffset = (33 * 33 - 1) * FlightTerrainMeshBuilder.VERTEX_COMPONENTS
 		assertEquals(1f, mesh.vertices[lastVertexOffset + 7], 0f)
 		assertEquals(1f, mesh.vertices[lastVertexOffset + 8], 0f)
+	}
+
+	@Test
+	fun ultraTerrainUsesRealDistanceRingsAndAnImmediateOverview() {
+		assertEquals(
+			FlightTerrainTextureTier.ULTRA,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA, 300, 10.0)
+		)
+		assertEquals(
+			FlightTerrainTextureTier.HIGH,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA, 300, 50.0)
+		)
+		assertEquals(
+			FlightTerrainTextureTier.STANDARD,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA, 300, 120.0)
+		)
+		assertEquals(
+			FlightTerrainTextureTier.OVERVIEW,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA, 300, 250.0)
+		)
+		assertEquals(
+			FlightTerrainTextureTier.ULTRA,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA_PLUS, 300, 40.0)
+		)
+		assertEquals(
+			FlightTerrainTextureTier.HIGH,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA_PLUS, 300, 80.0)
+		)
+	}
+
+	@Test
+	fun textureQualityAndSceneCenterDoNotRebuildCachedTerrainGeometry() {
+		val zoom = 8
+		val tileId = TerrainTileId(zoom, 141, 95)
+		val tile = TerrariumTile(tileId, 256, 256, FloatArray(256 * 256) { 100f })
+		val cache = linkedMapOf<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>()
+		val standard = FlightTerrainMeshBuilder.build(
+			centerLatitude = 42.0,
+			centerLongitude = 19.0,
+			radiusKm = 300,
+			plan = TerrainTilePlan(zoom, listOf(tileId)),
+			tiles = mapOf(tileId to tile),
+			satelliteQuality = FlightSatelliteQuality.STANDARD,
+			coordinateOriginLatitude = 42.0,
+			coordinateOriginLongitude = 19.0,
+			geometryCache = cache
+		)
+		val ultra = FlightTerrainMeshBuilder.build(
+			centerLatitude = 42.1,
+			centerLongitude = 19.1,
+			radiusKm = 300,
+			plan = TerrainTilePlan(zoom, listOf(tileId)),
+			tiles = mapOf(tileId to tile),
+			satelliteQuality = FlightSatelliteQuality.ULTRA,
+			coordinateOriginLatitude = 42.0,
+			coordinateOriginLongitude = 19.0,
+			geometryCache = cache
+		)
+
+		assertSame(standard.meshes.single().vertices, ultra.meshes.single().vertices)
+		assertSame(standard.meshes.single().indices, ultra.meshes.single().indices)
+	}
+
+	@Test
+	fun missingTerrainCanUseAnImmediateFourVertexPlaceholder() {
+		val tileId = TerrainTileId(8, 141, 95)
+		val scene = FlightTerrainMeshBuilder.build(
+			centerLatitude = 42.0,
+			centerLongitude = 19.0,
+			radiusKm = 300,
+			plan = TerrainTilePlan(8, listOf(tileId)),
+			tiles = emptyMap(),
+			coordinateOriginLatitude = 42.0,
+			coordinateOriginLongitude = 19.0,
+			includePlaceholders = true
+		)
+
+		assertEquals(1, scene.meshes.size)
+		assertEquals(4 * FlightTerrainMeshBuilder.VERTEX_COMPONENTS, scene.meshes.single().vertices.size)
+		assertEquals(6, scene.meshes.single().indices.size)
+		assertEquals(0, scene.loadedTiles)
+		assertEquals(1, scene.missingTiles)
+	}
+
+	@Test
+	fun stableTerrainOriginTransformsLocalDirectionsWithoutChangingTheirLength() {
+		val coordinates = FlightTerrainCoordinates(42.0, 19.0)
+		val atOrigin = coordinates.vectorToLocal(42.0, 19.0, 1f, 0f, 0f)
+		assertEquals(1f, atOrigin[0], 1e-5f)
+		assertEquals(0f, atOrigin[1], 1e-5f)
+		assertEquals(0f, atOrigin[2], 1e-5f)
+
+		val distantUp = coordinates.vectorToLocal(48.0, 2.0, 0f, 1f, 0f)
+		val length = kotlin.math.sqrt(
+			distantUp[0] * distantUp[0] + distantUp[1] * distantUp[1] + distantUp[2] * distantUp[2]
+		)
+		assertEquals(1f, length, 1e-5f)
 	}
 
 	@Test

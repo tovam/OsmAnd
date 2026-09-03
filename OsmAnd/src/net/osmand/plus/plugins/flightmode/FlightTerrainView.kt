@@ -9,8 +9,7 @@ import android.opengl.Matrix
 import android.util.AttributeSet
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
-import java.nio.ShortBuffer
+import java.util.LinkedHashMap
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
@@ -25,10 +24,13 @@ class FlightTerrainView @JvmOverloads constructor(
 	attributes: AttributeSet? = null
 ) : GLSurfaceView(context, attributes) {
 
-	private val terrainRenderer = TerrainRenderer { message ->
-		post { rendererErrorListener?.invoke(message) }
-	}
 	private var rendererErrorListener: ((String) -> Unit)? = null
+	private var renderStatsListener: ((FlightTerrainRenderStats) -> Unit)? = null
+	private val terrainRenderer = TerrainRenderer(
+		onError = { message -> post { rendererErrorListener?.invoke(message) } },
+		onStats = { stats -> post { renderStatsListener?.invoke(stats) } },
+		requestFrame = { post { requestRender() } }
+	)
 
 	init {
 		setEGLContextClientVersion(2)
@@ -49,9 +51,11 @@ class FlightTerrainView @JvmOverloads constructor(
 		satelliteOpacity: Float,
 		terrainOpacity: Float,
 		nativeMapOpacity: Float,
-		onRendererError: (String) -> Unit
+		onRendererError: (String) -> Unit,
+		onRenderStats: (FlightTerrainRenderStats) -> Unit
 	) {
 		rendererErrorListener = onRendererError
+		renderStatsListener = onRenderStats
 		terrainRenderer.update(
 			scene,
 			sample,
@@ -68,7 +72,9 @@ class FlightTerrainView @JvmOverloads constructor(
 	}
 
 	private class TerrainRenderer(
-		private val onError: (String) -> Unit
+		private val onError: (String) -> Unit,
+		private val onStats: (FlightTerrainRenderStats) -> Unit,
+		private val requestFrame: () -> Unit
 	) : GLSurfaceView.Renderer {
 
 		@Volatile
@@ -98,6 +104,15 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var surfaceHeight = 1
 		private var uploadedGeneration = Long.MIN_VALUE
 		private var renderMeshes: List<RenderMesh> = emptyList()
+		private val geometryCache = LinkedHashMap<TerrainTileId, CachedGeometry>(
+			MAXIMUM_RENDER_GEOMETRIES + 1,
+			0.75f,
+			true
+		)
+		private val textureCache = LinkedHashMap<String, UploadedTexture>(32, 0.75f, true)
+		private val pendingTextureUploads = linkedSetOf<String>()
+		private var lastReportedStats: FlightTerrainRenderStats? = null
+		private var lastStatsReportNanos = 0L
 
 		private var positionLocation = -1
 		private var normalLocation = -1
@@ -115,6 +130,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var hasSatelliteTextureLocation = -1
 		private var satelliteOpacityLocation = -1
 		private var terrainOpacityLocation = -1
+		private var terrainReadyLocation = -1
 		private var nativeMapTextureLocation = -1
 		private var hasNativeMapTextureLocation = -1
 		private var nativeMapOpacityLocation = -1
@@ -134,6 +150,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var shadowSunNorth = Float.NaN
 		private var shadowSunUp = Float.NaN
 		private var shadowFocusX = Float.NaN
+		private var shadowFocusY = Float.NaN
 		private var shadowFocusZ = Float.NaN
 		private var shadowLightMvp = FloatArray(16)
 
@@ -181,6 +198,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				hasSatelliteTextureLocation = GLES20.glGetUniformLocation(program, "uHasSatelliteTexture")
 				satelliteOpacityLocation = GLES20.glGetUniformLocation(program, "uSatelliteOpacity")
 				terrainOpacityLocation = GLES20.glGetUniformLocation(program, "uTerrainOpacity")
+				terrainReadyLocation = GLES20.glGetUniformLocation(program, "uTerrainReady")
 				nativeMapTextureLocation = GLES20.glGetUniformLocation(program, "uNativeMapTexture")
 				hasNativeMapTextureLocation = GLES20.glGetUniformLocation(program, "uHasNativeMapTexture")
 				nativeMapOpacityLocation = GLES20.glGetUniformLocation(program, "uNativeMapOpacity")
@@ -192,6 +210,11 @@ class FlightTerrainView @JvmOverloads constructor(
 				shadowAvailable = createShadowResources()
 				uploadedGeneration = Long.MIN_VALUE
 				renderMeshes = emptyList()
+				geometryCache.clear()
+				textureCache.clear()
+				pendingTextureUploads.clear()
+				lastReportedStats = null
+				lastStatsReportNanos = 0L
 				shadowSceneGeneration = Long.MIN_VALUE
 				GLES20.glEnable(GLES20.GL_DEPTH_TEST)
 				GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -233,11 +256,22 @@ class FlightTerrainView @JvmOverloads constructor(
 				return
 			}
 			if (uploadedGeneration != currentScene.generation) {
-				replaceRenderMeshes(currentScene.meshes)
-				uploadedGeneration = currentScene.generation
+				try {
+					replaceRenderMeshes(currentScene.meshes)
+					uploadedGeneration = currentScene.generation
+				} catch (error: RuntimeException) {
+					releaseRenderMeshes()
+					uploadedGeneration = currentScene.generation
+					onError(error.message ?: "Mise à jour GPU du relief impossible")
+					clearDefaultFrameBuffer(sky)
+					return
+				}
 			}
+			processTextureUploads()
+			publishRenderStats()
 			if (renderMeshes.isEmpty()) {
 				clearDefaultFrameBuffer(sky)
+				if (pendingTextureUploads.isNotEmpty()) requestFrame()
 				return
 			}
 
@@ -246,27 +280,52 @@ class FlightTerrainView @JvmOverloads constructor(
 				?: currentSample?.altitudeMeters?.toFloat()
 				?: DEFAULT_FLIGHT_ALTITUDE_METERS
 			val altitude = max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
-			val coordinates = FlightTerrainCoordinates(currentScene.centerLatitude, currentScene.centerLongitude)
+			val coordinates = FlightTerrainCoordinates(
+				currentScene.coordinateOriginLatitude,
+				currentScene.coordinateOriginLongitude
+			)
 			val camera = coordinates.toLocal(latitude, longitude, altitude.toDouble())
+			val groundFocus = coordinates.toLocal(latitude, longitude, 0.0)
+			val lightDirection = coordinates.vectorToLocal(
+				latitude,
+				longitude,
+				sun.east,
+				sun.up,
+				-sun.north
+			)
 
 			// Cast shadows are intentionally local to the aircraft. A single shadow map
 			// stretched over the whole 300 km scene had too little precision and exposed
 			// its moving projection boundary as a false east/west "night" line.
-			val lightMvp = createLightMvp(currentScene, sun, camera[0], camera[2])
+			val lightMvp = createLightMvp(
+				currentScene,
+				lightDirection,
+				groundFocus[0],
+				groundFocus[1],
+				groundFocus[2]
+			)
 			val shadowStrength = if (shadingEnabled && shadowAvailable) {
 				((sun.up - MINIMUM_SHADOW_SUN_UP) / SHADOW_FADE_SUN_RANGE).coerceIn(0f, 1f) *
 					shadowIntensity
 			} else 0f
 			val shadowsActive = shadowStrength > 0f
-			if (shadowsActive && shouldUpdateShadowMap(currentScene, sun, camera[0], camera[2])) {
+			if (shadowsActive && shouldUpdateShadowMap(
+					currentScene,
+					lightDirection,
+					groundFocus[0],
+					groundFocus[1],
+					groundFocus[2]
+				)
+			) {
 				renderShadowMap(lightMvp)
 				lightMvp.copyInto(shadowLightMvp)
-				shadowSceneGeneration = currentScene.generation
-				shadowSunEast = sun.east
-				shadowSunNorth = sun.north
-				shadowSunUp = sun.up
-				shadowFocusX = camera[0]
-				shadowFocusZ = camera[2]
+				shadowSceneGeneration = currentScene.geometryGeneration
+				shadowSunEast = lightDirection[0]
+				shadowSunNorth = lightDirection[2]
+				shadowSunUp = lightDirection[1]
+				shadowFocusX = groundFocus[0]
+				shadowFocusY = groundFocus[1]
+				shadowFocusZ = groundFocus[2]
 			}
 			clearDefaultFrameBuffer(sky)
 			val bearing = currentSample?.bearingDegrees ?: DEFAULT_BEARING_DEGREES
@@ -280,14 +339,24 @@ class FlightTerrainView @JvmOverloads constructor(
 			val directionX = (sin(viewAzimuth) * horizontalDirection).toFloat()
 			val directionY = sin(viewElevation).toFloat()
 			val directionZ = (-cos(viewAzimuth) * horizontalDirection).toFloat()
+			val viewDirection = coordinates.vectorToLocal(
+				latitude,
+				longitude,
+				directionX,
+				directionY,
+				directionZ
+			)
+			val cameraUp = coordinates.vectorToLocal(latitude, longitude, 0f, 1f, 0f)
 
 			val view = FloatArray(16)
 			Matrix.setLookAtM(
 				view,
 				0,
 				camera[0], camera[1], camera[2],
-				camera[0] + directionX, camera[1] + directionY, camera[2] + directionZ,
-				0f, 1f, 0f
+				camera[0] + viewDirection[0],
+				camera[1] + viewDirection[1],
+				camera[2] + viewDirection[2],
+				cameraUp[0], cameraUp[1], cameraUp[2]
 			)
 			val projection = windowProjection(currentWindowPlacement, currentScene.radiusKm)
 			val mvp = FloatArray(16)
@@ -303,7 +372,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				0
 			)
 			GLES20.glUniform3f(cameraLocation, camera[0], camera[1], camera[2])
-			GLES20.glUniform3f(lightLocation, sun.east, sun.up, -sun.north)
+			GLES20.glUniform3f(lightLocation, lightDirection[0], lightDirection[1], lightDirection[2])
 			GLES20.glUniform1f(fogDistanceLocation, currentScene.radiusKm * 1_000f * 0.92f)
 			// Keep directional relief lighting deliberately subtle. Cast-shadow strength
 			// is controlled separately below; using the full shadow slider here used to
@@ -333,11 +402,14 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glDisableVertexAttribArray(normalLocation)
 			GLES20.glDisableVertexAttribArray(elevationLocation)
 			GLES20.glDisableVertexAttribArray(textureCoordinateLocation)
+			GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+			GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + SHADOW_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + NATIVE_MAP_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+			if (pendingTextureUploads.isNotEmpty()) requestFrame()
 		}
 
 		private fun windowProjection(placement: FlightWindowPlacement, radiusKm: Int): FloatArray {
@@ -351,26 +423,54 @@ class FlightTerrainView @JvmOverloads constructor(
 
 		private fun drawMesh(mesh: RenderMesh) {
 			val strideBytes = FlightTerrainMeshBuilder.VERTEX_COMPONENTS * FLOAT_BYTES
-			mesh.vertices.position(0)
+			val geometry = mesh.geometry
+			GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, geometry.vertexBufferId)
+			GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, geometry.indexBufferId)
 			GLES20.glEnableVertexAttribArray(positionLocation)
-			GLES20.glVertexAttribPointer(positionLocation, 3, GLES20.GL_FLOAT, false, strideBytes, mesh.vertices)
-			mesh.vertices.position(3)
+			GLES20.glVertexAttribPointer(positionLocation, 3, GLES20.GL_FLOAT, false, strideBytes, 0)
 			GLES20.glEnableVertexAttribArray(normalLocation)
-			GLES20.glVertexAttribPointer(normalLocation, 3, GLES20.GL_FLOAT, false, strideBytes, mesh.vertices)
-			mesh.vertices.position(6)
+			GLES20.glVertexAttribPointer(
+				normalLocation,
+				3,
+				GLES20.GL_FLOAT,
+				false,
+				strideBytes,
+				3 * FLOAT_BYTES
+			)
 			GLES20.glEnableVertexAttribArray(elevationLocation)
-			GLES20.glVertexAttribPointer(elevationLocation, 1, GLES20.GL_FLOAT, false, strideBytes, mesh.vertices)
-			mesh.vertices.position(7)
+			GLES20.glVertexAttribPointer(
+				elevationLocation,
+				1,
+				GLES20.GL_FLOAT,
+				false,
+				strideBytes,
+				6 * FLOAT_BYTES
+			)
 			GLES20.glEnableVertexAttribArray(textureCoordinateLocation)
-			GLES20.glVertexAttribPointer(textureCoordinateLocation, 2, GLES20.GL_FLOAT, false, strideBytes, mesh.vertices)
+			GLES20.glVertexAttribPointer(
+				textureCoordinateLocation,
+				2,
+				GLES20.GL_FLOAT,
+				false,
+				strideBytes,
+				7 * FLOAT_BYTES
+			)
+			val detailedTextureId = mesh.satelliteTexturePath?.let { textureCache[it]?.id } ?: 0
+			val standardTextureId = mesh.standardSatelliteTexturePath?.let { textureCache[it]?.id } ?: 0
+			val satelliteTextureId = if (detailedTextureId != 0) {
+				detailedTextureId
+			} else if (mesh.satelliteTextureTier != FlightTerrainTextureTier.OVERVIEW) {
+				standardTextureId
+			} else 0
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + SATELLITE_TEXTURE_UNIT)
-			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mesh.satelliteTextureId)
-			GLES20.glUniform1f(hasSatelliteTextureLocation, if (mesh.satelliteTextureId != 0) 1f else 0f)
+			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, satelliteTextureId)
+			GLES20.glUniform1f(hasSatelliteTextureLocation, if (satelliteTextureId != 0) 1f else 0f)
+			val nativeMapTextureId = mesh.nativeMapTexturePath?.let { textureCache[it]?.id } ?: 0
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + NATIVE_MAP_TEXTURE_UNIT)
-			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mesh.nativeMapTextureId)
-			GLES20.glUniform1f(hasNativeMapTextureLocation, if (mesh.nativeMapTextureId != 0) 1f else 0f)
-			mesh.indices.position(0)
-			GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.indexCount, GLES20.GL_UNSIGNED_SHORT, mesh.indices)
+			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, nativeMapTextureId)
+			GLES20.glUniform1f(hasNativeMapTextureLocation, if (nativeMapTextureId != 0) 1f else 0f)
+			GLES20.glUniform1f(terrainReadyLocation, if (mesh.terrainAvailable) 1f else 0f)
+			GLES20.glDrawElements(GLES20.GL_TRIANGLES, geometry.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
 		}
 
 		private fun clearDefaultFrameBuffer(sky: FloatArray) {
@@ -382,26 +482,27 @@ class FlightTerrainView @JvmOverloads constructor(
 
 		private fun createLightMvp(
 			scene: FlightTerrainScene,
-			sun: FlightSunVector,
+			lightDirection: FloatArray,
 			focusX: Float,
+			focusY: Float,
 			focusZ: Float
 		): FloatArray {
 			val extent = (scene.radiusKm * 1_000f * SHADOW_EXTENT_MULTIPLIER)
 				.coerceIn(MINIMUM_SHADOW_EXTENT_METERS, MAXIMUM_SHADOW_EXTENT_METERS)
 			val distance = extent * SHADOW_LIGHT_DISTANCE_MULTIPLIER
-			val lightX = sun.east
-			val lightY = sun.up
-			val lightZ = -sun.north
+			val lightX = lightDirection[0]
+			val lightY = lightDirection[1]
+			val lightZ = lightDirection[2]
 			val view = FloatArray(16)
 			val useAlternateUp = abs(lightY) > 0.92f
 			Matrix.setLookAtM(
 				view,
 				0,
 				focusX + lightX * distance,
-				lightY * distance,
+				focusY + lightY * distance,
 				focusZ + lightZ * distance,
 				focusX,
-				0f,
+				focusY,
 				focusZ,
 				0f,
 				if (useAlternateUp) 0f else 1f,
@@ -432,7 +533,9 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glPolygonOffset(SHADOW_POLYGON_OFFSET_FACTOR, SHADOW_POLYGON_OFFSET_UNITS)
 			val strideBytes = FlightTerrainMeshBuilder.VERTEX_COMPONENTS * FLOAT_BYTES
 			for (mesh in renderMeshes) {
-				mesh.vertices.position(0)
+				val geometry = mesh.geometry
+				GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, geometry.vertexBufferId)
+				GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, geometry.indexBufferId)
 				GLES20.glEnableVertexAttribArray(shadowPositionLocation)
 				GLES20.glVertexAttribPointer(
 					shadowPositionLocation,
@@ -440,30 +543,40 @@ class FlightTerrainView @JvmOverloads constructor(
 					GLES20.GL_FLOAT,
 					false,
 					strideBytes,
-					mesh.vertices
+					0
 				)
-				mesh.indices.position(0)
-				GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.indexCount, GLES20.GL_UNSIGNED_SHORT, mesh.indices)
+				GLES20.glDrawElements(
+					GLES20.GL_TRIANGLES,
+					geometry.indexCount,
+					GLES20.GL_UNSIGNED_SHORT,
+					0
+				)
 			}
 			GLES20.glDisableVertexAttribArray(shadowPositionLocation)
+			GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+			GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
 			GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
 		}
 
 		private fun shouldUpdateShadowMap(
 			scene: FlightTerrainScene,
-			sun: FlightSunVector,
+			lightDirection: FloatArray,
 			focusX: Float,
+			focusY: Float,
 			focusZ: Float
 		): Boolean {
-			if (shadowSceneGeneration != scene.generation || shadowSunEast.isNaN()) return true
+			if (shadowSceneGeneration != scene.geometryGeneration || shadowSunEast.isNaN()) return true
 			val focusDeltaX = focusX - shadowFocusX
+			val focusDeltaY = focusY - shadowFocusY
 			val focusDeltaZ = focusZ - shadowFocusZ
-			if (focusDeltaX * focusDeltaX + focusDeltaZ * focusDeltaZ > SHADOW_FOCUS_UPDATE_DISTANCE_SQUARED) {
+			if (focusDeltaX * focusDeltaX + focusDeltaY * focusDeltaY + focusDeltaZ * focusDeltaZ >
+				SHADOW_FOCUS_UPDATE_DISTANCE_SQUARED
+			) {
 				return true
 			}
-			val eastDelta = sun.east - shadowSunEast
-			val northDelta = sun.north - shadowSunNorth
-			val upDelta = sun.up - shadowSunUp
+			val eastDelta = lightDirection[0] - shadowSunEast
+			val northDelta = lightDirection[2] - shadowSunNorth
+			val upDelta = lightDirection[1] - shadowSunUp
 			return eastDelta * eastDelta + northDelta * northDelta + upDelta * upDelta >
 				SHADOW_DIRECTION_EPSILON_SQUARED
 		}
@@ -561,17 +674,16 @@ class FlightTerrainView @JvmOverloads constructor(
 			shadowMapSize = 0
 		}
 
-		private fun createTexture(path: String?): Int {
-			if (path == null) return 0
+		private fun createTexture(path: String): UploadedTexture? {
 			val bitmap = BitmapFactory.decodeFile(
 				path,
 				BitmapFactory.Options().apply { inPreferredConfig = android.graphics.Bitmap.Config.RGB_565 }
-			) ?: return 0
+			) ?: return null
 			try {
 				val textureIds = IntArray(1)
 				GLES20.glGenTextures(1, textureIds, 0)
 				val textureId = textureIds[0]
-				if (textureId == 0) return 0
+				if (textureId == 0) return null
 				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
 				val powerOfTwo = isPowerOfTwo(bitmap.width) && isPowerOfTwo(bitmap.height)
@@ -585,7 +697,11 @@ class FlightTerrainView @JvmOverloads constructor(
 				GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
 				if (powerOfTwo) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
 				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-				return textureId
+				val baseBytes = bitmap.width.toLong() * bitmap.height * RGB_565_BYTES_PER_PIXEL
+				return UploadedTexture(
+					id = textureId,
+					bytes = if (powerOfTwo) baseBytes * 4L / 3L else baseBytes
+				)
 			} finally {
 				bitmap.recycle()
 			}
@@ -594,44 +710,58 @@ class FlightTerrainView @JvmOverloads constructor(
 		private fun isPowerOfTwo(value: Int): Boolean = value > 0 && (value and (value - 1)) == 0
 
 		private fun releaseRenderMeshes() {
-			val textures = renderMeshes.flatMap { listOf(it.satelliteTextureId, it.nativeMapTextureId) }
-				.filter { it != 0 }.distinct().toIntArray()
+			val textures = textureCache.values.map { it.id }.filter { it != 0 }.distinct().toIntArray()
 			if (textures.isNotEmpty()) GLES20.glDeleteTextures(textures.size, textures, 0)
+			geometryCache.values.forEach(::releaseGeometry)
 			renderMeshes = emptyList()
+			geometryCache.clear()
+			textureCache.clear()
+			pendingTextureUploads.clear()
 		}
 
 		private fun replaceRenderMeshes(meshes: List<FlightTerrainMesh>) {
-			val reusableSatelliteTextures = renderMeshes.mapNotNull { mesh ->
-				val path = mesh.satelliteTexturePath
-				if (path != null && mesh.satelliteTextureId != 0) path to mesh.satelliteTextureId else null
-			}.toMap()
-			val reusableNativeMapTextures = renderMeshes.mapNotNull { mesh ->
-				val path = mesh.nativeMapTexturePath
-				if (path != null && mesh.nativeMapTextureId != 0) path to mesh.nativeMapTextureId else null
-			}.toMap()
-			val reusedTextureIds = mutableSetOf<Int>()
-			val replacement = meshes.map { mesh ->
-				val reusableSatelliteId = mesh.satelliteTexturePath?.let(reusableSatelliteTextures::get)
-				val reusableNativeMapId = mesh.nativeMapTexturePath?.let(reusableNativeMapTextures::get)
-				if (reusableSatelliteId != null) reusedTextureIds += reusableSatelliteId
-				if (reusableNativeMapId != null) reusedTextureIds += reusableNativeMapId
-				createRenderMesh(mesh, reusableSatelliteId ?: 0, reusableNativeMapId ?: 0)
+			val activeTileIds = meshes.mapTo(hashSetOf()) { it.tileId }
+			renderMeshes = meshes.map { mesh ->
+				RenderMesh(
+					geometry = cachedGeometry(mesh),
+					terrainAvailable = mesh.terrainAvailable,
+					satelliteTexturePath = mesh.satelliteTexturePath,
+					standardSatelliteTexturePath = mesh.standardSatelliteTexturePath,
+					satelliteTextureTier = mesh.satelliteTextureTier,
+					nativeMapTexturePath = mesh.nativeMapTexturePath
+				)
 			}
-			val obsoleteTextures = renderMeshes.flatMap { listOf(it.satelliteTextureId, it.nativeMapTextureId) }
-				.filter { it != 0 && it !in reusedTextureIds }
-				.distinct()
-				.toIntArray()
-			if (obsoleteTextures.isNotEmpty()) {
-				GLES20.glDeleteTextures(obsoleteTextures.size, obsoleteTextures, 0)
+			evictGeometryCache(activeTileIds)
+
+			val wantedPaths = renderMeshes.flatMapTo(linkedSetOf()) { mesh ->
+				listOfNotNull(
+					mesh.standardSatelliteTexturePath,
+					mesh.satelliteTexturePath,
+					mesh.nativeMapTexturePath
+				)
 			}
-			renderMeshes = replacement
+			pendingTextureUploads.retainAll(wantedPaths)
+			// Near tiles arrive first. Standard is queued before its detailed replacement,
+			// so the screen never waits for a 1024/2048 px upload to gain useful imagery.
+			renderMeshes.forEach { mesh ->
+				if (mesh.satelliteTextureTier != FlightTerrainTextureTier.OVERVIEW) {
+					enqueueTexture(mesh.standardSatelliteTexturePath)
+					enqueueTexture(mesh.satelliteTexturePath)
+				}
+				enqueueTexture(mesh.nativeMapTexturePath)
+			}
+			// Warm Standard for overview tiles after every visible texture. A later quality
+			// change can then switch handles without decoding the complete scene at once.
+			renderMeshes.forEach { mesh -> enqueueTexture(mesh.standardSatelliteTexturePath) }
+			evictTextureCache(wantedPaths)
 		}
 
-		private fun createRenderMesh(
-			mesh: FlightTerrainMesh,
-			reusableSatelliteTextureId: Int = 0,
-			reusableNativeMapTextureId: Int = 0
-		): RenderMesh {
+		private fun cachedGeometry(mesh: FlightTerrainMesh): CachedGeometry {
+			val cached = geometryCache[mesh.tileId]
+			if (cached != null && cached.sourceVertices === mesh.vertices && cached.sourceIndices === mesh.indices) {
+				return cached
+			}
+			if (cached != null) releaseGeometry(cached)
 			val vertexBuffer = ByteBuffer.allocateDirect(mesh.vertices.size * FLOAT_BYTES)
 				.order(ByteOrder.nativeOrder())
 				.asFloatBuffer()
@@ -646,17 +776,125 @@ class FlightTerrainView @JvmOverloads constructor(
 					put(mesh.indices)
 					position(0)
 				}
-			return RenderMesh(
-				vertices = vertexBuffer,
-				indices = indexBuffer,
-				indexCount = mesh.indices.size,
-				satelliteTexturePath = mesh.satelliteTexturePath,
-				satelliteTextureId = reusableSatelliteTextureId.takeIf { it != 0 }
-					?: createTexture(mesh.satelliteTexturePath),
-				nativeMapTexturePath = mesh.nativeMapTexturePath,
-				nativeMapTextureId = reusableNativeMapTextureId.takeIf { it != 0 }
-					?: createTexture(mesh.nativeMapTexturePath)
+			val bufferIds = IntArray(2)
+			GLES20.glGenBuffers(bufferIds.size, bufferIds, 0)
+			if (bufferIds.any { it == 0 }) {
+				val validIds = bufferIds.filter { it != 0 }.toIntArray()
+				if (validIds.isNotEmpty()) GLES20.glDeleteBuffers(validIds.size, validIds, 0)
+				throw IllegalStateException("Impossible de créer les buffers GPU du relief")
+			}
+			GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, bufferIds[0])
+			GLES20.glBufferData(
+				GLES20.GL_ARRAY_BUFFER,
+				mesh.vertices.size * FLOAT_BYTES,
+				vertexBuffer,
+				GLES20.GL_STATIC_DRAW
 			)
+			GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, bufferIds[1])
+			GLES20.glBufferData(
+				GLES20.GL_ELEMENT_ARRAY_BUFFER,
+				mesh.indices.size * SHORT_BYTES,
+				indexBuffer,
+				GLES20.GL_STATIC_DRAW
+			)
+			GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+			GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+			return CachedGeometry(
+				tileId = mesh.tileId,
+				sourceVertices = mesh.vertices,
+				sourceIndices = mesh.indices,
+				vertexBufferId = bufferIds[0],
+				indexBufferId = bufferIds[1],
+				indexCount = mesh.indices.size,
+				bytes = mesh.vertices.size.toLong() * FLOAT_BYTES + mesh.indices.size.toLong() * SHORT_BYTES
+			).also { geometryCache[mesh.tileId] = it }
+		}
+
+		private fun enqueueTexture(path: String?) {
+			if (path != null && path !in textureCache) pendingTextureUploads += path
+		}
+
+		private fun processTextureUploads() {
+			var uploadedCount = 0
+			var uploadedBytes = 0L
+			val iterator = pendingTextureUploads.iterator()
+			while (iterator.hasNext() && uploadedCount < MAXIMUM_TEXTURE_UPLOADS_PER_FRAME) {
+				val path = iterator.next()
+				if (path in textureCache) {
+					iterator.remove()
+					continue
+				}
+				val estimatedBytes = estimatedTextureFileBytes(path)
+				if (uploadedCount > 0 && uploadedBytes + estimatedBytes > MAXIMUM_TEXTURE_UPLOAD_BYTES_PER_FRAME) break
+				iterator.remove()
+				createTexture(path)?.let { uploaded ->
+					textureCache[path] = uploaded
+					uploadedBytes += uploaded.bytes
+				}
+				uploadedCount++
+			}
+			val protectedPaths = renderMeshes.flatMapTo(hashSetOf()) { mesh ->
+				listOfNotNull(
+					mesh.satelliteTexturePath,
+					mesh.standardSatelliteTexturePath,
+					mesh.nativeMapTexturePath
+				)
+			}
+			evictTextureCache(protectedPaths)
+		}
+
+		private fun estimatedTextureFileBytes(path: String): Long {
+			val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+			BitmapFactory.decodeFile(path, options)
+			if (options.outWidth <= 0 || options.outHeight <= 0) return 0L
+			val base = options.outWidth.toLong() * options.outHeight * RGB_565_BYTES_PER_PIXEL
+			return if (isPowerOfTwo(options.outWidth) && isPowerOfTwo(options.outHeight)) base * 4L / 3L else base
+		}
+
+		private fun evictGeometryCache(activeTileIds: Set<TerrainTileId>) {
+			while (geometryCache.size > MAXIMUM_RENDER_GEOMETRIES) {
+				val candidate = geometryCache.entries.firstOrNull { it.key !in activeTileIds } ?: break
+				geometryCache.remove(candidate.key)?.let(::releaseGeometry)
+			}
+		}
+
+		private fun releaseGeometry(geometry: CachedGeometry) {
+			val ids = intArrayOf(geometry.vertexBufferId, geometry.indexBufferId).filter { it != 0 }.toIntArray()
+			if (ids.isNotEmpty()) GLES20.glDeleteBuffers(ids.size, ids, 0)
+		}
+
+		private fun evictTextureCache(protectedPaths: Set<String>) {
+			var totalBytes = textureCache.values.sumOf { it.bytes }
+			if (totalBytes <= MAXIMUM_TEXTURE_CACHE_BYTES) return
+			val iterator = textureCache.entries.iterator()
+			while (iterator.hasNext() && totalBytes > MAXIMUM_TEXTURE_CACHE_BYTES) {
+				val entry = iterator.next()
+				if (entry.key in protectedPaths) continue
+				GLES20.glDeleteTextures(1, intArrayOf(entry.value.id), 0)
+				totalBytes -= entry.value.bytes
+				iterator.remove()
+			}
+		}
+
+		private fun publishRenderStats() {
+			val stats = FlightTerrainRenderStats(
+				visibleMeshes = renderMeshes.size,
+				cachedGeometryTiles = geometryCache.size,
+				cachedTextures = textureCache.size,
+				queuedTextureUploads = pendingTextureUploads.size,
+				geometryBytes = geometryCache.values.sumOf { it.bytes },
+				textureBytes = textureCache.values.sumOf { it.bytes }
+			)
+			val now = System.nanoTime()
+			val queueJustCompleted = stats.queuedTextureUploads == 0 &&
+				(lastReportedStats?.queuedTextureUploads ?: 0) > 0
+			if (stats != lastReportedStats &&
+				(lastReportedStats == null || queueJustCompleted || now - lastStatsReportNanos >= STATS_REPORT_INTERVAL_NANOS)
+			) {
+				lastReportedStats = stats
+				lastStatsReportNanos = now
+				onStats(stats)
+			}
 		}
 
 		private fun createProgram(vertexSource: String, fragmentSource: String): Int {
@@ -692,19 +930,39 @@ class FlightTerrainView @JvmOverloads constructor(
 			return shader
 		}
 
-		private data class RenderMesh(
-			val vertices: FloatBuffer,
-			val indices: ShortBuffer,
+		private data class CachedGeometry(
+			val tileId: TerrainTileId,
+			val sourceVertices: FloatArray,
+			val sourceIndices: ShortArray,
+			val vertexBufferId: Int,
+			val indexBufferId: Int,
 			val indexCount: Int,
+			val bytes: Long
+		)
+
+		private data class UploadedTexture(
+			val id: Int,
+			val bytes: Long
+		)
+
+		private data class RenderMesh(
+			val geometry: CachedGeometry,
+			val terrainAvailable: Boolean,
 			val satelliteTexturePath: String?,
-			val satelliteTextureId: Int,
-			val nativeMapTexturePath: String?,
-			val nativeMapTextureId: Int
+			val standardSatelliteTexturePath: String?,
+			val satelliteTextureTier: FlightTerrainTextureTier,
+			val nativeMapTexturePath: String?
 		)
 
 		companion object {
 			private const val FLOAT_BYTES = 4
 			private const val SHORT_BYTES = 2
+			private const val RGB_565_BYTES_PER_PIXEL = 2L
+			private const val MAXIMUM_RENDER_GEOMETRIES = 768
+			private const val MAXIMUM_TEXTURE_CACHE_BYTES = 128L * 1_024L * 1_024L
+			private const val MAXIMUM_TEXTURE_UPLOADS_PER_FRAME = 2
+			private const val MAXIMUM_TEXTURE_UPLOAD_BYTES_PER_FRAME = 8L * 1_024L * 1_024L
+			private const val STATS_REPORT_INTERVAL_NANOS = 250_000_000L
 			private const val SATELLITE_TEXTURE_UNIT = 0
 			private const val SHADOW_TEXTURE_UNIT = 1
 			private const val NATIVE_MAP_TEXTURE_UNIT = 2
@@ -782,6 +1040,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				uniform float uHasSatelliteTexture;
 				uniform float uSatelliteOpacity;
 				uniform float uTerrainOpacity;
+				uniform float uTerrainReady;
 				uniform sampler2D uNativeMapTexture;
 				uniform float uHasNativeMapTexture;
 				uniform float uNativeMapOpacity;
@@ -844,6 +1103,9 @@ class FlightTerrainView @JvmOverloads constructor(
 					terrain = mix(terrain, rock, smoothstep(0.18, 0.62, vSlope));
 					terrain = mix(terrain, snow, smoothstep(2400.0, 3400.0, vElevation));
 					vec3 procedural = mix(water, terrain, step(0.0, vElevation));
+					// Missing MNT tiles remain visible without pretending that unknown land is
+					// ocean or vegetation. Satellite imagery can still cover this neutral base.
+					procedural = mix(vec3(0.20, 0.23, 0.24), procedural, uTerrainReady);
 					vec3 satellite = texture2D(uSatelliteTexture, vTexCoord).rgb;
 					float terrainWeight = max(uTerrainOpacity, 0.001);
 					float satelliteWeight = uHasSatelliteTexture * uSatelliteOpacity;

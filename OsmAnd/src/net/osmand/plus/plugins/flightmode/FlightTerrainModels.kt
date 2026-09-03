@@ -20,6 +20,21 @@ data class FlightTerrainStatus(
 	val nativeMapTiles: Int = 0,
 	val nativeMapFailedTiles: Int = 0,
 	val bytesDownloaded: Long = 0L,
+	val bytesPerSecond: Long = 0L,
+	val overviewTextureTiles: Int = 0,
+	val standardTextureTiles: Int = 0,
+	val highTextureTiles: Int = 0,
+	val ultraTextureTiles: Int = 0,
+	val ultraPlusTextureTiles: Int = 0,
+	val memoryCacheHits: Int = 0,
+	val diskCacheHits: Int = 0,
+	val networkRequests: Int = 0,
+	val decodedTerrainCacheTiles: Int = 0,
+	val decodedTerrainCacheBytes: Long = 0L,
+	val geometryCacheTiles: Int = 0,
+	val geometryCacheBytes: Long = 0L,
+	val textureQueue: Int = 0,
+	val estimatedVisibleGpuBytes: Long = 0L,
 	val zoom: Int? = null,
 	val message: String? = null
 ) {
@@ -27,6 +42,23 @@ data class FlightTerrainStatus(
 		get() = if (requestedTiles == 0) 0f else
 			((availableTiles + failedTiles).toFloat() / requestedTiles).coerceIn(0f, 1f)
 }
+
+enum class FlightTerrainTextureTier {
+	OVERVIEW,
+	STANDARD,
+	HIGH,
+	ULTRA,
+	ULTRA_PLUS
+}
+
+data class FlightTerrainRenderStats(
+	val visibleMeshes: Int = 0,
+	val cachedGeometryTiles: Int = 0,
+	val cachedTextures: Int = 0,
+	val queuedTextureUploads: Int = 0,
+	val geometryBytes: Long = 0L,
+	val textureBytes: Long = 0L
+)
 
 data class TerrainTileId(
 	val zoom: Int,
@@ -53,15 +85,32 @@ data class TerrariumTile(
 }
 
 data class FlightTerrainMesh(
+	val tileId: TerrainTileId,
 	val vertices: FloatArray,
 	val indices: ShortArray,
+	val terrainAvailable: Boolean = true,
 	val satelliteTexturePath: String? = null,
+	val standardSatelliteTexturePath: String? = null,
+	val satelliteTextureTier: FlightTerrainTextureTier = FlightTerrainTextureTier.OVERVIEW,
 	val nativeMapTexturePath: String? = null
+)
+
+data class FlightTerrainGeometry(
+	val vertices: FloatArray,
+	val indices: ShortArray
+)
+
+data class FlightTerrainGeometryCacheKey(
+	val tileId: TerrainTileId,
+	val coordinateOriginLatitude: Double,
+	val coordinateOriginLongitude: Double
 )
 
 data class FlightTerrainScene(
 	val centerLatitude: Double,
 	val centerLongitude: Double,
+	val coordinateOriginLatitude: Double,
+	val coordinateOriginLongitude: Double,
 	val radiusKm: Int,
 	val zoom: Int,
 	val satelliteQuality: FlightSatelliteQuality,
@@ -73,6 +122,7 @@ data class FlightTerrainScene(
 	val nativeMapFailedTiles: Int,
 	val nativeMapRequested: Boolean,
 	val centerGroundElevationMeters: Float?,
+	val geometryGeneration: Long,
 	val generation: Long = System.nanoTime()
 )
 

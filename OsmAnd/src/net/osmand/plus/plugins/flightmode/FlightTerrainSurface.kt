@@ -17,6 +17,7 @@ fun FlightTerrainSurface(
 	terrainOpacity: Float,
 	nativeMapOpacity: Float,
 	onRendererError: (String) -> Unit,
+	onRenderStats: (FlightTerrainRenderStats) -> Unit,
 	modifier: Modifier = Modifier
 ) {
 	AndroidView(
@@ -34,7 +35,8 @@ fun FlightTerrainSurface(
 				satelliteOpacity = satelliteOpacity,
 				terrainOpacity = terrainOpacity,
 				nativeMapOpacity = nativeMapOpacity,
-				onRendererError = onRendererError
+				onRendererError = onRendererError,
+				onRenderStats = onRenderStats
 			)
 		}
 	)

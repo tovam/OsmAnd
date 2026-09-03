@@ -18,20 +18,46 @@ object FlightTerrainMeshBuilder {
 		tiles: Map<TerrainTileId, TerrariumTile>,
 		satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
 		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+		standardSatelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+		satelliteTextureTiers: Map<TerrainTileId, FlightTerrainTextureTier> = emptyMap(),
 		nativeMapTexturePaths: Map<TerrainTileId, String> = emptyMap(),
 		nativeMapFailedTiles: Int = 0,
-		nativeMapRequested: Boolean = nativeMapTexturePaths.isNotEmpty()
+		nativeMapRequested: Boolean = nativeMapTexturePaths.isNotEmpty(),
+		coordinateOriginLatitude: Double = centerLatitude,
+		coordinateOriginLongitude: Double = centerLongitude,
+		geometryCache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>? = null,
+		geometryGeneration: Long = System.nanoTime(),
+		includePlaceholders: Boolean = false
 	): FlightTerrainScene {
-		val projection = FlightTerrainCoordinates(centerLatitude, centerLongitude)
+		val projection = FlightTerrainCoordinates(coordinateOriginLatitude, coordinateOriginLongitude)
 		val sampler = TileElevationSampler(plan.zoom, tiles)
 		val meshes = plan.tiles.mapNotNull { tileId ->
-			val tile = tiles[tileId] ?: return@mapNotNull null
-			buildTileMesh(
-				tile,
-				sampler,
-				projection,
-				satelliteTexturePaths[tileId],
-				nativeMapTexturePaths[tileId]
+			val terrainAvailable = tiles.containsKey(tileId)
+			val geometryCacheKey = FlightTerrainGeometryCacheKey(
+				tileId,
+				coordinateOriginLatitude,
+				coordinateOriginLongitude
+			)
+			val geometry = cachedOrBuildGeometry(geometryCache, geometryCacheKey) {
+				val tile = tiles[tileId]
+				when {
+					tile != null -> buildTileGeometry(tile, sampler, projection)
+					includePlaceholders -> buildPlaceholderGeometry(tileId, projection)
+					else -> null
+				}
+			} ?: return@mapNotNull null
+			FlightTerrainMesh(
+				tileId = tileId,
+				vertices = geometry.vertices,
+				indices = geometry.indices,
+				terrainAvailable = terrainAvailable,
+				satelliteTexturePath = satelliteTexturePaths[tileId],
+				standardSatelliteTexturePath = standardSatelliteTexturePaths[tileId],
+				satelliteTextureTier = satelliteTextureTiers[tileId]
+					?: if (satelliteTexturePaths[tileId] != null) {
+						FlightTerrainTextureTier.STANDARD
+					} else FlightTerrainTextureTier.OVERVIEW,
+				nativeMapTexturePath = nativeMapTexturePaths[tileId]
 			)
 		}
 		val centerGround = sampler.elevationAt(
@@ -42,27 +68,79 @@ object FlightTerrainMeshBuilder {
 		return FlightTerrainScene(
 			centerLatitude = centerLatitude,
 			centerLongitude = centerLongitude,
+			coordinateOriginLatitude = coordinateOriginLatitude,
+			coordinateOriginLongitude = coordinateOriginLongitude,
 			radiusKm = radiusKm,
 			zoom = plan.zoom,
 			satelliteQuality = satelliteQuality,
 			meshes = meshes,
 			loadedTiles = tiles.size,
 			missingTiles = (plan.tiles.size - tiles.size).coerceAtLeast(0),
-			satelliteTiles = satelliteTexturePaths.size,
+			satelliteTiles = (satelliteTexturePaths.keys + standardSatelliteTexturePaths.keys).size,
 			nativeMapTiles = nativeMapTexturePaths.size,
 			nativeMapFailedTiles = nativeMapFailedTiles,
 			nativeMapRequested = nativeMapRequested,
-			centerGroundElevationMeters = centerGround
+			centerGroundElevationMeters = centerGround,
+			geometryGeneration = geometryGeneration
 		)
 	}
 
-	private fun buildTileMesh(
+	private fun cachedOrBuildGeometry(
+		cache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>?,
+		key: FlightTerrainGeometryCacheKey,
+		builder: () -> FlightTerrainGeometry?
+	): FlightTerrainGeometry? {
+		if (cache == null) return builder()
+		synchronized(cache) { cache[key] }?.let { return it }
+		val built = builder() ?: return null
+		return synchronized(cache) {
+			cache[key] ?: built.also { cache[key] = it }
+		}
+	}
+
+	/**
+	 * A four-vertex Earth-positioned tile shown while its Terrarium payload is still loading.
+	 * It provides complete, stable coverage immediately; the repository invalidates it when
+	 * the real 33 x 33 geometry becomes available.
+	 */
+	private fun buildPlaceholderGeometry(
+		tileId: TerrainTileId,
+		projection: FlightTerrainCoordinates
+	): FlightTerrainGeometry {
+		val vertices = FloatArray(4 * VERTEX_COMPONENTS)
+		val corners = arrayOf(
+			0.0 to 0.0,
+			1.0 to 0.0,
+			0.0 to 1.0,
+			1.0 to 1.0
+		)
+		corners.forEachIndexed { index, (u, v) ->
+			val latitude = FlightTerrainTilePlanner.tileYToLatitude(tileId.y + v, tileId.zoom)
+			val longitude = FlightTerrainTilePlanner.tileXToLongitude(tileId.x + u, tileId.zoom)
+			val position = projection.toLocal(latitude, longitude, 0.0)
+			val normal = projection.vectorToLocal(latitude, longitude, 0f, 1f, 0f)
+			val offset = index * VERTEX_COMPONENTS
+			vertices[offset] = position[0]
+			vertices[offset + 1] = position[1]
+			vertices[offset + 2] = position[2]
+			vertices[offset + 3] = normal[0]
+			vertices[offset + 4] = normal[1]
+			vertices[offset + 5] = normal[2]
+			vertices[offset + 6] = 0f
+			vertices[offset + 7] = u.toFloat()
+			vertices[offset + 8] = v.toFloat()
+		}
+		return FlightTerrainGeometry(
+			vertices = vertices,
+			indices = shortArrayOf(0, 2, 1, 1, 2, 3)
+		)
+	}
+
+	private fun buildTileGeometry(
 		tile: TerrariumTile,
 		sampler: TileElevationSampler,
-		projection: FlightTerrainCoordinates,
-		satelliteTexturePath: String?,
-		nativeMapTexturePath: String?
-	): FlightTerrainMesh {
+		projection: FlightTerrainCoordinates
+	): FlightTerrainGeometry {
 		val vertices = FloatArray(GRID_SIZE * GRID_SIZE * VERTEX_COMPONENTS)
 		for (row in 0 until GRID_SIZE) {
 			val tileY = tile.id.y + row.toDouble() / GRID_QUADS
@@ -99,11 +177,9 @@ object FlightTerrainMeshBuilder {
 				indices[indexOffset++] = bottomRight.toShort()
 			}
 		}
-		return FlightTerrainMesh(
+		return FlightTerrainGeometry(
 			vertices = vertices,
-			indices = indices,
-			satelliteTexturePath = satelliteTexturePath,
-			nativeMapTexturePath = nativeMapTexturePath
+			indices = indices
 		)
 	}
 

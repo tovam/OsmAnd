@@ -528,10 +528,19 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private fun scheduleAutomaticOfflinePreload() {
 		offlinePreloadJob?.cancel()
 		val sceneJob = terrainJob
-		offlinePreloadJob = viewModelScope.launch {
-			// Let the visible local scene win the I/O race. The corridor is durable but
-			// background work, and starts as soon as the first scene is usable.
-			sceneJob?.join()
+			offlinePreloadJob = viewModelScope.launch {
+				// Let relief and the visible Standard base win first. The complete corridor may
+				// then download while detailed rings continue at their smaller worker count.
+				while (sceneJob?.isActive == true) {
+					val status = uiState.terrainStatus
+					val reliefReady = status.requestedTiles > 0 &&
+						status.availableTiles + status.failedTiles >= status.requestedTiles
+					val standardBaseAttempted = status.availableTiles > 0 &&
+						status.satelliteTiles + status.satelliteFailedTiles >= status.availableTiles
+					if (reliefReady && standardBaseAttempted) break
+					delay(250)
+				}
+			delay(500)
 			runOfflinePreload()
 		}
 	}
@@ -585,6 +594,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 	}
 
+	fun setTerrainRenderStats(stats: FlightTerrainRenderStats) {
+		if (uiState.terrainRenderStats != stats) {
+			uiState = uiState.copy(terrainRenderStats = stats)
+		}
+	}
+
 	private fun requestTerrain(sample: FlightSample, force: Boolean = false) {
 		// The dedicated cache page is now a stable offline tile viewer. The live 3D
 		// renderer belongs to Hublot, so it never needs a second native-map render pass.
@@ -624,9 +639,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					radiusKm = uiState.plan.terrainCorridorKm,
 					satelliteQuality = uiState.plan.satelliteQuality,
 					includeNativeMap = includeNativeMap,
+					previousScene = scene,
 					onScene = { partialScene ->
-						// Publish center-first chunks as soon as they are ready. OpenGL reuses
-						// existing textures, so the view stays interactive while detail grows.
+						// Publish only tile deltas. Geometry buffers and cached textures remain
+						// resident while missing detail is filled from the aircraft outward.
 						uiState = uiState.copy(terrainScene = partialScene)
 					}
 				) { status ->
@@ -636,6 +652,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					terrainScene = terrainScene,
 					terrainStatus = uiState.terrainStatus.copy(
 						phase = FlightTerrainPhase.READY,
+						bytesPerSecond = 0L,
+						textureQueue = 0,
 						message = when {
 							terrainScene.missingTiles > 0 && includeNativeMap ->
 								"Relief partiel : ${terrainScene.missingTiles} tuiles manquantes · carte OsmAnd ${terrainScene.nativeMapTiles}/${terrainScene.loadedTiles}"

@@ -166,6 +166,7 @@ fun FlightModeScreen(
 	onSetCabinHidden: (Boolean) -> Unit,
 	onRetryTerrain: () -> Unit,
 	onTerrainRendererError: (String) -> Unit,
+	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
 	onShowTrackPoints: (Boolean) -> Unit,
 	onMarkFlightStart: () -> Unit,
@@ -318,7 +319,8 @@ fun FlightModeScreen(
 					onResetPhotoTransform = onResetWindowPhotoTransform,
 					onClearPhoto = onClearWindowPhotoOverlay,
 					onRetryTerrain = onRetryTerrain,
-					onTerrainRendererError = onTerrainRendererError
+					onTerrainRendererError = onTerrainRendererError,
+					onTerrainRenderStats = onTerrainRenderStats
 				)
 				FlightPage.WINDOW_SETUP -> WindowSetupScreen(
 					state = state,
@@ -891,7 +893,8 @@ private fun WindowScreen(
 	onResetPhotoTransform: () -> Unit,
 	onClearPhoto: () -> Unit,
 	onRetryTerrain: () -> Unit,
-	onTerrainRendererError: (String) -> Unit
+	onTerrainRendererError: (String) -> Unit,
+	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit
 ) {
 	var panel by remember(state.sessionMode) {
 		mutableStateOf(if (state.sessionMode == FlightSessionMode.REPLAY) WindowPanel.FLIGHT else WindowPanel.VIEW)
@@ -908,12 +911,13 @@ private fun WindowScreen(
 				trip = state.trip,
 				sample = state.snapshot?.sample,
 				scene = state.terrainScene,
-					terrainStatus = state.terrainStatus,
-					altitudeOverrideMeters = state.windowAltitudeOverrideMeters,
-					shadingEnabled = state.plan.shadowsEnabled,
-					shadowIntensity = state.plan.shadowIntensity,
-					satelliteOpacity = state.satelliteOpacity,
-					satelliteQuality = state.plan.satelliteQuality,
+				terrainStatus = state.terrainStatus,
+				terrainRenderStats = state.terrainRenderStats,
+				altitudeOverrideMeters = state.windowAltitudeOverrideMeters,
+				shadingEnabled = state.plan.shadowsEnabled,
+				shadowIntensity = state.plan.shadowIntensity,
+				satelliteOpacity = state.satelliteOpacity,
+				satelliteQuality = state.plan.satelliteQuality,
 				photo = overlayPhoto,
 				photoOverlay = state.windowPhotoOverlay,
 				onSetSide = onSetSide,
@@ -929,6 +933,7 @@ private fun WindowScreen(
 				onSetShadowsEnabled = onSetShadowsEnabled,
 				onRetryTerrain = onRetryTerrain,
 				onRendererError = onTerrainRendererError,
+				onRenderStats = onTerrainRenderStats,
 				modifier = Modifier.fillMaxSize()
 			)
 		}
@@ -2428,6 +2433,7 @@ private fun FlightWindowScene(
 	sample: FlightSample?,
 	scene: FlightTerrainScene?,
 	terrainStatus: FlightTerrainStatus,
+	terrainRenderStats: FlightTerrainRenderStats,
 	altitudeOverrideMeters: Float?,
 	shadingEnabled: Boolean,
 	shadowIntensity: Float,
@@ -2448,6 +2454,7 @@ private fun FlightWindowScene(
 	onSetShadowsEnabled: (Boolean) -> Unit,
 	onRetryTerrain: () -> Unit,
 	onRendererError: (String) -> Unit,
+	onRenderStats: (FlightTerrainRenderStats) -> Unit,
 	modifier: Modifier = Modifier
 ) {
 	val latestPlacement by rememberUpdatedState(placement)
@@ -2506,6 +2513,7 @@ private fun FlightWindowScene(
 			terrainOpacity = 0f,
 			nativeMapOpacity = 0f,
 			onRendererError = onRendererError,
+			onRenderStats = onRenderStats,
 			modifier = Modifier.fillMaxSize()
 		)
 		activePhoto?.let { FlightWindowPhotoOverlayImage(it, photoOverlay, Modifier.fillMaxSize()) }
@@ -2558,6 +2566,7 @@ private fun FlightWindowScene(
 		TerrainStatusOverlay(
 			status = terrainStatus,
 			scene = scene,
+			renderStats = terrainRenderStats,
 			onRetry = onRetryTerrain,
 			modifier = Modifier.align(Alignment.BottomCenter)
 				.padding(bottom = if (photoOverlayVisible) 82.dp else 18.dp)
@@ -2903,27 +2912,38 @@ private fun FlightAircraftForwardOverlay(
 private fun TerrainStatusOverlay(
 	status: FlightTerrainStatus,
 	scene: FlightTerrainScene?,
+	renderStats: FlightTerrainRenderStats,
 	onRetry: () -> Unit,
 	modifier: Modifier = Modifier
 ) {
+	var expanded by remember { mutableStateOf(false) }
 	val working = status.phase == FlightTerrainPhase.PLANNING ||
 		status.phase == FlightTerrainPhase.DOWNLOADING ||
 		status.phase == FlightTerrainPhase.BUILDING
-	if (!working && status.phase != FlightTerrainPhase.ERROR && scene != null) return
+	if (!working && status.phase != FlightTerrainPhase.ERROR && scene == null) return
+	val showDetails = working || status.phase == FlightTerrainPhase.ERROR || expanded
 	Row(
 		modifier = modifier
 			.background(Color(0xD911181E))
 			.border(1.dp, if (status.phase == FlightTerrainPhase.ERROR) FlightWarning else FlightLine)
-			.clickable(enabled = status.phase == FlightTerrainPhase.ERROR, onClick = onRetry)
-			.padding(horizontal = 10.dp, vertical = 7.dp),
+			.clickable {
+				if (status.phase == FlightTerrainPhase.ERROR) onRetry() else expanded = !expanded
+			}
+			.padding(horizontal = 8.dp, vertical = if (showDetails) 6.dp else 3.dp),
 		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(8.dp)
+		horizontalArrangement = Arrangement.spacedBy(6.dp)
 	) {
-		if (working) CircularProgressIndicator(color = FlightOrange, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+		if (working) CircularProgressIndicator(color = FlightOrange, strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
 		Text(
-			text = if (status.phase == FlightTerrainPhase.ERROR) "${terrainStatusText(status)} · toucher pour réessayer" else terrainStatusText(status),
+			text = when {
+				status.phase == FlightTerrainPhase.ERROR -> "${terrainStatusText(status)} · toucher pour réessayer"
+				showDetails -> terrainRuntimeStatusText(status, renderStats)
+				else -> terrainRuntimeSummary(status, renderStats)
+			},
 			color = if (status.phase == FlightTerrainPhase.ERROR) FlightWarning else FlightText,
-			fontSize = 11.sp
+			fontSize = if (showDetails) 9.sp else 8.sp,
+			fontFamily = FontFamily.Monospace,
+			lineHeight = 11.sp
 		)
 	}
 }
@@ -3391,6 +3411,51 @@ private fun terrainStatusText(status: FlightTerrainStatus): String = when (statu
 	FlightTerrainPhase.ERROR -> status.message ?: "Relief indisponible"
 }
 
+private fun terrainRuntimeSummary(
+	status: FlightTerrainStatus,
+	renderStats: FlightTerrainRenderStats
+): String = buildString {
+	status.zoom?.let { append("z$it · ") }
+	append(terrainTierSummary(status))
+	val gpuBytes = renderStats.geometryBytes + renderStats.textureBytes
+	if (gpuBytes > 0L) append(" · GPU ${formatDataSize(gpuBytes)}")
+	if (renderStats.queuedTextureUploads > 0) append(" · attente ${renderStats.queuedTextureUploads}")
+}
+
+private fun terrainRuntimeStatusText(
+	status: FlightTerrainStatus,
+	renderStats: FlightTerrainRenderStats
+): String = buildString {
+	status.message?.takeIf { it.isNotBlank() }?.let { append(it).append('\n') }
+	append("z${status.zoom ?: "?"} · relief ${status.availableTiles}/${status.requestedTiles}")
+	append(" · ").append(terrainTierDetails(status)).append('\n')
+	append("relief RAM ${status.decodedTerrainCacheTiles}/${formatDataSize(status.decodedTerrainCacheBytes)}")
+	append(" (hits ${status.memoryCacheHits})")
+	append(" · géométrie CPU ${status.geometryCacheTiles}/${formatDataSize(status.geometryCacheBytes)}")
+	append(" · hits disque ${status.diskCacheHits}")
+	append(" · réseau ${status.networkRequests}")
+	if (status.bytesPerSecond > 0L) append(" · ${formatDataSize(status.bytesPerSecond)}/s")
+	if (status.bytesDownloaded > 0L) append(" · Σ${formatDataSize(status.bytesDownloaded)}")
+	append('\n')
+	append("maillage GPU visible ${renderStats.visibleMeshes} · gardé ${renderStats.cachedGeometryTiles}")
+	append(" · textures GPU ${renderStats.cachedTextures}")
+	append(" · attente ${renderStats.queuedTextureUploads + status.textureQueue}")
+	if (renderStats.geometryBytes > 0L) append(" · géométrie ${formatDataSize(renderStats.geometryBytes)}")
+	if (renderStats.textureBytes > 0L) append(" · textures ${formatDataSize(renderStats.textureBytes)}")
+	val actualGpuBytes = renderStats.geometryBytes + renderStats.textureBytes
+	if (status.estimatedVisibleGpuBytes > actualGpuBytes) {
+		append(" · cible ${formatDataSize(status.estimatedVisibleGpuBytes)}")
+	}
+}
+
+private fun terrainTierSummary(status: FlightTerrainStatus): String =
+	"A${status.overviewTextureTiles} S${status.standardTextureTiles} H${status.highTextureTiles} " +
+		"U${status.ultraTextureTiles} U+${status.ultraPlusTextureTiles}"
+
+private fun terrainTierDetails(status: FlightTerrainStatus): String =
+	"Aperçu ${status.overviewTextureTiles} · Standard ${status.standardTextureTiles} · " +
+		"Haute ${status.highTextureTiles} · Ultra ${status.ultraTextureTiles} · Ultra+ ${status.ultraPlusTextureTiles}"
+
 private fun formatDataSize(bytes: Long): String = when {
 	bytes >= 1_048_576L -> "%.1f Mio".format(bytes / 1_048_576.0)
 	bytes >= 1_024L -> "%.0f Kio".format(bytes / 1_024.0)
@@ -3466,7 +3531,7 @@ private fun FlightModePreview(state: FlightUiState) {
 		onSeekReplay = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapState = { _, _, _, _ -> },
 		onSetWindowAltitudeOverride = {}, onMoveWindow = { _, _ -> }, onSaveWindowPlacement = {}, onSetWindowSide = {},
 		onMoveWindowLook = { _, _ -> }, onRecenterWindowLook = {}, onSetWindowZoom = {}, onChangeWindowZoom = {}, onSetCabinTransparent = {}, onSetCabinHidden = {},
-		onRetryTerrain = {}, onTerrainRendererError = {}, onSetMapFollowing = {}, onShowTrackPoints = {},
+		onRetryTerrain = {}, onTerrainRendererError = {}, onTerrainRenderStats = {}, onSetMapFollowing = {}, onShowTrackPoints = {},
 		onMarkFlightStart = {}, onMarkFlightEnd = {}, onCancelFlightStart = {}, onRemoveFlightSpan = {},
 		onSetSatelliteQuality = {},
 		onSetRecordingPolicy = {}, onSetPhotoSources = { _, _, _, _ -> },

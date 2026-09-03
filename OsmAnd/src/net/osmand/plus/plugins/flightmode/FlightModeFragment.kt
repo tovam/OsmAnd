@@ -138,6 +138,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onSetCabinHidden = viewModel::setCabinHidden,
 					onRetryTerrain = viewModel::retryTerrain,
 					onTerrainRendererError = viewModel::setTerrainRendererError,
+					onTerrainRenderStats = viewModel::setTerrainRenderStats,
 					onSetMapFollowing = viewModel::setMapFollowing,
 					onShowTrackPoints = viewModel::setShowTrackPoints,
 					onMarkFlightStart = viewModel::markFlightStart,

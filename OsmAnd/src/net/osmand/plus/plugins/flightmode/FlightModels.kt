@@ -453,6 +453,7 @@ data class FlightUiState(
 	val tripLoadError: String? = null,
 	val duplicateJourneyWarning: FlightJourneySummary? = null,
 	val terrainStatus: FlightTerrainStatus = FlightTerrainStatus(),
+	val terrainRenderStats: FlightTerrainRenderStats = FlightTerrainRenderStats(),
 	val offlinePreloadStatus: FlightTerrainStatus = FlightTerrainStatus(),
 	val terrainScene: FlightTerrainScene? = null,
 	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),

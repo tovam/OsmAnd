@@ -29,6 +29,40 @@ class FlightTerrainCoordinates(centerLatitude: Double, centerLongitude: Double) 
 		return floatArrayOf(east.toFloat(), up.toFloat(), (-north).toFloat())
 	}
 
+	/** Converts a direction expressed in the local east/up/-north frame at a point into this origin's frame. */
+	fun vectorToLocal(
+		latitude: Double,
+		longitude: Double,
+		east: Float,
+		up: Float,
+		negativeNorth: Float
+	): FloatArray {
+		val pointLatitude = Math.toRadians(latitude)
+		val pointLongitude = Math.toRadians(longitude)
+		val pointSinLatitude = sin(pointLatitude)
+		val pointCosLatitude = cos(pointLatitude)
+		val pointSinLongitude = sin(pointLongitude)
+		val pointCosLongitude = cos(pointLongitude)
+		val localEastInput = east.toDouble()
+		val localUpInput = up.toDouble()
+		val north = -negativeNorth.toDouble()
+		val ecefX = localEastInput * -pointSinLongitude +
+			north * -pointSinLatitude * pointCosLongitude +
+			localUpInput * pointCosLatitude * pointCosLongitude
+		val ecefY = localEastInput * pointCosLongitude +
+			north * -pointSinLatitude * pointSinLongitude +
+			localUpInput * pointCosLatitude * pointSinLongitude
+		val ecefZ = north * pointCosLatitude + localUpInput * pointSinLatitude
+		val localEast = -sinLongitude * ecefX + cosLongitude * ecefY
+		val localNorth = -sinLatitude * cosLongitude * ecefX -
+			sinLatitude * sinLongitude * ecefY +
+			cosLatitude * ecefZ
+		val localUp = cosLatitude * cosLongitude * ecefX +
+			cosLatitude * sinLongitude * ecefY +
+			sinLatitude * ecefZ
+		return floatArrayOf(localEast.toFloat(), localUp.toFloat(), (-localNorth).toFloat())
+	}
+
 	private fun ecef(latitude: Double, longitude: Double, elevationMeters: Double): DoubleArray {
 		val sinLatitude = sin(latitude)
 		val cosLatitude = cos(latitude)
