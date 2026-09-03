@@ -2,9 +2,11 @@ package net.osmand.plus.plugins.flightmode
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import net.osmand.core.jni.MapMarker
 import net.osmand.core.jni.MapMarkerBuilder
@@ -34,9 +36,9 @@ import kotlin.math.sin
 /**
  * Renderer-native flight geometry.
  *
- * Positions and absolute altitudes are sent to OsmAnd's OpenGL renderer. Nothing is projected
- * back to Android Canvas, so the trace, samples and aircraft remain attached to the 3D world while
- * the camera pans, zooms or tilts.
+ * Positions and absolute altitudes are sent to OsmAnd's OpenGL renderer, so the trace, samples and
+ * aircraft remain attached to the 3D world while the camera pans, zooms or tilts. A Canvas path is
+ * kept solely as a visible fallback when the native renderer is unavailable.
  */
 class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 
@@ -67,6 +69,28 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private var aircraftModelRequested = false
 	private var aircraftGroundAltitudeMeters = Float.NaN
 	private var lastAircraftVectorUpdateMillis = 0L
+	private val fallbackAircraftBitmap: Bitmap? by lazy(LazyThreadSafetyMode.NONE) {
+		runCatching {
+			context.assets.open(AIRCRAFT_FALLBACK_BITMAP_ASSET).use { stream ->
+				BitmapFactory.decodeStream(stream)
+			}
+		}.getOrNull()
+	}
+	private val fallbackRouteSleevePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+		color = TUBE_SLEEVE_COLOR
+		style = Paint.Style.STROKE
+		strokeCap = Paint.Cap.ROUND
+		strokeJoin = Paint.Join.ROUND
+	}
+	private val fallbackRoutePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+		color = TUBE_CORE_COLOR
+		style = Paint.Style.STROKE
+		strokeCap = Paint.Cap.ROUND
+		strokeJoin = Paint.Join.ROUND
+	}
+	private val fallbackPointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = POINT_COLOR }
+	private val fallbackPhotoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = PHOTO_COLOR }
+	private val fallbackAircraftPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
 	fun update(
 		trip: FlightTrip?,
@@ -123,7 +147,12 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		settings: DrawSettings
 	) {
 		super.onPrepareBufferImage(canvas, tileBox, settings)
-		val renderer = mapRenderer ?: return
+		val current = state
+		val renderer = mapRenderer
+		if (renderer == null) {
+			drawCanvasFallback(canvas, tileBox, current)
+			return
+		}
 		if (mapRendererChanged) {
 			clearNativeCollections()
 			routeGeometryDirty = true
@@ -133,7 +162,6 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			mapRendererChanged = false
 		}
 
-		val current = state
 		if (routeGeometryDirty) rebuildRoute(current.trip)
 		if (pointGeometryDirty) rebuildRecordedPoints(current.trip, current.showPoints)
 		if (photoGeometryDirty) rebuildPhotoMarkers(current.trip, current.photos)
@@ -158,6 +186,63 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		photoMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		aircraftLinesCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		aircraftMarkerCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
+	}
+
+	private fun drawCanvasFallback(canvas: Canvas, tileBox: RotatedTileBox, current: LayerState) {
+		val trip = current.trip ?: return
+		val samples = trip.samples
+		if (samples.isEmpty()) return
+		val density = context.resources.displayMetrics.density.coerceAtLeast(1f)
+		fallbackRouteSleevePaint.strokeWidth = (TUBE_SLEEVE_WIDTH_DP * density).toFloat()
+		fallbackRoutePaint.strokeWidth = (TUBE_CORE_WIDTH_DP * density).toFloat()
+		contiguousLegRanges(samples).forEach { range ->
+			if (range.last <= range.first) return@forEach
+			val path = Path()
+			sampledIndices(range, MAXIMUM_ROUTE_POINTS).forEachIndexed { pathIndex, sampleIndex ->
+				val sample = samples[sampleIndex]
+				val x = tileBox.getPixXFromLatLon(sample.latitude, sample.longitude)
+				val y = tileBox.getPixYFromLatLon(sample.latitude, sample.longitude)
+				if (pathIndex == 0) path.moveTo(x, y) else path.lineTo(x, y)
+			}
+			canvas.drawPath(path, fallbackRouteSleevePaint)
+			canvas.drawPath(path, fallbackRoutePaint)
+		}
+
+		if (current.showPoints) {
+			val step = ceil(samples.size / MAXIMUM_NATIVE_POINTS.toDouble()).toInt().coerceAtLeast(1)
+			val radius = POINT_BITMAP_DP * density * 0.42f
+			for (index in samples.indices step step) {
+				val sample = samples[index]
+				canvas.drawCircle(
+					tileBox.getPixXFromLatLon(sample.latitude, sample.longitude),
+					tileBox.getPixYFromLatLon(sample.latitude, sample.longitude),
+					radius,
+					fallbackPointPaint
+				)
+			}
+		}
+
+		val photoRadius = PHOTO_BITMAP_DP * density * 0.36f
+		current.photos.forEach { photo ->
+			val sample = FlightSampleInterpolator.sampleAt(trip, photo.matchedSamplePosition) ?: return@forEach
+			canvas.drawCircle(
+				tileBox.getPixXFromLatLon(sample.latitude, sample.longitude),
+				tileBox.getPixYFromLatLon(sample.latitude, sample.longitude),
+				photoRadius,
+				fallbackPhotoPaint
+			)
+		}
+
+		val sample = current.sample ?: return
+		val bitmap = fallbackAircraftBitmap ?: return
+		val size = aircraftIconSizePixels(tileBox).toFloat()
+		val x = tileBox.getPixXFromLatLon(sample.latitude, sample.longitude)
+		val y = tileBox.getPixYFromLatLon(sample.latitude, sample.longitude)
+		val direction = sample.bearingDegrees ?: estimateBearing(trip, sample) ?: 0f
+		canvas.save()
+		canvas.rotate(direction - tileBox.rotate, x, y)
+		canvas.drawBitmap(bitmap, null, RectF(x - size / 2f, y - size / 2f, x + size / 2f, y + size / 2f), fallbackAircraftPaint)
+		canvas.restore()
 	}
 
 	private fun rebuildRoute(trip: FlightTrip?) {
@@ -374,12 +459,11 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			nativeTrip = trip
 			nativeHeights = resolveVisualHeights(samples)
 		}
-		val sampleByIndex = samples.associateBy(FlightSample::index)
 		val icon = NativeUtilities.createSkImageFromBitmap(createPhotoBitmap())
 		val collection = MapMarkersCollection()
 		var markerId = PHOTO_MARKER_ID_START
 		photos.forEach { photo ->
-			val sample = photo.matchedSampleIndex?.let(sampleByIndex::get) ?: return@forEach
+			val sample = FlightSampleInterpolator.sampleAt(trip, photo.matchedSamplePosition) ?: return@forEach
 			MapMarkerBuilder()
 				.setMarkerId(markerId++)
 				.setBaseOrder(pointsOrder - 2)
@@ -724,6 +808,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val POINT_BITMAP_DP = 10f
 		private const val PHOTO_BITMAP_DP = 26f
 		private const val PHOTO_MARKER_CLEARANCE_METERS = 36f
+		private const val AIRCRAFT_FALLBACK_BITMAP_ASSET = "flightmode/aircraft/flight_airliner_black.png"
 		private const val AIRCRAFT_MINIMUM_ZOOM = 3.0
 		private const val AIRCRAFT_MAXIMUM_ZOOM = 20.0
 		private const val AIRCRAFT_MINIMUM_ICON_DP = 42.0

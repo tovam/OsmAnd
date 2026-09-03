@@ -135,7 +135,7 @@
 	<string name="flight_mode_confirm_photos">Valider les associations</string>
 	<string name="flight_mode_attached_photos">%1$d photo(s) associée(s)</string>
 	<string name="flight_mode_photo_without_date">Date absente</string>
-	<string name="flight_mode_photo_matched_point">Point %1$d</string>
+	<string name="flight_mode_photo_matched_point">Point %1$s</string>
 	<string name="flight_mode_photo_not_matched">Non associée</string>
 	<string name="flight_mode_open_photo_window">Revoir ce moment dans Hublot</string>
 	<string name="flight_mode_photo_match_by_time">Associer par l’heure</string>
@@ -146,12 +146,11 @@
 	<string name="flight_mode_photo_open_map">Voir sur la carte</string>
 	<string name="flight_mode_photo_open_window">Voir dans Hublot</string>
 	<string name="flight_mode_photo_open_fullscreen">Plein écran</string>
-	<string name="flight_mode_photo_rotate_left">↶ 90°</string>
-	<string name="flight_mode_photo_rotate_right">↷ 90°</string>
+	<string name="flight_mode_photo_rotate_gesture">Tourner avec deux doigts · %1$.1f°</string>
 	<string name="flight_mode_photo_opacity">Opacité</string>
 	<string name="flight_mode_photo_overlay_close">Retirer</string>
 	<string name="flight_mode_gesture_view">Pincer la vue</string>
-	<string name="flight_mode_gesture_photo">Pincer la photo</string>
+	<string name="flight_mode_gesture_photo">Manipuler la photo</string>
 	<string name="flight_mode_reset">Réinitialiser</string>
 	<string name="flight_mode_photo_unmatch">Dissocier</string>
 	<string name="flight_mode_photo_preview_loading">Chargement de l’aperçu…</string>
@@ -173,7 +172,7 @@
 	<string name="flight_mode_photo_file_size">Taille</string>
 	<string name="flight_mode_photo_position">Position</string>
 	<string name="flight_mode_photo_timeline">Chronologie</string>
-	<string name="flight_mode_photo_timeline_value">Point %1$d · %2$d %% du trajet</string>
+	<string name="flight_mode_photo_timeline_value">Point %1$s · %2$d %% du trajet</string>
 	<string name="flight_mode_photo_time_offset">Écart photo / GPS</string>
 	<string name="flight_mode_duplicate_gpx_title">⚠ GPX DÉJÀ DANS UN JOURNAL</string>
 	<string name="flight_mode_duplicate_gpx_message">Cette trace correspond exactement à un journal existant. L’importer de nouveau créerait un doublon.</string>

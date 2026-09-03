@@ -18,6 +18,7 @@ import net.osmand.plus.OsmAndLocationProvider.GPSInfo
 import net.osmand.plus.OsmandApplication
 import net.osmand.shared.gpx.GpxFile
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
 
@@ -33,6 +34,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var offlinePreloadJob: Job? = null
 	private var storageJob: Job? = null
 	private var citySearchJob: Job? = null
+	private var photoPersistenceJob: Job? = null
 	private var requestedTerrainCenter: Pair<Double, Double>? = null
 	private val liveSamples = mutableListOf<FlightSample>()
 	private var liveDistanceMeters = 0.0
@@ -807,10 +809,16 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun saveJourney() {
+		photoPersistenceJob?.cancel()
+		photoPersistenceJob = null
+		persistJourney(showConfirmation = true)
+	}
+
+	private fun persistJourney(showConfirmation: Boolean) {
 		flushLatestLiveSample()
 		val trip = uiState.trip
 		if (trip == null || trip.samples.isEmpty()) {
-			uiState = uiState.copy(journeyMessage = "Aucun point à enregistrer")
+			if (showConfirmation) uiState = uiState.copy(journeyMessage = "Aucun point à enregistrer")
 			return
 		}
 		val now = System.currentTimeMillis()
@@ -835,12 +843,23 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					offlineAssets = saved.offlineAssets,
 					journeyDirty = false,
 					savedJourneys = journeyStore.list(),
-					journeyMessage = "Journal de vol enregistré"
+					journeyMessage = if (showConfirmation) "Journal de vol enregistré" else uiState.journeyMessage
 				)
 				refreshStorageUsage()
 			}.onFailure { error ->
-				uiState = uiState.copy(journeyMessage = error.message ?: "Enregistrement impossible")
+				uiState = uiState.copy(
+					journeyMessage = error.message ?: "Enregistrement automatique impossible"
+				)
 			}
+		}
+	}
+
+	private fun schedulePhotoPersistence() {
+		if (uiState.trip?.samples.isNullOrEmpty() || uiState.photos.isEmpty()) return
+		photoPersistenceJob?.cancel()
+		photoPersistenceJob = viewModelScope.launch {
+			delay(PHOTO_PERSISTENCE_DEBOUNCE_MILLIS)
+			persistJourney(showConfirmation = false)
 		}
 	}
 
@@ -919,6 +938,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyMessage = "Photos associées par leur heure"
 		)
 		refreshStorageUsage()
+		schedulePhotoPersistence()
 	}
 
 	fun discardPendingPhotos() {
@@ -958,13 +978,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyDirty = true,
 			journeyMessage = "Photo enregistrée à ${photo.timestampMillis ?: pendingCaptureTimestampMillis}"
 		)
+		schedulePhotoPersistence()
 	}
 
 	fun selectPhoto(id: String) {
 		val photo = (uiState.photos + uiState.pendingPhotos).firstOrNull { it.id == id } ?: return
 		uiState = uiState.copy(selectedPhotoId = id)
-		val sample = photo.matchedSampleIndex?.let { index -> uiState.trip?.samples?.firstOrNull { it.index == index } }
-		if (sample != null) seekReplay(uiState.trip?.progressFor(sample) ?: return)
+		val progress = FlightSampleInterpolator.progressAt(uiState.trip, photo.matchedSamplePosition)
+		if (progress != null) seekReplay(progress)
 	}
 
 	fun togglePhotoSelection(id: String) {
@@ -993,8 +1014,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			} else currentPhoto
 			val trip = uiState.trip
 			val timestamp = photo.timestampMillis
-			val sample = journeyStore.matchPhotoSample(trip, timestamp)
-			if (sample == null) {
+			val position = journeyStore.matchPhotoPosition(trip, timestamp)
+			if (position == null) {
 				val message = when {
 					timestamp == null ->
 						"Aucune heure trouvée dans l’EXIF, le nom « ${photo.fileName} » ou les dates du fichier · place le curseur puis choisis Associer ici"
@@ -1012,48 +1033,57 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			}
 			val dateRecovered = currentPhoto.timestampMillis == null && photo.timestampMillis != null
 			replacePhoto(
-				photo.copy(matchedSampleIndex = sample.index),
+				photo.copy(matchedSamplePosition = position),
 				if (dateRecovered) {
-					"Date retrouvée dans la photo · réassociation au point GPS le plus proche"
+					"Date retrouvée dans la photo · association à la position GPS interpolée"
 				} else {
-					"Photo réassociée au point GPS le plus proche dans le temps"
+					"Photo réassociée à la position GPS interpolée dans le temps"
 				}
 			)
-			seekReplay(trip?.progressFor(sample) ?: return@launch)
+			FlightSampleInterpolator.progressAt(trip, position)?.let(::seekReplay)
 		}
 	}
 
 	fun associatePhotoAtCurrentReplay(id: String) {
 		val photo = findPhoto(id) ?: return
-		val sample = uiState.snapshot?.sample
-		if (sample == null) {
+		val trip = uiState.trip
+		val position = FlightSampleInterpolator.positionAtProgress(trip, uiState.replayProgress)
+			?.let(FlightSampleInterpolator::quantizePosition)
+		if (position == null) {
 			uiState = uiState.copy(selectedPhotoId = id, journeyMessage = "Aucun point courant auquel associer cette photo")
 			return
 		}
-		replacePhoto(photo.copy(matchedSampleIndex = sample.index), "Photo associée à la position actuelle du curseur")
+		replacePhoto(
+			photo.copy(matchedSamplePosition = position),
+			String.format(Locale.US, "Photo associée au point virtuel %.2f", position + 1.0)
+		)
 	}
 
 	fun clearPhotoAssociation(id: String) {
 		val photo = findPhoto(id) ?: return
-		replacePhoto(photo.copy(matchedSampleIndex = null), "Association de la photo supprimée")
+		replacePhoto(photo.copy(matchedSamplePosition = null), "Association de la photo supprimée")
 	}
 
-	fun rotatePhoto(id: String, quarterTurns: Int) {
+	fun rotatePhoto(id: String, deltaDegrees: Float) {
+		if (!deltaDegrees.isFinite() || abs(deltaDegrees) < 0.01f) return
 		val photo = findPhoto(id) ?: return
-		val rotation = Math.floorMod(photo.rotationDegrees + quarterTurns * 90, 360)
+		val rotation = (photo.rotationDegrees + deltaDegrees).let { value ->
+			val normalized = value % 360f
+			if (normalized < 0f) normalized + 360f else normalized
+		}
 		replacePhoto(photo.copy(rotationDegrees = rotation), "Rotation de la photo enregistrée")
 	}
 
 	fun openPhotoOnMap(id: String) {
 		selectPhoto(id)
-		if (findPhoto(id)?.matchedSampleIndex != null) {
+		if (findPhoto(id)?.matchedSamplePosition != null) {
 			uiState = uiState.copy(page = FlightPage.MAP, mapFollowing = true)
 		}
 	}
 
 	fun openPhotoInWindow(id: String) {
 		selectPhoto(id)
-		if (findPhoto(id)?.matchedSampleIndex != null) {
+		if (findPhoto(id)?.matchedSamplePosition != null) {
 			uiState = uiState.copy(
 				page = FlightPage.WINDOW,
 				windowPhotoOverlay = FlightWindowPhotoOverlay(
@@ -1094,6 +1124,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(
 			windowPhotoOverlay = current.copy(scale = 1f, offsetXFraction = 0f, offsetYFraction = 0f)
 		)
+		current.photoId?.let(::findPhoto)?.takeIf { it.rotationDegrees != 0f }?.let { photo ->
+			replacePhoto(photo.copy(rotationDegrees = 0f), "Position et rotation de la photo réinitialisées")
+		}
 	}
 
 	fun clearWindowPhotoOverlay() {
@@ -1113,6 +1146,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			journeyDirty = uiState.journeyDirty || attached,
 			journeyMessage = message
 		)
+		if (attached) schedulePhotoPersistence()
 	}
 
 	fun setPhotoSources(main: Boolean? = null, selfie: Boolean? = null, map: Boolean? = null, scene3d: Boolean? = null) {
@@ -1142,6 +1176,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		offlinePreloadJob?.cancel()
 		storageJob?.cancel()
 		citySearchJob?.cancel()
+		photoPersistenceJob?.cancel()
 		super.onCleared()
 	}
 
@@ -1158,6 +1193,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 		private const val MINIMUM_CITY_QUERY_LENGTH = 2
 		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
+		private const val PHOTO_PERSISTENCE_DEBOUNCE_MILLIS = 450L
 		private const val TERRAIN_RELOAD_RADIUS_FRACTION = 0.32
 		private const val MINIMUM_RELOAD_DISTANCE_KM = 20.0
 		private const val MINIMUM_WINDOW_ALTITUDE_METERS = -500f

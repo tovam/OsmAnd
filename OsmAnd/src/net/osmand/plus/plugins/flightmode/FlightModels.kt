@@ -291,9 +291,10 @@ data class FlightPhotoAttachment(
 	val fileName: String,
 	val localPath: String,
 	val timestampMillis: Long?,
-	val matchedSampleIndex: Int?,
+	/** Zero-based, continuous point position. The UI displays this value plus one. */
+	val matchedSamplePosition: Double?,
 	val timestampSource: FlightPhotoTimestampSource? = null,
-	val rotationDegrees: Int = 0,
+	val rotationDegrees: Float = 0f,
 	val includeMainCamera: Boolean = true,
 	val includeSelfie: Boolean = false,
 	val includeMap: Boolean = true,

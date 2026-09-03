@@ -21,7 +21,6 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
-import kotlin.math.abs
 
 /** Persists one editable flight log and exports a portable archive. */
 class FlightJourneyStore(private val context: Context) {
@@ -335,7 +334,7 @@ class FlightJourneyStore(private val context: Context) {
 				fileName = originalName,
 				localPath = destination.absolutePath,
 				timestampMillis = timestamp,
-				matchedSampleIndex = matchSampleIndex(trip, timestamp),
+				matchedSamplePosition = matchPhotoPosition(trip, timestamp),
 				timestampSource = detectedTimestamp?.source
 			)
 		}.getOrNull()
@@ -361,16 +360,12 @@ class FlightJourneyStore(private val context: Context) {
 	}
 
 	fun matchPhotoSample(trip: FlightTrip?, timestamp: Long?): FlightSample? {
-		if (trip == null || timestamp == null || !trip.hasUsableTimestamps) return null
-		val timedSamples = trip.samples.filter { it.timestampMillis > 0L }
-		if (timedSamples.isEmpty()) return null
-		val firstTime = timedSamples.minOf { it.timestampMillis }
-		val lastTime = timedSamples.maxOf { it.timestampMillis }
-		if (timestamp < firstTime - PHOTO_MATCH_TOLERANCE_MILLIS ||
-			timestamp > lastTime + PHOTO_MATCH_TOLERANCE_MILLIS
-		) return null
-		return timedSamples.minByOrNull { abs(it.timestampMillis - timestamp) }
+		return FlightSampleInterpolator.sampleAt(trip, matchPhotoPosition(trip, timestamp))
 	}
+
+	fun matchPhotoPosition(trip: FlightTrip?, timestamp: Long?): Double? =
+		FlightSampleInterpolator.positionAtTimestamp(trip, timestamp, PHOTO_MATCH_TOLERANCE_MILLIS)
+			?.let(FlightSampleInterpolator::quantizePosition)
 
 	fun createCaptureFile(): File = File(mediaDirectory, "${UUID.randomUUID()}.jpg")
 
@@ -391,7 +386,7 @@ class FlightJourneyStore(private val context: Context) {
 			fileName = file.name,
 			localPath = file.absolutePath,
 			timestampMillis = timestamp,
-			matchedSampleIndex = matchSampleIndex(trip, timestamp),
+			matchedSamplePosition = matchPhotoPosition(trip, timestamp),
 			timestampSource = if (exifTimestamp != null) {
 				FlightPhotoTimestampSource.EXIF
 			} else FlightPhotoTimestampSource.LIVE_CAPTURE,
@@ -438,7 +433,7 @@ class FlightJourneyStore(private val context: Context) {
 					put("storageName", photoStorageNames[photo.id] ?: File(photo.localPath).name)
 					putOptional("timestampMillis", photo.timestampMillis)
 					putOptional("timestampSource", photo.timestampSource?.name)
-					putOptional("matchedSampleIndex", photo.matchedSampleIndex)
+					putOptional("matchedSamplePosition", photo.matchedSamplePosition)
 					put("rotationDegrees", normalizePhotoRotation(photo.rotationDegrees))
 					put("includeMainCamera", photo.includeMainCamera)
 					put("includeSelfie", photo.includeSelfie)
@@ -456,16 +451,24 @@ class FlightJourneyStore(private val context: Context) {
 		val photos = (0 until photosJson.length()).mapNotNull { index ->
 			photosJson.optJSONObject(index)?.let { json ->
 				val storageName = safeFileName(json.optString("storageName"))
+				val storedPosition = json.optNullableDouble("matchedSamplePosition")
+					?: json.optNullableDouble("matchedSampleIndex")
 				FlightPhotoAttachment(
 					id = json.optString("id").ifBlank { UUID.randomUUID().toString() },
 					fileName = json.optString("fileName").ifBlank { storageName },
 					localPath = photoPath(storageName),
 					timestampMillis = json.optNullableLong("timestampMillis"),
-					matchedSampleIndex = json.optNullableInt("matchedSampleIndex"),
+					matchedSamplePosition = storedPosition
+						?.takeIf { it.isFinite() && trip.samples.isNotEmpty() }
+						?.let { position ->
+							FlightSampleInterpolator.quantizePosition(
+								position.coerceIn(0.0, trip.samples.lastIndex.toDouble())
+							)
+						},
 					timestampSource = json.optString("timestampSource").takeIf(String::isNotBlank)?.let { value ->
 						runCatching { FlightPhotoTimestampSource.valueOf(value) }.getOrNull()
 					},
-					rotationDegrees = normalizePhotoRotation(json.optInt("rotationDegrees", 0)),
+					rotationDegrees = normalizePhotoRotation(json.optDouble("rotationDegrees", 0.0).toFloat()),
 					includeMainCamera = json.optBoolean("includeMainCamera", true),
 					includeSelfie = json.optBoolean("includeSelfie", false),
 					includeMap = json.optBoolean("includeMap", true),
@@ -694,9 +697,6 @@ class FlightJourneyStore(private val context: Context) {
 			.append(xmlEscape(value.toString())).append("</osmandflight:").append(name).append(">\n")
 	}
 
-	private fun matchSampleIndex(trip: FlightTrip?, timestamp: Long?): Int? =
-		matchPhotoSample(trip, timestamp)?.index
-
 	private fun displayName(uri: Uri): String? {
 		val providerName = runCatching {
 			context.contentResolver.query(
@@ -905,7 +905,11 @@ class FlightJourneyStore(private val context: Context) {
 	private fun JSONObject.optNullableInt(key: String): Int? =
 		if (has(key) && !isNull(key)) optInt(key) else null
 
-	private fun normalizePhotoRotation(value: Int): Int = Math.floorMod(value, 360) / 90 * 90
+	private fun normalizePhotoRotation(value: Float): Float {
+		if (!value.isFinite()) return 0f
+		val normalized = value % 360f
+		return if (normalized < 0f) normalized + 360f else normalized
+	}
 
 	private fun xmlEscape(value: String): String = value
 		.replace("&", "&amp;")
@@ -916,7 +920,7 @@ class FlightJourneyStore(private val context: Context) {
 
 	companion object {
 		const val ARCHIVE_EXTENSION = "osmandflight"
-		private const val SCHEMA_VERSION = 3
+		private const val SCHEMA_VERSION = 4
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"

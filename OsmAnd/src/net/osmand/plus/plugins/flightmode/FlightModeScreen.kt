@@ -182,7 +182,7 @@ fun FlightModeScreen(
 	onAssociatePhotoAutomatically: (String) -> Unit,
 	onAssociatePhotoAtCurrentReplay: (String) -> Unit,
 	onClearPhotoAssociation: (String) -> Unit,
-	onRotatePhoto: (String, Int) -> Unit,
+	onRotatePhoto: (String, Float) -> Unit,
 	onOpenPhotoOnMap: (String) -> Unit,
 	onOpenPhotoInWindow: (String) -> Unit,
 	onSetWindowPhotoOpacity: (Float) -> Unit,
@@ -314,6 +314,7 @@ fun FlightModeScreen(
 					onSetPhotoOpacity = onSetWindowPhotoOpacity,
 					onSetGestureTarget = onSetWindowGestureTarget,
 					onTransformPhoto = onTransformWindowPhoto,
+					onRotatePhoto = onRotatePhoto,
 					onResetPhotoTransform = onResetWindowPhotoTransform,
 					onClearPhoto = onClearWindowPhotoOverlay,
 					onRetryTerrain = onRetryTerrain,
@@ -886,6 +887,7 @@ private fun WindowScreen(
 	onSetPhotoOpacity: (Float) -> Unit,
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onTransformPhoto: (Float, Float, Float) -> Unit,
+	onRotatePhoto: (String, Float) -> Unit,
 	onResetPhotoTransform: () -> Unit,
 	onClearPhoto: () -> Unit,
 	onRetryTerrain: () -> Unit,
@@ -922,6 +924,7 @@ private fun WindowScreen(
 				onSetPhotoOpacity = onSetPhotoOpacity,
 				onSetGestureTarget = onSetGestureTarget,
 				onResetPhotoTransform = onResetPhotoTransform,
+				onRotatePhoto = onRotatePhoto,
 				onClearPhoto = onClearPhoto,
 				onSetShadowsEnabled = onSetShadowsEnabled,
 				onRetryTerrain = onRetryTerrain,
@@ -1275,7 +1278,7 @@ private fun PhotoScreen(
 	onAssociatePhotoAutomatically: (String) -> Unit,
 	onAssociatePhotoAtCurrentReplay: (String) -> Unit,
 	onClearPhotoAssociation: (String) -> Unit,
-	onRotatePhoto: (String, Int) -> Unit,
+	onRotatePhoto: (String, Float) -> Unit,
 	onOpenPhotoOnMap: (String) -> Unit,
 	onOpenPhotoInWindow: (String) -> Unit
 ) {
@@ -1381,7 +1384,7 @@ private fun PhotoScreen(
 			FlightPhotoFullscreen(
 				photo = photo,
 				onClose = { fullScreenPhotoId = null },
-				onRotate = { quarterTurns -> onRotatePhoto(photo.id, quarterTurns) }
+				onRotate = { deltaDegrees -> onRotatePhoto(photo.id, deltaDegrees) }
 			)
 		}
 	}
@@ -1400,36 +1403,19 @@ private fun FlightPhotoEntry(
 	onOpenMap: (String) -> Unit,
 	onOpenWindow: (String) -> Unit,
 	onOpenPhoto: (String) -> Unit,
-	onRotatePhoto: (String, Int) -> Unit
+	onRotatePhoto: (String, Float) -> Unit
 ) {
-	val sample = photo.matchedSampleIndex?.let { sampleIndex ->
-		trip?.samples?.firstOrNull { it.index == sampleIndex }
-	}
+	val sample = FlightSampleInterpolator.sampleAt(trip, photo.matchedSamplePosition)
 	Column {
 		FlightPhotoRow(photo, selected, sample, onSelect)
 		if (selected) {
 			FlightPhotoPreview(photo, onOpenPhoto)
 			FlightPhotoMetadata(photo, sample, trip)
-			Row(
-				Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
-				horizontalArrangement = Arrangement.spacedBy(5.dp)
-			) {
+			Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
 				CompactAction(
 					stringResource(R.string.flight_mode_photo_open_fullscreen).uppercase(),
 					FlightBlue,
 					{ onOpenPhoto(photo.id) },
-					Modifier.weight(1f)
-				)
-				CompactAction(
-					stringResource(R.string.flight_mode_photo_rotate_left).uppercase(),
-					FlightMuted,
-					{ onRotatePhoto(photo.id, -1) },
-					Modifier.weight(1f)
-				)
-				CompactAction(
-					stringResource(R.string.flight_mode_photo_rotate_right).uppercase(),
-					FlightMuted,
-					{ onRotatePhoto(photo.id, 1) },
 					Modifier.weight(1f)
 				)
 			}
@@ -1534,9 +1520,11 @@ private fun FlightPhotoRow(
 		Column(horizontalAlignment = Alignment.End) {
 			Text(dateLabel, color = FlightMuted, fontSize = 9.sp)
 			Text(
-				photo.matchedSampleIndex?.let { stringResource(R.string.flight_mode_photo_matched_point, it + 1) }
+				photo.matchedSamplePosition?.let {
+					stringResource(R.string.flight_mode_photo_matched_point, formatVirtualPoint(it))
+				}
 					?: stringResource(R.string.flight_mode_photo_not_matched),
-				color = if (photo.matchedSampleIndex != null) FlightGreen else FlightWarning,
+				color = if (photo.matchedSamplePosition != null) FlightGreen else FlightWarning,
 				fontSize = 8.sp
 			)
 		}
@@ -1581,7 +1569,7 @@ private fun FlightPhotoPreview(photo: FlightPhotoAttachment, onOpen: (String) ->
 private fun FlightPhotoFullscreen(
 	photo: FlightPhotoAttachment,
 	onClose: () -> Unit,
-	onRotate: (Int) -> Unit
+	onRotate: (Float) -> Unit
 ) {
 	val preview by produceState(initialValue = PhotoPreviewState(), key1 = photo.localPath) {
 		val loaded = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath)) }
@@ -1597,6 +1585,11 @@ private fun FlightPhotoFullscreen(
 				contentDescription = photo.fileName,
 				contentScale = ContentScale.Fit,
 				modifier = Modifier.fillMaxSize().padding(top = 50.dp, bottom = 54.dp)
+					.pointerInput(photo.id) {
+						detectTransformGestures { _, _, _, rotationDegrees ->
+							if (abs(rotationDegrees) >= 0.01f) onRotate(rotationDegrees)
+						}
+					}
 					.graphicsLayer(rotationZ = photo.rotationDegrees.toFloat())
 			)
 		} ?: Text(
@@ -1617,19 +1610,14 @@ private fun FlightPhotoFullscreen(
 		Row(
 			Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(50.dp).background(FlightHudPanel)
 				.padding(horizontal = 10.dp, vertical = 8.dp),
-			horizontalArrangement = Arrangement.spacedBy(8.dp)
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.Center
 		) {
-			CompactAction(
-				stringResource(R.string.flight_mode_photo_rotate_left).uppercase(),
-				FlightBlue,
-				{ onRotate(-1) },
-				Modifier.weight(1f)
-			)
-			CompactAction(
-				stringResource(R.string.flight_mode_photo_rotate_right).uppercase(),
-				FlightBlue,
-				{ onRotate(1) },
-				Modifier.weight(1f)
+			Text(
+				stringResource(R.string.flight_mode_photo_rotate_gesture, photo.rotationDegrees),
+				color = FlightBlue,
+				fontSize = 10.sp,
+				fontWeight = FontWeight.Bold
 			)
 		}
 	}
@@ -1688,10 +1676,15 @@ private fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSamp
 				warning = true
 			)
 		} else {
-			val progress = trip?.progressFor(sample)?.times(100f)?.roundToInt() ?: 0
+			val progress = FlightSampleInterpolator.progressAt(trip, photo.matchedSamplePosition)
+				?.times(100f)?.roundToInt() ?: 0
 			PhotoMetadataLine(
 				stringResource(R.string.flight_mode_photo_timeline),
-				stringResource(R.string.flight_mode_photo_timeline_value, sample.index + 1, progress)
+				stringResource(
+					R.string.flight_mode_photo_timeline_value,
+					formatVirtualPoint(photo.matchedSamplePosition ?: sample.index.toDouble()),
+					progress
+				)
 			)
 			if (photo.timestampMillis != null && sample.timestampMillis > 0L) {
 				PhotoMetadataLine(
@@ -2450,6 +2443,7 @@ private fun FlightWindowScene(
 	onSetPhotoOpacity: (Float) -> Unit,
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onResetPhotoTransform: () -> Unit,
+	onRotatePhoto: (String, Float) -> Unit,
 	onClearPhoto: () -> Unit,
 	onSetShadowsEnabled: (Boolean) -> Unit,
 	onRetryTerrain: () -> Unit,
@@ -2461,8 +2455,10 @@ private fun FlightWindowScene(
 	val latestChangeZoom by rememberUpdatedState(onChangeZoom)
 	val latestPhotoOverlay by rememberUpdatedState(photoOverlay)
 	val latestTransformPhoto by rememberUpdatedState(onTransformPhoto)
+	val latestRotatePhoto by rememberUpdatedState(onRotatePhoto)
 	var sceneAspectRatio by remember { mutableStateOf(1f) }
 	val activePhoto = photo?.takeIf { photoOverlay.photoId == it.id }
+	val latestActivePhotoId by rememberUpdatedState(activePhoto?.id)
 	val photoOverlayVisible = activePhoto != null
 	Box(
 		modifier = modifier.background(FlightBackground)
@@ -2470,7 +2466,7 @@ private fun FlightWindowScene(
 				sceneAspectRatio = size.width.toFloat() / size.height.coerceAtLeast(1)
 			}
 			.pointerInput(Unit) {
-				detectTransformGestures { _, pan, zoom, _ ->
+				detectTransformGestures { _, pan, zoom, rotationDegrees ->
 					val manipulatePhoto = latestPhotoOverlay.photoId != null &&
 						latestPhotoOverlay.gestureTarget == FlightWindowGestureTarget.PHOTO
 					if (manipulatePhoto) {
@@ -2479,6 +2475,9 @@ private fun FlightWindowScene(
 							pan.y / size.height.coerceAtLeast(1),
 							zoom
 						)
+						if (abs(rotationDegrees) >= 0.01f) {
+							latestActivePhotoId?.let { latestRotatePhoto(it, rotationDegrees) }
+						}
 					} else if (pan != Offset.Zero) {
 						val horizontalFov = latestPlacement.horizontalFieldOfViewDegrees(
 							size.width.toFloat() / size.height.coerceAtLeast(1)
@@ -3403,6 +3402,9 @@ private fun formatClock(timestampMillis: Long): String =
 
 private fun formatDateTime(timestampMillis: Long): String =
 	SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date(timestampMillis))
+
+private fun formatVirtualPoint(zeroBasedPosition: Double): String =
+	String.format(Locale.US, "%.2f", zeroBasedPosition + 1.0)
 
 private fun formatDuration(durationMillis: Long): String {
 	val totalSeconds = durationMillis / 1_000L

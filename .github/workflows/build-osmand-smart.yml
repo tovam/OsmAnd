@@ -120,6 +120,14 @@ jobs:
           ./gradlew -PusePatchedOsmAndCoreNative=true :OsmAnd:compileAndroidFullOpenglArm64DebugKotlin 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
           ./gradlew -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug 2>&1 | tee -a "${RUNNER_TEMP}/gradle-build.log"
 
+      - name: Verify patched native core is packaged
+        run: |
+          apk_path="$(find android/OsmAnd/build/outputs/apk -type f -name '*.apk' -print -quit)"
+          test -n "${apk_path}"
+          unzip -p "${apk_path}" lib/arm64-v8a/libOsmAndCoreWithJNI.so > "${RUNNER_TEMP}/packaged-OsmAndCoreWithJNI.so"
+          test -s "${RUNNER_TEMP}/packaged-OsmAndCoreWithJNI.so"
+          cmp binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so "${RUNNER_TEMP}/packaged-OsmAndCoreWithJNI.so"
+
       - name: Publish Gradle failure details
         if: failure()
         run: |

@@ -209,10 +209,21 @@ android {
 }
 
 afterEvaluate {
+	def usePatchedOsmAndCoreNative = project.findProperty("usePatchedOsmAndCoreNative")?.toString()?.toBoolean() ?: false
 	android.applicationVariants.configureEach { variant ->
-		if (variant.name.contains('Opengldebug')) {
+		def variantName = variant.name.toLowerCase()
+		def needsLocalOsmAndCore = variantName.contains('opengldebug') ||
+			(usePatchedOsmAndCoreNative && variantName.contains('opengl'))
+		if (needsLocalOsmAndCore) {
 			variant.javaCompileProvider.configure {
 				dependsOn collectExternalResources, buildOsmAndCore, copyOsmAndCoreWithJNI, cleanupDuplicatesInCore
+			}
+			// Native libraries are merged independently from Java compilation. Make the copy an
+			// explicit input of the packaging path so Gradle cannot merge jniLibs before the
+			// patched core has reached OsmAnd/libs.
+			def taskName = variant.name.capitalize()
+			tasks.named("merge${taskName}NativeLibs").configure {
+				dependsOn copyOsmAndCoreWithJNI
 			}
 		} else {
 			variant.javaCompileProvider.configure {
@@ -231,6 +242,12 @@ afterEvaluate {
 tasks.register('copyOsmAndCoreWithJNI') {
 	dependsOn buildOsmAndCore
 	doLast {
+		def patchedCoreRequested = project.findProperty("usePatchedOsmAndCoreNative")?.toString()?.toBoolean() ?: false
+		def requestedTasks = gradle.startParameter.taskNames.join(",").toLowerCase()
+		def arm64Core = file("../../binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so")
+		if (patchedCoreRequested && requestedTasks.contains("arm64") && !arm64Core.isFile()) {
+			throw new GradleException("Patched ARM64 OsmAndCore library is missing: ${arm64Core}")
+		}
 		file("libs/armeabi-v7a").mkdirs()
 		copy { from("../../binaries/android/clang-armeabi-v7a/Debug/libOsmAndCoreWithJNI.so") into("libs/armeabi-v7a") }
 

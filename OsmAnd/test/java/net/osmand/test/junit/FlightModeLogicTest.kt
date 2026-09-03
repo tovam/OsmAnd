@@ -8,6 +8,7 @@ import net.osmand.plus.plugins.flightmode.FlightProfilePlanner
 import net.osmand.plus.plugins.flightmode.FlightRecordingPolicy
 import net.osmand.plus.plugins.flightmode.FlightReplayEngine
 import net.osmand.plus.plugins.flightmode.FlightSample
+import net.osmand.plus.plugins.flightmode.FlightSampleInterpolator
 import net.osmand.plus.plugins.flightmode.FlightSatelliteSource
 import net.osmand.plus.plugins.flightmode.FlightSatelliteQuality
 import net.osmand.plus.plugins.flightmode.FlightStop
@@ -117,6 +118,67 @@ class FlightModeLogicTest {
 
 		assertTrue(snapshot.dataGap)
 		assertFalse(snapshot.interpolated)
+	}
+
+	@Test
+	fun photoTimeProducesAHundredthPrecisionVirtualPointAndInterpolatedData() {
+		val samples = listOf(
+			sample(0, 1_000L, 10.0, 20.0).copy(
+				altitudeMeters = 100.0,
+				speedMetersPerSecond = 100f,
+				bearingDegrees = 350f,
+				horizontalAccuracyMeters = 20f,
+				satellitesUsed = 4
+			),
+			sample(1, 2_000L, 20.0, 40.0).copy(
+				altitudeMeters = 300.0,
+				speedMetersPerSecond = 200f,
+				bearingDegrees = 10f,
+				horizontalAccuracyMeters = 10f,
+				satellitesUsed = 8
+			)
+		)
+		val trip = FlightTrip(
+			"photo",
+			samples,
+			listOf(FlightLeg(0, "Vol", 0, 1, 1_000.0, 1_000L, 2_000L)),
+			true,
+			1_000.0,
+			"synthetic.gpx"
+		)
+
+		val position = FlightSampleInterpolator.positionAtTimestamp(trip, 1_870L, 15_000L)
+			?.let(FlightSampleInterpolator::quantizePosition)
+		assertEquals(0.87, position ?: -1.0, 0.0001)
+
+		val virtual = FlightSampleInterpolator.sampleAt(trip, position)!!
+		assertEquals(18.7, virtual.latitude, 0.0001)
+		assertEquals(37.4, virtual.longitude, 0.0001)
+		assertEquals(274.0, virtual.altitudeMeters ?: -1.0, 0.0001)
+		assertEquals(187f, virtual.speedMetersPerSecond ?: -1f, 0.0001f)
+		assertEquals(7.4f, virtual.bearingDegrees ?: -1f, 0.0001f)
+		assertEquals(11.3f, virtual.horizontalAccuracyMeters ?: -1f, 0.0001f)
+		assertEquals(8, virtual.satellitesUsed ?: -1)
+	}
+
+	@Test
+	fun photoVirtualPointNeverInterpolatesAcrossTwoFlightLegs() {
+		val samples = listOf(
+			sample(0, 1_000L, 10.0, 20.0).copy(legIndex = 0),
+			sample(1, 2_000L, 50.0, 60.0).copy(legIndex = 1)
+		)
+		val trip = FlightTrip(
+			"legs",
+			samples,
+			emptyList(),
+			true,
+			1_000.0,
+			"synthetic.gpx"
+		)
+
+		val virtual = FlightSampleInterpolator.sampleAt(trip, 0.87)!!
+		assertEquals(samples[1].latitude, virtual.latitude, 0.0)
+		assertEquals(samples[1].longitude, virtual.longitude, 0.0)
 	}
 
 	@Test
