@@ -11,7 +11,10 @@ object FlightViewGeometry {
 	fun viewElevationDegrees(
 		placement: FlightWindowPlacement,
 		look: FlightWindowLook
-	): Float = viewDirection(0f, placement, look).elevationDegrees
+	): Float = Math.toDegrees(
+		placement.geometry().elevationRadians.toDouble() +
+			Math.toRadians(look.clamped().pitchDegrees.toDouble())
+	).toFloat().coerceIn(MINIMUM_VIEW_ELEVATION_DEGREES, MAXIMUM_VIEW_ELEVATION_DEGREES)
 
 	fun photoSpatialPose(
 		trip: FlightTrip?,
@@ -23,7 +26,6 @@ object FlightViewGeometry {
 		val position = samplePosition?.takeIf { it.isFinite() } ?: return null
 		val sample = FlightSampleInterpolator.sampleAt(trip, position) ?: return null
 		val bearing = sample.bearingDegrees ?: return null
-		val direction = viewDirection(bearing, placement, look)
 		return FlightPhotoSpatialPose(
 			samplePosition = FlightSampleInterpolator.quantizePosition(position),
 			timestampMillis = sample.timestampMillis.takeIf { it > 0L },
@@ -31,8 +33,8 @@ object FlightViewGeometry {
 			eyeLongitude = sample.longitude,
 			eyeAltitudeMeters = altitudeOverrideMeters ?: sample.altitudeMeters?.toFloat(),
 			aircraftBearingDegrees = bearing,
-			viewAzimuthDegrees = direction.azimuthDegrees,
-			viewElevationDegrees = direction.elevationDegrees,
+			viewAzimuthDegrees = placement.viewAzimuthDegrees(bearing, look),
+			viewElevationDegrees = viewElevationDegrees(placement, look),
 			verticalFieldOfViewDegrees = placement.verticalFieldOfViewDegrees()
 		).clampedOrNull()
 	}
@@ -54,51 +56,19 @@ object FlightViewGeometry {
 			?.coerceAtLeast(0f)
 			?: return null
 		val aircraftBearing = sample.bearingDegrees ?: return null
-		val direction = viewDirection(aircraftBearing, placement, look)
-		if (direction.vertical >= -MINIMUM_DOWNWARD_COMPONENT) return null
-		val horizontalDistanceKm = altitudeMeters.toDouble() * direction.horizontal /
-			-direction.vertical / 1_000.0
+		val elevation = Math.toRadians(viewElevationDegrees(placement, look).toDouble())
+		val vertical = sin(elevation)
+		if (vertical >= -MINIMUM_DOWNWARD_COMPONENT) return null
+		val horizontalDistanceKm = altitudeMeters.toDouble() * cos(elevation) /
+			-vertical / 1_000.0
 		if (!horizontalDistanceKm.isFinite() || horizontalDistanceKm !in 0.0..maximumDistanceKm) return null
 		return destination(
 			latitude = sample.latitude,
 			longitude = sample.longitude,
-			bearingDegrees = direction.azimuthDegrees.toDouble(),
+			bearingDegrees = placement.viewAzimuthDegrees(aircraftBearing, look).toDouble(),
 			distanceKm = horizontalDistanceKm
 		)
 	}
-
-	/** Canonical spherical angles for the exact forward vector used by the GL camera. */
-	private fun viewDirection(
-		aircraftBearingDegrees: Float,
-		placement: FlightWindowPlacement,
-		look: FlightWindowLook
-	): ViewDirection {
-		val rawElevation = placement.geometry().elevationRadians.toDouble() +
-			Math.toRadians(look.clamped().pitchDegrees.toDouble())
-		val vertical = sin(rawElevation)
-		val rawHorizontal = cos(rawElevation)
-		val horizontal = kotlin.math.abs(rawHorizontal)
-		val rawAzimuth = placement.viewAzimuthDegrees(aircraftBearingDegrees, look)
-		val azimuth = normalizeDegrees(rawAzimuth + if (rawHorizontal < 0.0) 180f else 0f)
-		return ViewDirection(
-			azimuthDegrees = azimuth,
-			elevationDegrees = Math.toDegrees(atan2(vertical, horizontal)).toFloat(),
-			horizontal = horizontal,
-			vertical = vertical
-		)
-	}
-
-	private fun normalizeDegrees(value: Float): Float {
-		val normalized = value % 360f
-		return if (normalized < 0f) normalized + 360f else normalized
-	}
-
-	private data class ViewDirection(
-		val azimuthDegrees: Float,
-		val elevationDegrees: Float,
-		val horizontal: Double,
-		val vertical: Double
-	)
 
 	private fun destination(
 		latitude: Double,
@@ -127,4 +97,6 @@ object FlightViewGeometry {
 	const val DEFAULT_MAXIMUM_GROUND_FOCUS_KM = 100.0
 	private const val EARTH_RADIUS_KM = 6_371.0088
 	private const val MINIMUM_DOWNWARD_COMPONENT = 0.0017
+	private const val MINIMUM_VIEW_ELEVATION_DEGREES = -89f
+	private const val MAXIMUM_VIEW_ELEVATION_DEGREES = 45f
 }

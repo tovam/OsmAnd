@@ -121,6 +121,54 @@ object FlightTerrainTilePlanner {
 		return result
 	}
 
+	/** A bounded, nearest-first patch shared by the aircraft and stable gaze focus. */
+	fun refinementPlan(
+		foci: List<FlightTerrainDetailFocus>,
+		radiusKm: Double,
+		zoom: Int,
+		maxTiles: Int
+	): TerrainTilePlan {
+		val safeZoom = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+		val validFoci = foci.filter {
+			it.latitude.isFinite() && it.latitude in -WEB_MERCATOR_MAX_LATITUDE..WEB_MERCATOR_MAX_LATITUDE &&
+				it.longitude.isFinite()
+		}
+		if (validFoci.isEmpty()) return TerrainTilePlan(safeZoom, emptyList())
+		val candidatesByFocus = validFoci.map { focus ->
+			tilesAround(focus.latitude, focus.longitude, radiusKm.coerceAtLeast(0.5), safeZoom)
+				.sortedBy { tile ->
+				distanceKm(
+					focus.latitude,
+					focus.longitude,
+					tileYToLatitude(tile.y + 0.5, tile.zoom),
+					tileXToLongitude(tile.x + 0.5, tile.zoom)
+				)
+			}
+		}
+		val limit = maxTiles.coerceAtLeast(1)
+		val ordered = linkedSetOf<TerrainTileId>()
+		val positions = IntArray(candidatesByFocus.size)
+		while (ordered.size < limit) {
+			var addedThisRound = false
+			candidatesByFocus.forEachIndexed { focusIndex, candidates ->
+				while (positions[focusIndex] < candidates.size &&
+					candidates[positions[focusIndex]] in ordered
+				) positions[focusIndex]++
+				if (positions[focusIndex] < candidates.size && ordered.size < limit) {
+					ordered += candidates[positions[focusIndex]++]
+					addedThisRound = true
+				}
+			}
+			if (!addedThisRound) break
+		}
+		return TerrainTilePlan(safeZoom, ordered.toList())
+	}
+
+	/** Approximate width represented by one 256-pixel Terrarium source sample. */
+	fun groundResolutionMeters(latitude: Double, zoom: Int): Double =
+		tileGroundWidthKm(latitude.coerceIn(-WEB_MERCATOR_MAX_LATITUDE, WEB_MERCATOR_MAX_LATITUDE), zoom) *
+			1_000.0 / TERRARIUM_TILE_SIZE
+
 	fun longitudeToTileX(longitude: Double, zoom: Int): Double =
 		(longitude + 180.0) / 360.0 * 2.0.pow(zoom)
 
@@ -195,6 +243,7 @@ object FlightTerrainTilePlanner {
 
 	private val tileComparator = compareBy<TerrainTileId>({ it.zoom }, { it.y }, { it.x })
 
+	private const val TERRARIUM_TILE_SIZE = 256.0
 	private const val WEB_MERCATOR_MAX_LATITUDE = 85.05112878
 	private const val MAXIMUM_TRACK_PLANNER_POINTS = 512
 }

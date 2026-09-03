@@ -625,6 +625,8 @@ class FlightJourneyStore(private val context: Context) {
 	private fun planToJson(plan: FlightPlan): JSONObject = JSONObject().apply {
 		put("terrainCorridorKm", plan.terrainCorridorKm)
 		put("detailedSatelliteRadiusKm", plan.detailedSatelliteRadiusKm)
+		put("terrainFineZoom", plan.terrainFineZoom)
+		put("terrainMiddleZoom", plan.terrainMiddleZoom)
 		put("satelliteQuality", plan.satelliteQuality.name)
 		put("shadowsEnabled", plan.shadowsEnabled)
 		put("shadowIntensity", plan.shadowIntensity.coerceIn(0f, 1f).toDouble())
@@ -648,10 +650,20 @@ class FlightJourneyStore(private val context: Context) {
 				FlightStop(it.optString("name"), it.optNullableDouble("latitude"), it.optNullableDouble("longitude"))
 			}
 		}.takeIf { it.size >= 2 } ?: FlightPlan.preview().stops
+		val terrainFineZoom = json.optInt(
+			"terrainFineZoom",
+			FlightPlan.DEFAULT_TERRAIN_FINE_ZOOM
+		).coerceIn(FlightPlan.MIN_TERRAIN_DETAIL_ZOOM, FlightPlan.MAX_TERRAIN_DETAIL_ZOOM)
+		val terrainMiddleZoom = json.optInt(
+			"terrainMiddleZoom",
+			FlightPlan.DEFAULT_TERRAIN_MIDDLE_ZOOM
+		).coerceIn(FlightPlan.MIN_TERRAIN_DETAIL_ZOOM, terrainFineZoom)
 		return FlightPlan(
 			stops = stops,
 			terrainCorridorKm = json.optInt("terrainCorridorKm", 300),
 			detailedSatelliteRadiusKm = json.optInt("detailedSatelliteRadiusKm", 300),
+			terrainFineZoom = terrainFineZoom,
+			terrainMiddleZoom = terrainMiddleZoom,
 			satelliteQuality = runCatching {
 				FlightSatelliteQuality.valueOf(json.optString("satelliteQuality", FlightSatelliteQuality.HIGH.name))
 			}.getOrDefault(FlightSatelliteQuality.HIGH),
@@ -1019,7 +1031,7 @@ class FlightJourneyStore(private val context: Context) {
 
 	companion object {
 		const val ARCHIVE_EXTENSION = "osmandflight"
-		private const val SCHEMA_VERSION = 7
+		private const val SCHEMA_VERSION = 8
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"

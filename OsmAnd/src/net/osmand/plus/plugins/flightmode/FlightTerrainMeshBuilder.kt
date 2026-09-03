@@ -34,6 +34,22 @@ object FlightTerrainGeometryLodPolicy {
 	private const val SHORT_BYTES = 2L
 }
 
+/**
+ * Bounded high-resolution patches layered over the complete coarse scene.
+ * The fine patch preserves almost every Terrarium source sample; the middle
+ * patch keeps every other sample and bridges toward the cheap distant mesh.
+ */
+object FlightTerrainRefinementPolicy {
+
+	const val FINE_RADIUS_KM = 10.0
+	const val MIDDLE_RADIUS_KM = 35.0
+	const val MAXIMUM_FINE_TILES = 12
+	const val MAXIMUM_MIDDLE_TILES = 32
+	const val FINE_GRID_QUADS = 255
+	const val MIDDLE_GRID_QUADS = 128
+	const val MINIMUM_DISTINCT_FOCUS_KM = 2.0
+}
+
 object FlightTerrainMeshBuilder {
 
 	const val DEFAULT_GRID_QUADS = 32
@@ -47,6 +63,8 @@ object FlightTerrainMeshBuilder {
 		plan: TerrainTilePlan,
 		tiles: Map<TerrainTileId, TerrariumTile>,
 		satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
+		terrainFineZoom: Int = FlightPlan.DEFAULT_TERRAIN_FINE_ZOOM,
+		terrainMiddleZoom: Int = FlightPlan.DEFAULT_TERRAIN_MIDDLE_ZOOM,
 		detailFocus: FlightTerrainDetailFocus? = null,
 		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
 		standardSatelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
@@ -86,6 +104,7 @@ object FlightTerrainMeshBuilder {
 				tileId = tileId,
 				vertices = geometry.vertices,
 				indices = geometry.indices,
+				refinementLevel = 0,
 				terrainAvailable = terrainAvailable,
 				satelliteTexturePath = satelliteTexturePaths[tileId],
 				standardSatelliteTexturePath = standardSatelliteTexturePaths[tileId],
@@ -109,6 +128,8 @@ object FlightTerrainMeshBuilder {
 			coordinateOriginLongitude = coordinateOriginLongitude,
 			radiusKm = radiusKm,
 			zoom = plan.zoom,
+			terrainFineZoom = terrainFineZoom,
+			terrainMiddleZoom = terrainMiddleZoom,
 			satelliteQuality = satelliteQuality,
 			meshes = meshes,
 			loadedTiles = tiles.size,
@@ -120,6 +141,73 @@ object FlightTerrainMeshBuilder {
 			centerGroundElevationMeters = centerGround,
 			geometryGeneration = geometryGeneration
 		)
+	}
+
+	/**
+	 * Builds a nested elevation layer while reusing the already loaded base satellite
+	 * texture. Exposed patch edges morph back to the coarser elevation over a few
+	 * quads, so a new level appears as added detail instead of a vertical tile wall.
+	 */
+	fun buildRefinementMeshes(
+		baseZoom: Int,
+		plan: TerrainTilePlan,
+		tiles: Map<TerrainTileId, TerrariumTile>,
+		boundaryZoom: Int,
+		boundaryTiles: Map<TerrainTileId, TerrariumTile>,
+		baseSatelliteTexturePaths: Map<TerrainTileId, String>,
+		baseStandardSatelliteTexturePaths: Map<TerrainTileId, String>,
+		baseSatelliteTextureTiers: Map<TerrainTileId, FlightTerrainTextureTier>,
+		coordinateOriginLatitude: Double,
+		coordinateOriginLongitude: Double,
+		geometryQuadsByTile: Map<TerrainTileId, Int>,
+		geometryCache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>?
+	): List<FlightTerrainMesh> {
+		if (plan.zoom <= baseZoom || tiles.isEmpty()) return emptyList()
+		val projection = FlightTerrainCoordinates(coordinateOriginLatitude, coordinateOriginLongitude)
+		val sampler = TileElevationSampler(plan.zoom, tiles)
+		val boundarySampler = TileElevationSampler(boundaryZoom, boundaryTiles)
+		val availableIds = tiles.keys
+		return plan.tiles.mapNotNull { tileId ->
+			val tile = tiles[tileId] ?: return@mapNotNull null
+			val gridQuads = geometryQuadsByTile[tileId]
+				?.coerceIn(DEFAULT_GRID_QUADS, MAXIMUM_GRID_QUADS)
+				?: DEFAULT_GRID_QUADS
+			val textureTransform = textureTransform(tileId, baseZoom)
+			val boundaryMask = exposedBoundaryMask(tileId, availableIds)
+			val geometryCacheKey = FlightTerrainGeometryCacheKey(
+				tileId = tileId,
+				coordinateOriginLatitude = coordinateOriginLatitude,
+				coordinateOriginLongitude = coordinateOriginLongitude,
+				gridQuads = gridQuads,
+				textureZoom = baseZoom,
+				boundaryMask = boundaryMask,
+				boundarySourceZoom = boundaryZoom
+			)
+			val geometry = cachedOrBuildGeometry(geometryCache, geometryCacheKey) {
+				buildTileGeometry(
+					tile = tile,
+					sampler = sampler,
+					projection = projection,
+					gridQuads = gridQuads,
+					textureTransform = textureTransform,
+					boundarySampler = boundarySampler,
+					boundaryMask = boundaryMask
+				)
+			}
+			val textureTile = textureTransform.textureTile
+			FlightTerrainMesh(
+				tileId = tileId,
+				vertices = geometry.vertices,
+				indices = geometry.indices,
+				refinementLevel = (tileId.zoom - baseZoom).coerceAtLeast(1),
+				terrainAvailable = true,
+				satelliteTexturePath = baseSatelliteTexturePaths[textureTile],
+				standardSatelliteTexturePath = baseStandardSatelliteTexturePaths[textureTile],
+				satelliteTextureTier = baseSatelliteTextureTiers[textureTile]
+					?: FlightTerrainTextureTier.OVERVIEW,
+				nativeMapTexturePath = null
+			)
+		}
 	}
 
 	private fun cachedOrBuildGeometry(
@@ -177,8 +265,12 @@ object FlightTerrainMeshBuilder {
 		tile: TerrariumTile,
 		sampler: TileElevationSampler,
 		projection: FlightTerrainCoordinates,
-		gridQuads: Int
+		gridQuads: Int,
+		textureTransform: TextureTransform? = null,
+		boundarySampler: TileElevationSampler? = null,
+		boundaryMask: Int = 0
 	): FlightTerrainGeometry {
+		val resolvedTextureTransform = textureTransform ?: TextureTransform(tile.id, 0f, 0f, 1f)
 		val gridSize = gridQuads + 1
 		val vertices = FloatArray(gridSize * gridSize * VERTEX_COMPONENTS)
 		for (row in 0 until gridSize) {
@@ -187,15 +279,22 @@ object FlightTerrainMeshBuilder {
 			for (column in 0 until gridSize) {
 				val tileX = tile.id.x + column.toDouble() / gridQuads
 				val longitude = FlightTerrainTilePlanner.tileXToLongitude(tileX, tile.id.zoom)
-				val elevation = sampler.elevationAt(tileX, tileY, tile) ?: 0f
+				val detailedElevation = sampler.elevationAt(tileX, tileY, tile) ?: 0f
+				val edgeBlend = boundaryBlend(column, row, gridQuads, boundaryMask)
+				val elevation = if (edgeBlend < 1f && boundarySampler != null) {
+					val coarseElevation = boundarySampler.elevationAtLocation(latitude, longitude)
+					detailedElevation + ((coarseElevation ?: detailedElevation) - detailedElevation) * (1f - edgeBlend)
+				} else detailedElevation
 				val position = projection.toLocal(latitude, longitude, elevation.toDouble())
 				val offset = (row * gridSize + column) * VERTEX_COMPONENTS
 				vertices[offset] = position[0]
 				vertices[offset + 1] = position[1]
 				vertices[offset + 2] = position[2]
 				vertices[offset + 6] = elevation
-				vertices[offset + 7] = column.toFloat() / gridQuads
-				vertices[offset + 8] = row.toFloat() / gridQuads
+				vertices[offset + 7] = resolvedTextureTransform.offsetU +
+					column.toFloat() / gridQuads * resolvedTextureTransform.scale
+				vertices[offset + 8] = resolvedTextureTransform.offsetV +
+					row.toFloat() / gridQuads * resolvedTextureTransform.scale
 			}
 		}
 		calculateNormals(vertices, gridSize)
@@ -220,6 +319,42 @@ object FlightTerrainMeshBuilder {
 			vertices = vertices,
 			indices = indices
 		)
+	}
+
+	private fun boundaryBlend(column: Int, row: Int, gridQuads: Int, boundaryMask: Int): Float {
+		if (boundaryMask == 0) return 1f
+		var distance = EDGE_MORPH_QUADS
+		if (boundaryMask and BOUNDARY_LEFT != 0) distance = minOf(distance, column)
+		if (boundaryMask and BOUNDARY_RIGHT != 0) distance = minOf(distance, gridQuads - column)
+		if (boundaryMask and BOUNDARY_TOP != 0) distance = minOf(distance, row)
+		if (boundaryMask and BOUNDARY_BOTTOM != 0) distance = minOf(distance, gridQuads - row)
+		return (distance.toFloat() / EDGE_MORPH_QUADS).coerceIn(0f, 1f)
+	}
+
+	private fun textureTransform(tileId: TerrainTileId, textureZoom: Int): TextureTransform {
+		val zoomDelta = (tileId.zoom - textureZoom).coerceAtLeast(0)
+		val factor = 1 shl zoomDelta
+		val textureTile = TerrainTileId(textureZoom, tileId.x / factor, tileId.y / factor)
+		return TextureTransform(
+			textureTile = textureTile,
+			offsetU = (tileId.x % factor).toFloat() / factor,
+			offsetV = (tileId.y % factor).toFloat() / factor,
+			scale = 1f / factor
+		)
+	}
+
+	private fun exposedBoundaryMask(tileId: TerrainTileId, availableIds: Set<TerrainTileId>): Int {
+		val tileCount = 1 shl tileId.zoom
+		val left = TerrainTileId(tileId.zoom, Math.floorMod(tileId.x - 1, tileCount), tileId.y)
+		val right = TerrainTileId(tileId.zoom, Math.floorMod(tileId.x + 1, tileCount), tileId.y)
+		val top = TerrainTileId(tileId.zoom, tileId.x, tileId.y - 1)
+		val bottom = TerrainTileId(tileId.zoom, tileId.x, tileId.y + 1)
+		var mask = 0
+		if (left !in availableIds) mask = mask or BOUNDARY_LEFT
+		if (right !in availableIds) mask = mask or BOUNDARY_RIGHT
+		if (top !in availableIds) mask = mask or BOUNDARY_TOP
+		if (bottom !in availableIds) mask = mask or BOUNDARY_BOTTOM
+		return mask
 	}
 
 	private fun calculateNormals(vertices: FloatArray, gridSize: Int) {
@@ -260,6 +395,12 @@ object FlightTerrainMeshBuilder {
 		private val tiles: Map<TerrainTileId, TerrariumTile>
 	) {
 		private val tileCount = 1 shl zoom
+
+		fun elevationAtLocation(latitude: Double, longitude: Double): Float? = elevationAt(
+			FlightTerrainTilePlanner.longitudeToTileX(longitude, zoom),
+			FlightTerrainTilePlanner.latitudeToTileY(latitude, zoom),
+			null
+		)
 
 		fun elevationAt(tileX: Double, tileY: Double, fallback: TerrariumTile?): Float? {
 			val globalPixelX = tileX * TERRARIUM_TILE_SIZE
@@ -305,5 +446,17 @@ object FlightTerrainMeshBuilder {
 		private fun floorMod(value: Long, divisor: Long): Long = Math.floorMod(value, divisor)
 	}
 
+	private data class TextureTransform(
+		val textureTile: TerrainTileId,
+		val offsetU: Float,
+		val offsetV: Float,
+		val scale: Float
+	)
+
 	private const val TERRARIUM_TILE_SIZE = 256
+	private const val EDGE_MORPH_QUADS = 4
+	private const val BOUNDARY_LEFT = 1
+	private const val BOUNDARY_RIGHT = 2
+	private const val BOUNDARY_TOP = 4
+	private const val BOUNDARY_BOTTOM = 8
 }

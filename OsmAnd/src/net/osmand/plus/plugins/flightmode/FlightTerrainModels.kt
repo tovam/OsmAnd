@@ -88,6 +88,7 @@ data class FlightTerrainMesh(
 	val tileId: TerrainTileId,
 	val vertices: FloatArray,
 	val indices: ShortArray,
+	val refinementLevel: Int = 0,
 	val terrainAvailable: Boolean = true,
 	val satelliteTexturePath: String? = null,
 	val standardSatelliteTexturePath: String? = null,
@@ -104,7 +105,10 @@ data class FlightTerrainGeometryCacheKey(
 	val tileId: TerrainTileId,
 	val coordinateOriginLatitude: Double,
 	val coordinateOriginLongitude: Double,
-	val gridQuads: Int = FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS
+	val gridQuads: Int = FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS,
+	val textureZoom: Int = tileId.zoom,
+	val boundaryMask: Int = 0,
+	val boundarySourceZoom: Int = tileId.zoom
 )
 
 data class FlightTerrainScene(
@@ -115,6 +119,8 @@ data class FlightTerrainScene(
 	val coordinateOriginLongitude: Double,
 	val radiusKm: Int,
 	val zoom: Int,
+	val terrainFineZoom: Int,
+	val terrainMiddleZoom: Int,
 	val satelliteQuality: FlightSatelliteQuality,
 	val meshes: List<FlightTerrainMesh>,
 	val loadedTiles: Int,

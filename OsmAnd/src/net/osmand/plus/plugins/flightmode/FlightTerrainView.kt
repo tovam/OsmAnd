@@ -123,6 +123,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var elevationLocation = -1
 		private var textureCoordinateLocation = -1
 		private var mvpLocation = -1
+		private var depthBiasLocation = -1
 		private var lightMvpLocation = -1
 		private var cameraLocation = -1
 		private var lightLocation = -1
@@ -195,6 +196,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				elevationLocation = GLES20.glGetAttribLocation(program, "aElevation")
 				textureCoordinateLocation = GLES20.glGetAttribLocation(program, "aTexCoord")
 				mvpLocation = GLES20.glGetUniformLocation(program, "uMvp")
+				depthBiasLocation = GLES20.glGetUniformLocation(program, "uDepthBias")
 				lightMvpLocation = GLES20.glGetUniformLocation(program, "uLightMvp")
 				cameraLocation = GLES20.glGetUniformLocation(program, "uCameraPosition")
 				lightLocation = GLES20.glGetUniformLocation(program, "uLightDirection")
@@ -466,6 +468,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				strideBytes,
 				7 * FLOAT_BYTES
 			)
+			GLES20.glUniform1f(depthBiasLocation, mesh.refinementLevel * REFINEMENT_DEPTH_BIAS)
 			val detailedTextureId = mesh.satelliteTexturePath?.let { textureCache[it]?.id } ?: 0
 			val standardTextureId = mesh.standardSatelliteTexturePath?.let { textureCache[it]?.id } ?: 0
 			val satelliteTextureId = if (detailedTextureId != 0) {
@@ -756,6 +759,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			renderMeshes = meshes.map { mesh ->
 				RenderMesh(
 					geometry = cachedGeometry(mesh),
+					refinementLevel = mesh.refinementLevel,
 					terrainAvailable = mesh.terrainAvailable,
 					satelliteTexturePath = mesh.satelliteTexturePath,
 					standardSatelliteTexturePath = mesh.standardSatelliteTexturePath,
@@ -985,6 +989,7 @@ class FlightTerrainView @JvmOverloads constructor(
 
 		private data class RenderMesh(
 			val geometry: CachedGeometry,
+			val refinementLevel: Int,
 			val terrainAvailable: Boolean,
 			val satelliteTexturePath: String?,
 			val standardSatelliteTexturePath: String?,
@@ -997,7 +1002,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SHORT_BYTES = 2
 			private const val RGB_565_BYTES_PER_PIXEL = 2L
 			private const val MAXIMUM_RENDER_GEOMETRIES = 768
-			private const val MAXIMUM_RENDER_GEOMETRY_BYTES = 96L * 1_024L * 1_024L
+			private const val MAXIMUM_RENDER_GEOMETRY_BYTES = 128L * 1_024L * 1_024L
 			private const val MAXIMUM_TEXTURE_CACHE_BYTES = 128L * 1_024L * 1_024L
 			private const val MAXIMUM_TEXTURE_UPLOADS_PER_FRAME = 2
 			private const val MAXIMUM_TEXTURE_UPLOAD_BYTES_PER_FRAME = 8L * 1_024L * 1_024L
@@ -1014,6 +1019,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SHADOW_DEPTH_MULTIPLIER = 2.2f
 			private const val SHADOW_POLYGON_OFFSET_FACTOR = 2f
 			private const val SHADOW_POLYGON_OFFSET_UNITS = 4f
+			private const val REFINEMENT_DEPTH_BIAS = 0.00002f
 			private const val RELIEF_LIGHTING_STRENGTH = 0.18f
 			private const val MINIMUM_SHADOW_SUN_UP = 0.015f
 			private const val SHADOW_FADE_SUN_RANGE = 0.10f
@@ -1040,6 +1046,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private val QUALITY_DEBUG_ULTRA_PLUS = floatArrayOf(0.70f, 0.34f, 1.00f)
 			private const val VERTEX_SHADER = """
 				uniform mat4 uMvp;
+				uniform float uDepthBias;
 				uniform mat4 uLightMvp;
 				uniform vec3 uCameraPosition;
 				uniform vec3 uLightDirection;
@@ -1068,7 +1075,9 @@ class FlightTerrainView @JvmOverloads constructor(
 					vFog = clamp(distance(aPosition, uCameraPosition) / uFogDistance, 0.0, 1.0);
 					vTexCoord = aTexCoord;
 					vShadowPosition = uLightMvp * vec4(aPosition, 1.0);
-					gl_Position = uMvp * vec4(aPosition, 1.0);
+					vec4 clipPosition = uMvp * vec4(aPosition, 1.0);
+					clipPosition.z -= uDepthBias * clipPosition.w;
+					gl_Position = clipPosition;
 				}
 			"""
 

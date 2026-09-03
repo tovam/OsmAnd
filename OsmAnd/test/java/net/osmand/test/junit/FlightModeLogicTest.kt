@@ -16,11 +16,13 @@ import net.osmand.plus.plugins.flightmode.FlightSatelliteQuality
 import net.osmand.plus.plugins.flightmode.FlightStop
 import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
+import net.osmand.plus.plugins.flightmode.FlightTerrainDetailFocus
 import net.osmand.plus.plugins.flightmode.FlightTerrainGeometry
 import net.osmand.plus.plugins.flightmode.FlightTerrainGeometryCacheKey
 import net.osmand.plus.plugins.flightmode.FlightTerrainGeometryLodPolicy
 import net.osmand.plus.plugins.flightmode.FlightTerrainLodPolicy
 import net.osmand.plus.plugins.flightmode.FlightTerrainMeshBuilder
+import net.osmand.plus.plugins.flightmode.FlightTerrainRefinementPolicy
 import net.osmand.plus.plugins.flightmode.FlightTerrainTextureTier
 import net.osmand.plus.plugins.flightmode.FlightTerrainTilePlanner
 import net.osmand.plus.plugins.flightmode.FlightTrackMath
@@ -357,6 +359,26 @@ class FlightModeLogicTest {
 	}
 
 	@Test
+	fun sharedViewElevationUsesTheSameLimitsAsTheOpenGlCamera() {
+		assertEquals(
+			45f,
+			FlightViewGeometry.viewElevationDegrees(
+				FlightWindowPlacement(verticalOffsetMeters = FlightWindowPlacement.MAX_VERTICAL_OFFSET_METERS),
+				FlightWindowLook(pitchDegrees = FlightWindowLook.MAX_PITCH_DEGREES)
+			),
+			0f
+		)
+		assertEquals(
+			-89f,
+			FlightViewGeometry.viewElevationDegrees(
+				FlightWindowPlacement(verticalOffsetMeters = FlightWindowPlacement.MIN_VERTICAL_OFFSET_METERS),
+				FlightWindowLook(pitchDegrees = FlightWindowLook.MIN_PITCH_DEGREES)
+			),
+			0f
+		)
+	}
+
+	@Test
 	fun hublotPinchUsesHalfTheLogarithmicZoomMovement() {
 		assertEquals(2f, dampedFlightPinchFactor(4f), 0.0001f)
 		assertEquals(0.5f, dampedFlightPinchFactor(0.25f), 0.0001f)
@@ -562,6 +584,66 @@ class FlightModeLogicTest {
 		assertEquals(255, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 0.0))
 		assertEquals(128, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 80.0))
 		assertEquals(32, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 200.0))
+		assertEquals(255, FlightTerrainRefinementPolicy.FINE_GRID_QUADS)
+		assertEquals(128, FlightTerrainRefinementPolicy.MIDDLE_GRID_QUADS)
+	}
+
+	@Test
+	fun terrariumZoomTwelveIsTwiceAsFineAsZoomEleven() {
+		val zoom11 = FlightTerrainTilePlanner.groundResolutionMeters(45.0, 11)
+		val zoom12 = FlightTerrainTilePlanner.groundResolutionMeters(45.0, 12)
+
+		assertEquals(zoom11 / 2.0, zoom12, 0.0001)
+		assertTrue(zoom11 in 53.0..56.0)
+		assertTrue(zoom12 in 26.0..28.0)
+	}
+
+	@Test
+	fun refinementPlannerKeepsTheFinePatchBoundedAtTheRequestedZoom() {
+		val plan = FlightTerrainTilePlanner.refinementPlan(
+			foci = listOf(
+				FlightTerrainDetailFocus(48.0, 2.0),
+				FlightTerrainDetailFocus(48.2, 2.4)
+			),
+			radiusKm = FlightTerrainRefinementPolicy.FINE_RADIUS_KM,
+			zoom = 12,
+			maxTiles = FlightTerrainRefinementPolicy.MAXIMUM_FINE_TILES
+		)
+
+		assertEquals(12, plan.zoom)
+		assertTrue(plan.tiles.isNotEmpty())
+		assertTrue(plan.tiles.size <= FlightTerrainRefinementPolicy.MAXIMUM_FINE_TILES)
+		assertTrue(plan.tiles.all { it.zoom == 12 })
+	}
+
+	@Test
+	fun refinementMeshReusesTheCorrectPartOfItsParentSatelliteTexture() {
+		val base = TerrainTileId(10, 518, 352)
+		val child = TerrainTileId(12, base.x * 4 + 2, base.y * 4 + 1)
+		val baseTerrain = TerrariumTile(base, 256, 256, FloatArray(256 * 256) { 100f })
+		val childTerrain = TerrariumTile(child, 256, 256, FloatArray(256 * 256) { 150f })
+		val mesh = FlightTerrainMeshBuilder.buildRefinementMeshes(
+			baseZoom = base.zoom,
+			plan = TerrainTilePlan(child.zoom, listOf(child)),
+			tiles = mapOf(child to childTerrain),
+			boundaryZoom = base.zoom,
+			boundaryTiles = mapOf(base to baseTerrain),
+			baseSatelliteTexturePaths = mapOf(base to "parent.jpg"),
+			baseStandardSatelliteTexturePaths = mapOf(base to "parent-standard.jpg"),
+			baseSatelliteTextureTiers = mapOf(base to FlightTerrainTextureTier.HIGH),
+			coordinateOriginLatitude = 48.0,
+			coordinateOriginLongitude = 2.0,
+			geometryQuadsByTile = mapOf(child to 32),
+			geometryCache = null
+		).single()
+		val lastVertexOffset = mesh.vertices.size - FlightTerrainMeshBuilder.VERTEX_COMPONENTS
+
+		assertEquals(2, mesh.refinementLevel)
+		assertEquals("parent.jpg", mesh.satelliteTexturePath)
+		assertEquals(0.5f, mesh.vertices[7], 0.0001f)
+		assertEquals(0.25f, mesh.vertices[8], 0.0001f)
+		assertEquals(0.75f, mesh.vertices[lastVertexOffset + 7], 0.0001f)
+		assertEquals(0.5f, mesh.vertices[lastVertexOffset + 8], 0.0001f)
 	}
 
 	@Test

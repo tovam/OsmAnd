@@ -146,6 +146,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onCancelFlightStart = viewModel::cancelFlightStart,
 					onRemoveFlightSpan = viewModel::removeFlightSpan,
 					onSetSatelliteQuality = viewModel::setSatelliteQuality,
+					onSetTerrainFineZoom = viewModel::setTerrainFineZoom,
+					onSetTerrainMiddleZoom = viewModel::setTerrainMiddleZoom,
 					onSetSatelliteQualityOverlay = viewModel::setSatelliteQualityOverlay,
 					onSetRecordingPolicy = viewModel::setRecordingPolicy,
 					onSetPhotoSources = viewModel::setPhotoSources,

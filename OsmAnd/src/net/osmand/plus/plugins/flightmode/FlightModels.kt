@@ -158,12 +158,19 @@ data class FlightPlan(
 	val stops: List<FlightStop>,
 	val terrainCorridorKm: Int = 300,
 	val detailedSatelliteRadiusKm: Int = 300,
+	val terrainFineZoom: Int = DEFAULT_TERRAIN_FINE_ZOOM,
+	val terrainMiddleZoom: Int = DEFAULT_TERRAIN_MIDDLE_ZOOM,
 	val satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
 	val shadowsEnabled: Boolean = true,
 	val shadowIntensity: Float = 0.85f,
 	val resumeAfterRestart: Boolean = true
 ) {
 	companion object {
+		const val MIN_TERRAIN_DETAIL_ZOOM = 9
+		const val MAX_TERRAIN_DETAIL_ZOOM = 12
+		const val DEFAULT_TERRAIN_FINE_ZOOM = 12
+		const val DEFAULT_TERRAIN_MIDDLE_ZOOM = 11
+
 		fun preview(): FlightPlan = FlightPlan(
 			stops = listOf(
 				FlightStop("Paris", 49.0097, 2.5479),

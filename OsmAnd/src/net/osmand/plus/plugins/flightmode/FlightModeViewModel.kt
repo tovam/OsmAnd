@@ -628,6 +628,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val scene = uiState.terrainScene
 		if (!force && scene != null && scene.radiusKm == uiState.plan.terrainCorridorKm &&
 			scene.satelliteQuality == uiState.plan.satelliteQuality &&
+			scene.terrainFineZoom == uiState.plan.terrainFineZoom &&
+			scene.terrainMiddleZoom == uiState.plan.terrainMiddleZoom &&
 			(!includeNativeMap || scene.nativeMapRequested)
 		) {
 			val distance = FlightTerrainTilePlanner.distanceKm(
@@ -659,6 +661,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					longitude = sample.longitude,
 					radiusKm = uiState.plan.terrainCorridorKm,
 					satelliteQuality = uiState.plan.satelliteQuality,
+					terrainFineZoom = uiState.plan.terrainFineZoom,
+					terrainMiddleZoom = uiState.plan.terrainMiddleZoom,
 					detailFocus = uiState.terrainDetailFocus,
 					includeNativeMap = includeNativeMap,
 					previousScene = scene,
@@ -907,6 +911,30 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun setSatelliteQuality(quality: FlightSatelliteQuality) {
 		if (uiState.plan.satelliteQuality == quality) return
 		updatePlan(uiState.plan.copy(satelliteQuality = quality))
+		requestedTerrainCenter = null
+		(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
+	}
+
+	fun setTerrainFineZoom(zoom: Int) {
+		val fineZoom = zoom.coerceIn(
+			FlightPlan.MIN_TERRAIN_DETAIL_ZOOM,
+			FlightPlan.MAX_TERRAIN_DETAIL_ZOOM
+		)
+		val middleZoom = uiState.plan.terrainMiddleZoom.coerceAtMost(fineZoom)
+		if (uiState.plan.terrainFineZoom == fineZoom && uiState.plan.terrainMiddleZoom == middleZoom) return
+		updatePlan(uiState.plan.copy(terrainFineZoom = fineZoom, terrainMiddleZoom = middleZoom))
+		requestedTerrainCenter = null
+		(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
+	}
+
+	fun setTerrainMiddleZoom(zoom: Int) {
+		val middleZoom = zoom.coerceIn(
+			FlightPlan.MIN_TERRAIN_DETAIL_ZOOM,
+			FlightPlan.MAX_TERRAIN_DETAIL_ZOOM
+		)
+		val fineZoom = uiState.plan.terrainFineZoom.coerceAtLeast(middleZoom)
+		if (uiState.plan.terrainFineZoom == fineZoom && uiState.plan.terrainMiddleZoom == middleZoom) return
+		updatePlan(uiState.plan.copy(terrainFineZoom = fineZoom, terrainMiddleZoom = middleZoom))
 		requestedTerrainCenter = null
 		(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
 	}

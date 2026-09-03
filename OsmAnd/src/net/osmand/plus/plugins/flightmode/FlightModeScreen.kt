@@ -179,6 +179,8 @@ fun FlightModeScreen(
 	onCancelFlightStart: () -> Unit,
 	onRemoveFlightSpan: (Int) -> Unit,
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
+	onSetTerrainFineZoom: (Int) -> Unit,
+	onSetTerrainMiddleZoom: (Int) -> Unit,
 	onSetSatelliteQualityOverlay: (Boolean) -> Unit,
 	onSetRecordingPolicy: (FlightRecordingPolicy) -> Unit,
 	onSetPhotoSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit,
@@ -315,6 +317,8 @@ fun FlightModeScreen(
 					onSetCabinTransparent = onSetCabinTransparent,
 					onSetCabinHidden = onSetCabinHidden,
 					onSetSatelliteQuality = onSetSatelliteQuality,
+					onSetTerrainFineZoom = onSetTerrainFineZoom,
+					onSetTerrainMiddleZoom = onSetTerrainMiddleZoom,
 					onSetSatelliteQualityOverlay = onSetSatelliteQualityOverlay,
 					onSetShadowsEnabled = { enabled -> onUpdatePlan(state.plan.copy(shadowsEnabled = enabled)) },
 					onSetShadowIntensity = { intensity ->
@@ -893,6 +897,8 @@ private fun WindowScreen(
 	onSetCabinTransparent: (Boolean) -> Unit,
 	onSetCabinHidden: (Boolean) -> Unit,
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
+	onSetTerrainFineZoom: (Int) -> Unit,
+	onSetTerrainMiddleZoom: (Int) -> Unit,
 	onSetSatelliteQualityOverlay: (Boolean) -> Unit,
 	onSetShadowsEnabled: (Boolean) -> Unit,
 	onSetShadowIntensity: (Float) -> Unit,
@@ -969,6 +975,17 @@ private fun WindowScreen(
 			WindowPanel.VIEW -> {
 				LazyColumn(Modifier.fillMaxWidth().height(176.dp)) {
 					item { SatelliteQualitySelector(state.plan.satelliteQuality, onSetSatelliteQuality) }
+					item {
+						TerrainElevationZoomSelector(
+							latitude = state.snapshot?.sample?.latitude
+								?: state.plan.stops.firstOrNull { it.latitude != null }?.latitude,
+							fineZoom = state.plan.terrainFineZoom,
+							middleZoom = state.plan.terrainMiddleZoom,
+							baseZoom = state.terrainScene?.zoom,
+							onSetFineZoom = onSetTerrainFineZoom,
+							onSetMiddleZoom = onSetTerrainMiddleZoom
+						)
+					}
 					item {
 						SatelliteQualityOverlayControl(
 							show = state.showSatelliteQualityOverlay,
@@ -1193,6 +1210,104 @@ private fun SatelliteQualitySelector(
 						FlightSatelliteQuality.ULTRA_PLUS -> stringResource(R.string.flight_mode_satellite_quality_ultra_plus)
 					},
 					color = if (selected) FlightBlue else FlightText,
+					fontSize = 8.sp,
+					fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun TerrainElevationZoomSelector(
+	latitude: Double?,
+	fineZoom: Int,
+	middleZoom: Int,
+	baseZoom: Int?,
+	onSetFineZoom: (Int) -> Unit,
+	onSetMiddleZoom: (Int) -> Unit
+) {
+	val representativeLatitude = latitude?.takeIf(Double::isFinite) ?: 45.0
+	val zoom11Resolution = FlightTerrainTilePlanner.groundResolutionMeters(representativeLatitude, 11).roundToInt()
+	val zoom12Resolution = FlightTerrainTilePlanner.groundResolutionMeters(representativeLatitude, 12).roundToInt()
+	Column(
+		Modifier.fillMaxWidth().background(FlightPanelStrong).border(1.dp, FlightLine)
+			.padding(horizontal = 9.dp, vertical = 6.dp),
+		verticalArrangement = Arrangement.spacedBy(4.dp)
+	) {
+		Text(
+			stringResource(R.string.flight_mode_terrain_detail_title).uppercase(),
+			color = FlightText,
+			fontSize = 8.sp,
+			fontWeight = FontWeight.Bold
+		)
+		Text(
+			stringResource(
+				R.string.flight_mode_terrain_zoom_help,
+				zoom11Resolution,
+				zoom12Resolution
+			),
+			color = FlightMuted,
+			fontSize = 7.sp,
+			lineHeight = 9.sp
+		)
+		TerrainElevationZoomRow(
+			label = stringResource(R.string.flight_mode_terrain_fine_zone),
+			zoom = fineZoom,
+			latitude = representativeLatitude,
+			onSetZoom = onSetFineZoom
+		)
+		TerrainElevationZoomRow(
+			label = stringResource(R.string.flight_mode_terrain_middle_zone),
+			zoom = middleZoom,
+			latitude = representativeLatitude,
+			onSetZoom = onSetMiddleZoom
+		)
+		Text(
+			stringResource(
+				R.string.flight_mode_terrain_far_zone,
+				baseZoom?.toString() ?: "auto"
+			),
+			color = FlightMuted,
+			fontSize = 7.sp
+		)
+	}
+}
+
+@Composable
+private fun TerrainElevationZoomRow(
+	label: String,
+	zoom: Int,
+	latitude: Double,
+	onSetZoom: (Int) -> Unit
+) {
+	val resolutionMeters = FlightTerrainTilePlanner.groundResolutionMeters(latitude, zoom).roundToInt()
+	Row(
+		Modifier.fillMaxWidth().height(30.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(4.dp)
+	) {
+		Column(Modifier.width(150.dp)) {
+			Text(label, color = FlightText, fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+			Text(
+				stringResource(R.string.flight_mode_terrain_zoom_resolution, zoom, resolutionMeters),
+				color = FlightMuted,
+				fontSize = 7.sp,
+				maxLines = 1
+			)
+		}
+		(FlightPlan.MIN_TERRAIN_DETAIL_ZOOM..FlightPlan.MAX_TERRAIN_DETAIL_ZOOM).forEach { candidate ->
+			val selected = candidate == zoom
+			Box(
+				Modifier.weight(1f).height(23.dp)
+					.background(if (selected) FlightOrange.copy(alpha = 0.16f) else Color.Transparent)
+					.border(1.dp, if (selected) FlightOrange else FlightLine)
+					.clickable { onSetZoom(candidate) },
+				contentAlignment = Alignment.Center
+			) {
+				Text(
+					"z$candidate",
+					color = if (selected) FlightOrange else FlightText,
 					fontSize = 8.sp,
 					fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
 				)
@@ -3634,6 +3749,8 @@ private fun FlightModePreview(state: FlightUiState) {
 		onRetryTerrain = {}, onTerrainRendererError = {}, onTerrainRenderStats = {}, onSetMapFollowing = {}, onShowTrackPoints = {},
 		onMarkFlightStart = {}, onMarkFlightEnd = {}, onCancelFlightStart = {}, onRemoveFlightSpan = {},
 		onSetSatelliteQuality = {},
+		onSetTerrainFineZoom = {},
+		onSetTerrainMiddleZoom = {},
 		onSetSatelliteQualityOverlay = {},
 		onSetRecordingPolicy = {}, onSetPhotoSources = { _, _, _, _ -> },
 		onPhotoAction = {}, onValidatePhotos = {}, onDiscardPhotos = {}, onSelectPhoto = {},

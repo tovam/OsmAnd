@@ -87,6 +87,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		longitude: Double,
 		radiusKm: Int,
 		satelliteQuality: FlightSatelliteQuality,
+		terrainFineZoom: Int,
+		terrainMiddleZoom: Int,
 		detailFocus: FlightTerrainDetailFocus?,
 		includeNativeMap: Boolean,
 		previousScene: FlightTerrainScene? = null,
@@ -100,6 +102,34 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val origin = coordinateOriginFor(latitude, longitude)
 		val orderedTiles = plan.tiles.sortedBy { tile -> tileDistanceKm(tile, latitude, longitude) }
 		val orderedPlan = plan.copy(tiles = orderedTiles)
+		val safeFineZoom = terrainFineZoom.coerceIn(
+			FlightPlan.MIN_TERRAIN_DETAIL_ZOOM,
+			FlightPlan.MAX_TERRAIN_DETAIL_ZOOM
+		)
+		val safeMiddleZoom = terrainMiddleZoom.coerceIn(
+			FlightPlan.MIN_TERRAIN_DETAIL_ZOOM,
+			safeFineZoom
+		)
+		val refinementFoci = buildList {
+			add(FlightTerrainDetailFocus(latitude, longitude))
+			if (detailFocus != null && FlightTerrainTilePlanner.distanceKm(
+					latitude,
+					longitude,
+					detailFocus.latitude,
+					detailFocus.longitude
+				) >= FlightTerrainRefinementPolicy.MINIMUM_DISTINCT_FOCUS_KM
+			) add(detailFocus)
+		}
+		val refinementLayers = refinementLayers(
+			baseZoom = plan.zoom,
+			foci = refinementFoci,
+			fineZoom = safeFineZoom,
+			middleZoom = safeMiddleZoom
+		)
+		val refinementQuadsByTile = refinementLayers
+			.flatMap { it.quadsByTile.entries }
+			.associate { it.toPair() }
+		val requestedRefinementTiles = refinementLayers.flatMapTo(linkedSetOf()) { it.plan.tiles }
 		val geometryQuadsByTile = orderedTiles.associateWith { tile ->
 			FlightTerrainGeometryLodPolicy.quadsForDistance(
 				radiusKm,
@@ -115,12 +145,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			requested = satelliteQuality
 		)
 		val tiles = linkedMapOf<TerrainTileId, TerrariumTile>()
+		val refinementTiles = linkedMapOf<TerrainTileId, TerrariumTile>()
 		val standardTexturePaths = linkedMapOf<TerrainTileId, String>()
 		val detailedTexturePaths = linkedMapOf<TerrainTileId, String>()
 		val satelliteTexturePaths = linkedMapOf<TerrainTileId, String>()
 		val activeTextureTiers = linkedMapOf<TerrainTileId, FlightTerrainTextureTier>()
 		val downloadedTileIds = linkedSetOf<TerrainTileId>()
 		var failed = 0
+		var refinementFailed = 0
 		var satelliteFailed = 0
 		var detailedFailed = 0
 		val satelliteDownloadsEnabled = AtomicBoolean(true)
@@ -189,6 +221,11 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					geometryQuadsByTile[tileId] ?: FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS
 				)
 			}
+			val refinementGeometryBytes = refinementTiles.keys.sumOf { tileId ->
+				FlightTerrainGeometryLodPolicy.estimatedBytes(
+					refinementQuadsByTile[tileId] ?: FlightTerrainRefinementPolicy.MIDDLE_GRID_QUADS
+				)
+			}
 			val placeholderBytes = (orderedTiles.size - tiles.size).coerceAtLeast(0).toLong() *
 				ESTIMATED_PLACEHOLDER_GEOMETRY_BYTES_PER_TILE
 			val standardBaseBytes = orderedTiles.count { standardTexturePaths[it] != null }.toLong() *
@@ -199,7 +236,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					tier == FlightTerrainTextureTier.ULTRA_PLUS
 				) FlightTerrainLodPolicy.estimatedTextureBytes(tier) else 0L
 			}
-			return geometryBytes + placeholderBytes + standardBaseBytes + detailBytes
+			return geometryBytes + refinementGeometryBytes + placeholderBytes + standardBaseBytes + detailBytes
 		}
 
 		fun status(
@@ -210,10 +247,10 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			nativeMapFailedTiles: Int = 0
 		): FlightTerrainStatus = FlightTerrainStatus(
 			phase = phase,
-			requestedTiles = orderedTiles.size,
-			availableTiles = tiles.size,
+			requestedTiles = orderedTiles.size + requestedRefinementTiles.size,
+			availableTiles = tiles.size + refinementTiles.size,
 			downloadedTiles = downloadedTileIds.size,
-			failedTiles = failed,
+			failedTiles = failed + refinementFailed,
 			satelliteTiles = standardTexturePaths.size,
 			satelliteFailedTiles = satelliteFailed,
 			nativeMapTiles = nativeMapTiles,
@@ -238,37 +275,97 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			message = message
 		)
 
+		suspend fun buildBaseScene(
+			nativeMapTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+			nativeMapFailedTiles: Int = 0
+		): FlightTerrainScene = withContext(Dispatchers.Default) {
+			FlightTerrainMeshBuilder.build(
+				centerLatitude = latitude,
+				centerLongitude = longitude,
+				detailFocus = detailFocus,
+				radiusKm = radiusKm,
+				plan = orderedPlan,
+				tiles = tiles.toMap(),
+				satelliteQuality = satelliteQuality,
+				terrainFineZoom = safeFineZoom,
+				terrainMiddleZoom = safeMiddleZoom,
+				satelliteTexturePaths = satelliteTexturePaths.toMap(),
+				standardSatelliteTexturePaths = standardTexturePaths.toMap(),
+				satelliteTextureTiers = activeTextureTiers.toMap(),
+				nativeMapTexturePaths = nativeMapTexturePaths,
+				nativeMapFailedTiles = nativeMapFailedTiles,
+				nativeMapRequested = includeNativeMap,
+				coordinateOriginLatitude = origin.first,
+				coordinateOriginLongitude = origin.second,
+				geometryQuadsByTile = geometryQuadsByTile,
+				geometryCache = geometryCache,
+				geometryGeneration = sceneGeometryGeneration(tiles.keys, geometryQuadsByTile),
+				includePlaceholders = true
+			)
+		}
+
+		suspend fun withRefinementMeshes(
+			baseScene: FlightTerrainScene,
+			retainPreviousRefinements: Boolean
+		): FlightTerrainScene = withContext(Dispatchers.Default) {
+			val meshes = baseScene.meshes.filter { it.refinementLevel == 0 }.toMutableList()
+			var boundaryZoom = plan.zoom
+			var boundaryTiles: Map<TerrainTileId, TerrariumTile> = tiles.toMap()
+			refinementLayers.forEach { layer ->
+				val availableTiles = layer.plan.tiles.mapNotNull { tileId ->
+					refinementTiles[tileId]?.let { tileId to it }
+				}.toMap()
+				if (availableTiles.isNotEmpty()) {
+					val availablePlan = layer.plan.copy(tiles = layer.plan.tiles.filter(availableTiles::containsKey))
+					meshes += FlightTerrainMeshBuilder.buildRefinementMeshes(
+						baseZoom = plan.zoom,
+						plan = availablePlan,
+						tiles = availableTiles,
+						boundaryZoom = boundaryZoom,
+						boundaryTiles = boundaryTiles,
+						baseSatelliteTexturePaths = satelliteTexturePaths,
+						baseStandardSatelliteTexturePaths = standardTexturePaths,
+						baseSatelliteTextureTiers = activeTextureTiers,
+						coordinateOriginLatitude = origin.first,
+						coordinateOriginLongitude = origin.second,
+						geometryQuadsByTile = layer.quadsByTile,
+						geometryCache = geometryCache
+					)
+					boundaryZoom = layer.plan.zoom
+					boundaryTiles = availableTiles
+				}
+			}
+			if (retainPreviousRefinements && previousScene != null &&
+				previousScene.coordinateOriginLatitude == baseScene.coordinateOriginLatitude &&
+				previousScene.coordinateOriginLongitude == baseScene.coordinateOriginLongitude
+			) {
+				val present = meshes.mapTo(hashSetOf()) { it.tileId }
+				meshes += previousScene.meshes.filter { it.refinementLevel > 0 && it.tileId !in present }
+			}
+			val combinedQuads = geometryQuadsByTile + refinementQuadsByTile
+			baseScene.copy(
+				meshes = meshes.sortedBy { it.tileId.zoom },
+				loadedTiles = tiles.size + refinementTiles.size,
+				missingTiles = (orderedTiles.size - tiles.size).coerceAtLeast(0) +
+					(requestedRefinementTiles.size - refinementTiles.size).coerceAtLeast(0),
+				satelliteTiles = meshes.count { it.satelliteTexturePath != null },
+				geometryGeneration = sceneGeometryGeneration(meshes.map { it.tileId }, combinedQuads),
+				generation = System.nanoTime()
+			)
+		}
+
 		suspend fun publishProgressiveScene(
 			force: Boolean = false,
-			retainPreviousCoverage: Boolean = false
+			retainPreviousCoverage: Boolean = true
 		) {
 			val now = System.nanoTime()
 			val enoughNewTiles = visualUpdates - lastPublishedVisualUpdates >= SCENE_PUBLISH_TILE_BATCH
 			val enoughTime = now - lastScenePublishNanos >= SCENE_PUBLISH_INTERVAL_NANOS
 			if (!force && latestScene != null && !enoughNewTiles && !enoughTime) return
-			val built = withContext(Dispatchers.Default) {
-				FlightTerrainMeshBuilder.build(
-					centerLatitude = latitude,
-					centerLongitude = longitude,
-					detailFocus = detailFocus,
-					radiusKm = radiusKm,
-					plan = orderedPlan,
-					tiles = tiles.toMap(),
-					satelliteQuality = satelliteQuality,
-					satelliteTexturePaths = satelliteTexturePaths.toMap(),
-					standardSatelliteTexturePaths = standardTexturePaths.toMap(),
-					satelliteTextureTiers = activeTextureTiers.toMap(),
-					nativeMapTexturePaths = emptyMap(),
-					nativeMapFailedTiles = 0,
-					nativeMapRequested = includeNativeMap,
-					coordinateOriginLatitude = origin.first,
-					coordinateOriginLongitude = origin.second,
-					geometryQuadsByTile = geometryQuadsByTile,
-					geometryCache = geometryCache,
-					geometryGeneration = sceneGeometryGeneration(tiles.keys, geometryQuadsByTile),
-					includePlaceholders = true
-				)
-			}
+			val built = withRefinementMeshes(
+				baseScene = buildBaseScene(),
+				retainPreviousRefinements = true
+			)
 			latestScene = if (retainPreviousCoverage && previousScene != null &&
 				previousScene.coordinateOriginLatitude == built.coordinateOriginLatitude &&
 				previousScene.coordinateOriginLongitude == built.coordinateOriginLongitude
@@ -318,7 +415,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				)
 				publishProgressiveScene(
 					force = index == terrainRequests.lastIndex,
-					retainPreviousCoverage = index != terrainRequests.lastIndex
+					retainPreviousCoverage = true
 				)
 			}
 			producer.join()
@@ -327,7 +424,53 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		}
 		if (tiles.isEmpty()) throw IOException("Aucune tuile de relief disponible")
 		if (terrainRequests.isEmpty()) {
-			publishProgressiveScene(force = true, retainPreviousCoverage = false)
+			publishProgressiveScene(force = true, retainPreviousCoverage = true)
+		}
+
+		// Elevation refinement is independent from imagery and is loaded before the
+		// satellite queue. The complete coarse scene remains visible while bounded
+		// z11/z12 patches appear around the aircraft and stable gaze focus.
+		requestedRefinementTiles.forEach { tileId ->
+			cachedDecodedTerrain(tileId)?.let { tile ->
+				refinementTiles[tileId] = tile
+				memoryCacheHits++
+			}
+		}
+		if (refinementTiles.isNotEmpty()) {
+			val cachedRefinedScene = withRefinementMeshes(buildBaseScene(), retainPreviousRefinements = true)
+			latestScene = cachedRefinedScene
+			onScene(cachedRefinedScene)
+		}
+		refinementLayers.forEach { layer ->
+			val missingLayerTiles = layer.plan.tiles.filterNot(refinementTiles::containsKey)
+			for (chunk in missingLayerTiles.chunked(PARALLEL_DOWNLOADS)) {
+				val results = coroutineScope {
+					chunk.map { tileId ->
+						async(Dispatchers.IO) { runCatching { loadTerrainTile(tileId) } }
+					}.awaitAll()
+				}
+				results.forEach { result ->
+					result.onSuccess { loaded ->
+						refinementTiles[loaded.tile.id] = loaded.tile
+						invalidateGeometryAround(loaded.tile.id)
+						memoryCacheHits += loaded.memoryCacheHits
+						diskCacheHits += loaded.diskCacheHits
+						networkRequests += loaded.networkRequests
+						if (loaded.networkRequests > 0) downloadedTileIds += loaded.tile.id
+						bytesDownloaded += loaded.downloadedBytes
+						downloadRate.record(loaded.downloadedBytes)
+					}.onFailure { refinementFailed++ }
+				}
+				onStatus(
+					status(
+						phase = FlightTerrainPhase.DOWNLOADING,
+						message = "Relief z${layer.plan.zoom} ${layer.plan.tiles.count(refinementTiles::containsKey)}/${layer.plan.tiles.size}"
+					)
+				)
+				val refinedScene = withRefinementMeshes(buildBaseScene(), retainPreviousRefinements = true)
+				latestScene = refinedScene
+				onScene(refinedScene)
+			}
 		}
 
 		// Standard is the durable base texture for the complete visible scene. It is
@@ -437,6 +580,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				results.close()
 			}
 		}
+
 		val buildingStatus = status(
 			phase = FlightTerrainPhase.BUILDING,
 			message = when {
@@ -459,31 +603,82 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		} else {
 			FlightNativeMapTextureResult(emptyMap(), 0)
 		}
-		val finalScene = withContext(Dispatchers.Default) {
-			FlightTerrainMeshBuilder.build(
-				centerLatitude = latitude,
-				centerLongitude = longitude,
-				detailFocus = detailFocus,
-				radiusKm = radiusKm,
-				plan = orderedPlan,
-				tiles = tiles,
-				satelliteQuality = satelliteQuality,
-				satelliteTexturePaths = satelliteTexturePaths,
-				standardSatelliteTexturePaths = standardTexturePaths,
-				satelliteTextureTiers = activeTextureTiers,
-				nativeMapTexturePaths = nativeMapResult.texturePaths,
-				nativeMapFailedTiles = nativeMapResult.failedTiles,
-				nativeMapRequested = includeNativeMap,
-				coordinateOriginLatitude = origin.first,
-				coordinateOriginLongitude = origin.second,
-				geometryQuadsByTile = geometryQuadsByTile,
-				geometryCache = geometryCache,
-				geometryGeneration = sceneGeometryGeneration(tiles.keys, geometryQuadsByTile),
-				includePlaceholders = true
-			)
-		}
+		val finalBaseScene = buildBaseScene(
+			nativeMapTexturePaths = nativeMapResult.texturePaths,
+			nativeMapFailedTiles = nativeMapResult.failedTiles
+		)
+		val finalScene = withRefinementMeshes(finalBaseScene, retainPreviousRefinements = false)
 		onScene(finalScene)
 		return finalScene
+	}
+
+	private fun refinementLayers(
+		baseZoom: Int,
+		foci: List<FlightTerrainDetailFocus>,
+		fineZoom: Int,
+		middleZoom: Int
+	): List<TerrainRefinementLayer> {
+		val initialMiddlePlan = middleZoom.takeIf { it > baseZoom }?.let { zoom ->
+			FlightTerrainTilePlanner.refinementPlan(
+				foci = foci,
+				radiusKm = FlightTerrainRefinementPolicy.MIDDLE_RADIUS_KM,
+				zoom = zoom,
+				maxTiles = FlightTerrainRefinementPolicy.MAXIMUM_MIDDLE_TILES
+			)
+		}
+		val finePlan = fineZoom.takeIf { it > baseZoom }?.let { zoom ->
+			FlightTerrainTilePlanner.refinementPlan(
+				foci = foci,
+				radiusKm = FlightTerrainRefinementPolicy.FINE_RADIUS_KM,
+				zoom = zoom,
+				maxTiles = FlightTerrainRefinementPolicy.MAXIMUM_FINE_TILES
+			)
+		}
+		val middlePlan = if (initialMiddlePlan != null && finePlan != null &&
+			initialMiddlePlan.zoom < finePlan.zoom
+		) {
+			val factor = 1 shl (finePlan.zoom - initialMiddlePlan.zoom)
+			val fineParents = finePlan.tiles.map { tile ->
+				TerrainTileId(initialMiddlePlan.zoom, tile.x / factor, tile.y / factor)
+			}.distinct()
+			initialMiddlePlan.copy(
+				tiles = (fineParents + initialMiddlePlan.tiles).distinct()
+					.take(FlightTerrainRefinementPolicy.MAXIMUM_MIDDLE_TILES)
+			)
+		} else initialMiddlePlan
+		if (middlePlan == null && finePlan == null) return emptyList()
+		if (middlePlan != null && finePlan != null && middlePlan.zoom == finePlan.zoom) {
+			val fineIds = finePlan.tiles.toHashSet()
+			val tiles = (finePlan.tiles + middlePlan.tiles).distinct()
+			return listOf(
+				TerrainRefinementLayer(
+					plan = TerrainTilePlan(middlePlan.zoom, tiles),
+					quadsByTile = tiles.associateWith { tileId ->
+						if (tileId in fineIds) {
+							FlightTerrainRefinementPolicy.FINE_GRID_QUADS
+						} else FlightTerrainRefinementPolicy.MIDDLE_GRID_QUADS
+					}
+				)
+			)
+		}
+		return buildList {
+			middlePlan?.let { plan ->
+				add(
+					TerrainRefinementLayer(
+						plan,
+						plan.tiles.associateWith { FlightTerrainRefinementPolicy.MIDDLE_GRID_QUADS }
+					)
+				)
+			}
+			finePlan?.let { plan ->
+				add(
+					TerrainRefinementLayer(
+						plan,
+						plan.tiles.associateWith { FlightTerrainRefinementPolicy.FINE_GRID_QUADS }
+					)
+				)
+			}
+		}
 	}
 
 	suspend fun preloadCorridor(
@@ -1055,6 +1250,11 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val networkRequests: Int
 	)
 
+	private data class TerrainRefinementLayer(
+		val plan: TerrainTilePlan,
+		val quadsByTile: Map<TerrainTileId, Int>
+	)
+
 	private class DownloadRateTracker {
 		private val samples = ArrayDeque<Pair<Long, Long>>()
 
@@ -1098,7 +1298,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		private const val COMPOSITE_JPEG_QUALITY = 92
 		private const val MAXIMUM_DECODED_TERRAIN_TILES = 384
 		private const val MAXIMUM_GEOMETRY_CACHE_TILES = 384
-		private const val MAXIMUM_GEOMETRY_CACHE_BYTES = 96L * 1_024L * 1_024L
+		private const val MAXIMUM_GEOMETRY_CACHE_BYTES = 128L * 1_024L * 1_024L
 		private const val MAXIMUM_LOD_HISTORY_TILES = 2_048
 		private const val LOD_HYSTERESIS_FACTOR = 1.18
 		// Keeps a continental trip resident while bounding float-coordinate error in
