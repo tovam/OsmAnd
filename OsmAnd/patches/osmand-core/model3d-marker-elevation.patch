@@ -1,3 +1,52 @@
+diff --git a/include/OsmAndCore/CommonTypes.h b/include/OsmAndCore/CommonTypes.h
+--- a/include/OsmAndCore/CommonTypes.h
++++ b/include/OsmAndCore/CommonTypes.h
+@@ -120,5 +120,9 @@ namespace OsmAnd
+         MaxZoomLevel = ZoomLevel31,
+     };
+     enum {
++#if defined(SWIG)
++        ZoomLevelsCount = 32
++#else
+         ZoomLevelsCount = static_cast<unsigned>(ZoomLevel::MaxZoomLevel) + 1u
++#endif
+     };
+diff --git a/include/OsmAndCore/Data/DataCommonTypes.h b/include/OsmAndCore/Data/DataCommonTypes.h
+--- a/include/OsmAndCore/Data/DataCommonTypes.h
++++ b/include/OsmAndCore/Data/DataCommonTypes.h
+@@ -160,5 +160,9 @@ namespace OsmAnd
+         __LAST
+     };
+     enum {
++#if defined(SWIG)
++        RoutingDataLevelsCount = 2
++#else
+         RoutingDataLevelsCount = static_cast<int>(RoutingDataLevel::__LAST)
++#endif
+     };
+diff --git a/include/OsmAndCore/Map/MapCommonTypes.h b/include/OsmAndCore/Map/MapCommonTypes.h
+--- a/include/OsmAndCore/Map/MapCommonTypes.h
++++ b/include/OsmAndCore/Map/MapCommonTypes.h
+@@ -50,5 +50,9 @@ namespace OsmAnd
+         __LAST
+     };
+     enum : unsigned int {
++#if defined(SWIG)
++        MapStyleRulesetTypesCount = 6
++#else
+         MapStyleRulesetTypesCount = static_cast<unsigned int>(MapStyleRulesetType::__LAST)
++#endif
+     };
+@@ -72,5 +76,9 @@ namespace OsmAnd
+         __LAST
+     };
+     enum : unsigned int {
++#if defined(SWIG)
++        MapStubStylesCount = 3,
++#else
+         MapStubStylesCount = static_cast<unsigned int>(MapStubStyle::__LAST),
++#endif
+     };
 diff --git a/include/OsmAndCore/Map/Model3DMapSymbol.h b/include/OsmAndCore/Map/Model3DMapSymbol.h
 --- a/include/OsmAndCore/Map/Model3DMapSymbol.h
 +++ b/include/OsmAndCore/Map/Model3DMapSymbol.h
