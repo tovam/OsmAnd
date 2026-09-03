@@ -30,6 +30,7 @@ import net.osmand.plus.plugins.flightmode.FlightWindowLook
 import net.osmand.plus.plugins.flightmode.FlightWindowGestureTarget
 import net.osmand.plus.plugins.flightmode.FlightWindowPhotoOverlay
 import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
+import net.osmand.plus.plugins.flightmode.FlightViewGeometry
 import net.osmand.plus.plugins.flightmode.geometry
 import net.osmand.plus.plugins.flightmode.dampedFlightPinchFactor
 import net.osmand.plus.plugins.flightmode.horizontalFieldOfViewDegrees
@@ -291,6 +292,68 @@ class FlightModeLogicTest {
 		assertEquals(90f, alignment.windowLook.yawDegrees, 0f)
 		assertEquals(45f, alignment.windowLook.pitchDegrees, 0f)
 		assertEquals(FlightPhotoWindowAlignment.MAX_ALTITUDE_OVERRIDE_METERS, alignment.altitudeOverrideMeters ?: 0f, 0f)
+	}
+
+	@Test
+	fun calibratedPhotoStoresBothTrackRelativeAndWorldSpaceCameraPose() {
+		val trip = FlightTrip(
+			"photo-pose",
+			listOf(
+				sample(0, 1_000L, 48.0, 2.0).copy(altitudeMeters = 10_000.0, bearingDegrees = 90f),
+				sample(1, 2_000L, 48.1, 2.2).copy(altitudeMeters = 11_000.0, bearingDegrees = 100f)
+			),
+			emptyList(),
+			true,
+			20_000.0,
+			"synthetic.gpx"
+		)
+		val placement = FlightWindowPlacement(side = FlightCabinSide.LEFT, zoom = 1.4f)
+		val look = FlightWindowLook(yawDegrees = 12f, pitchDegrees = -18f)
+
+		val pose = FlightViewGeometry.photoSpatialPose(trip, 0.25, placement, look, null)!!
+
+		assertEquals(0.25, pose.samplePosition, 0.0001)
+		assertEquals(48.025, pose.eyeLatitude, 0.0001)
+		assertEquals(2.05, pose.eyeLongitude, 0.0001)
+		assertEquals(10_250f, pose.eyeAltitudeMeters ?: -1f, 0.01f)
+		assertEquals(92.5f, pose.aircraftBearingDegrees, 0.01f)
+		assertEquals(14.5f, pose.viewAzimuthDegrees, 0.01f)
+		assertEquals(-18f, pose.viewElevationDegrees, 0.01f)
+		assertEquals(placement.verticalFieldOfViewDegrees(), pose.verticalFieldOfViewDegrees, 0.001f)
+	}
+
+	@Test
+	fun downwardWindowLookTargetsGroundButSkyAndDistantHorizonDoNot() {
+		val aircraft = sample(0, 1_000L, 48.0, 2.0).copy(
+			altitudeMeters = 10_000.0,
+			bearingDegrees = 90f
+		)
+		val placement = FlightWindowPlacement(side = FlightCabinSide.LEFT)
+		val ground = FlightViewGeometry.groundDetailFocus(
+			aircraft,
+			placement,
+			FlightWindowLook(pitchDegrees = -45f),
+			null
+		)!!
+
+		assertEquals(10.0, FlightTerrainTilePlanner.distanceKm(48.0, 2.0, ground.latitude, ground.longitude), 0.02)
+		assertTrue(ground.latitude > 48.0)
+		assertTrue(
+			FlightViewGeometry.groundDetailFocus(
+				aircraft,
+				placement,
+				FlightWindowLook(pitchDegrees = 5f),
+				null
+			) == null
+		)
+		assertTrue(
+			FlightViewGeometry.groundDetailFocus(
+				aircraft,
+				placement,
+				FlightWindowLook(pitchDegrees = -2f),
+				null
+			) == null
+		)
 	}
 
 	@Test
@@ -580,6 +643,28 @@ class FlightModeLogicTest {
 		assertEquals(
 			FlightTerrainTextureTier.HIGH,
 			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA_PLUS, 300, 80.0)
+		)
+	}
+
+	@Test
+	fun gazeFocusAddsAtLeastHighDetailWithoutReducingAircraftDetail() {
+		assertEquals(
+			FlightTerrainTextureTier.HIGH,
+			FlightTerrainLodPolicy.tierForFoci(
+				requested = FlightSatelliteQuality.STANDARD,
+				radiusKm = 300,
+				aircraftDistanceKm = 250.0,
+				detailFocusDistanceKm = 0.0
+			)
+		)
+		assertEquals(
+			FlightTerrainTextureTier.ULTRA_PLUS,
+			FlightTerrainLodPolicy.tierForFoci(
+				requested = FlightSatelliteQuality.ULTRA_PLUS,
+				radiusKm = 300,
+				aircraftDistanceKm = 0.0,
+				detailFocusDistanceKm = 80.0
+			)
 		)
 	}
 

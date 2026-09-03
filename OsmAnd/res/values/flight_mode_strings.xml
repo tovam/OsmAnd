@@ -67,6 +67,9 @@
 	<string name="flight_mode_satellite_quality_high">Haute</string>
 	<string name="flight_mode_satellite_quality_ultra">Ultra</string>
 	<string name="flight_mode_satellite_quality_ultra_plus">Ultra+</string>
+	<string name="flight_mode_satellite_quality_overview">Aperçu</string>
+	<string name="flight_mode_show_loaded_quality">Afficher la précision réellement chargée</string>
+	<string name="flight_mode_show_loaded_quality_help">La texture devient une couleur par niveau, après chargement GPU.</string>
 	<string name="flight_mode_sensors">Capteurs</string>
 	<string name="flight_mode_photo">Photo+</string>
 	<string name="flight_mode_altitude">Altitude</string>

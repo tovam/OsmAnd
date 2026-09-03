@@ -49,6 +49,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		shadingEnabled: Boolean,
 		shadowIntensity: Float,
 		satelliteOpacity: Float,
+		showSatelliteQualityOverlay: Boolean,
 		terrainOpacity: Float,
 		nativeMapOpacity: Float,
 		onRendererError: (String) -> Unit,
@@ -65,6 +66,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			shadingEnabled,
 			shadowIntensity,
 			satelliteOpacity,
+			showSatelliteQualityOverlay,
 			terrainOpacity,
 			nativeMapOpacity
 		)
@@ -93,6 +95,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var shadowIntensity: Float = 0.85f
 		@Volatile
 		private var satelliteOpacity: Float = 0.92f
+		@Volatile
+		private var showSatelliteQualityOverlay: Boolean = false
 		@Volatile
 		private var terrainOpacity: Float = 0.70f
 		@Volatile
@@ -129,6 +133,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var satelliteTextureLocation = -1
 		private var hasSatelliteTextureLocation = -1
 		private var satelliteOpacityLocation = -1
+		private var qualityDebugEnabledLocation = -1
+		private var qualityDebugColorLocation = -1
 		private var terrainOpacityLocation = -1
 		private var terrainReadyLocation = -1
 		private var nativeMapTextureLocation = -1
@@ -163,6 +169,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			shadingEnabled: Boolean,
 			shadowIntensity: Float,
 			satelliteOpacity: Float,
+			showSatelliteQualityOverlay: Boolean,
 			terrainOpacity: Float,
 			nativeMapOpacity: Float
 		) {
@@ -174,6 +181,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			this.shadingEnabled = shadingEnabled
 			this.shadowIntensity = shadowIntensity.coerceIn(0f, 1f)
 			this.satelliteOpacity = satelliteOpacity.coerceIn(0f, 1f)
+			this.showSatelliteQualityOverlay = showSatelliteQualityOverlay
 			this.terrainOpacity = terrainOpacity.coerceIn(0f, 1f)
 			this.nativeMapOpacity = nativeMapOpacity.coerceIn(0f, 1f)
 		}
@@ -197,6 +205,8 @@ class FlightTerrainView @JvmOverloads constructor(
 				satelliteTextureLocation = GLES20.glGetUniformLocation(program, "uSatelliteTexture")
 				hasSatelliteTextureLocation = GLES20.glGetUniformLocation(program, "uHasSatelliteTexture")
 				satelliteOpacityLocation = GLES20.glGetUniformLocation(program, "uSatelliteOpacity")
+				qualityDebugEnabledLocation = GLES20.glGetUniformLocation(program, "uQualityDebugEnabled")
+				qualityDebugColorLocation = GLES20.glGetUniformLocation(program, "uQualityDebugColor")
 				terrainOpacityLocation = GLES20.glGetUniformLocation(program, "uTerrainOpacity")
 				terrainReadyLocation = GLES20.glGetUniformLocation(program, "uTerrainReady")
 				nativeMapTextureLocation = GLES20.glGetUniformLocation(program, "uNativeMapTexture")
@@ -384,6 +394,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUniform3f(skyColorLocation, sky[0], sky[1], sky[2])
 			GLES20.glUniform1f(daylightLocation, daylight)
 			GLES20.glUniform1f(satelliteOpacityLocation, satelliteOpacity)
+			GLES20.glUniform1f(qualityDebugEnabledLocation, if (showSatelliteQualityOverlay) 1f else 0f)
 			GLES20.glUniform1f(terrainOpacityLocation, terrainOpacity)
 			GLES20.glUniform1f(nativeMapOpacityLocation, nativeMapOpacity)
 			GLES20.glUniform1f(shadowsEnabledLocation, shadowStrength)
@@ -462,6 +473,19 @@ class FlightTerrainView @JvmOverloads constructor(
 			} else if (mesh.satelliteTextureTier != FlightTerrainTextureTier.OVERVIEW) {
 				standardTextureId
 			} else 0
+			val activeTextureTier = when {
+				detailedTextureId != 0 -> mesh.satelliteTextureTier
+				standardTextureId != 0 && mesh.satelliteTextureTier != FlightTerrainTextureTier.OVERVIEW ->
+					FlightTerrainTextureTier.STANDARD
+				else -> FlightTerrainTextureTier.OVERVIEW
+			}
+			val qualityColor = qualityDebugColor(activeTextureTier)
+			GLES20.glUniform3f(
+				qualityDebugColorLocation,
+				qualityColor[0],
+				qualityColor[1],
+				qualityColor[2]
+			)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + SATELLITE_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, satelliteTextureId)
 			GLES20.glUniform1f(hasSatelliteTextureLocation, if (satelliteTextureId != 0) 1f else 0f)
@@ -471,6 +495,14 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUniform1f(hasNativeMapTextureLocation, if (nativeMapTextureId != 0) 1f else 0f)
 			GLES20.glUniform1f(terrainReadyLocation, if (mesh.terrainAvailable) 1f else 0f)
 			GLES20.glDrawElements(GLES20.GL_TRIANGLES, geometry.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+		}
+
+		private fun qualityDebugColor(tier: FlightTerrainTextureTier): FloatArray = when (tier) {
+			FlightTerrainTextureTier.OVERVIEW -> QUALITY_DEBUG_OVERVIEW
+			FlightTerrainTextureTier.STANDARD -> QUALITY_DEBUG_STANDARD
+			FlightTerrainTextureTier.HIGH -> QUALITY_DEBUG_HIGH
+			FlightTerrainTextureTier.ULTRA -> QUALITY_DEBUG_ULTRA
+			FlightTerrainTextureTier.ULTRA_PLUS -> QUALITY_DEBUG_ULTRA_PLUS
 		}
 
 		private fun clearDefaultFrameBuffer(sky: FloatArray) {
@@ -1001,6 +1033,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val NIGHT_SKY_RED = 0.015f
 			private const val NIGHT_SKY_GREEN = 0.025f
 			private const val NIGHT_SKY_BLUE = 0.065f
+			private val QUALITY_DEBUG_OVERVIEW = floatArrayOf(0.28f, 0.33f, 0.40f)
+			private val QUALITY_DEBUG_STANDARD = floatArrayOf(0.18f, 0.83f, 0.75f)
+			private val QUALITY_DEBUG_HIGH = floatArrayOf(1.00f, 0.78f, 0.25f)
+			private val QUALITY_DEBUG_ULTRA = floatArrayOf(1.00f, 0.34f, 0.18f)
+			private val QUALITY_DEBUG_ULTRA_PLUS = floatArrayOf(0.70f, 0.34f, 1.00f)
 			private const val VERTEX_SHADER = """
 				uniform mat4 uMvp;
 				uniform mat4 uLightMvp;
@@ -1046,6 +1083,8 @@ class FlightTerrainView @JvmOverloads constructor(
 				uniform sampler2D uSatelliteTexture;
 				uniform float uHasSatelliteTexture;
 				uniform float uSatelliteOpacity;
+				uniform float uQualityDebugEnabled;
+				uniform vec3 uQualityDebugColor;
 				uniform float uTerrainOpacity;
 				uniform float uTerrainReady;
 				uniform sampler2D uNativeMapTexture;
@@ -1121,9 +1160,14 @@ class FlightTerrainView @JvmOverloads constructor(
 					vec3 nativeMap = texture2D(uNativeMapTexture, vTexCoord).rgb;
 					base = mix(base, nativeMap, uHasNativeMapTexture * uNativeMapOpacity);
 					float castShadow = shadowVisibility();
-					vec3 lit = base * vLight * castShadow * mix(0.08, 1.0, uDaylight);
+					vec3 naturalLit = base * vLight * castShadow * mix(0.08, 1.0, uDaylight);
 					float fogAmount = smoothstep(0.68, 1.0, vFog);
-					gl_FragColor = vec4(mix(lit, uSkyColor, fogAmount), 1.0);
+					vec3 natural = mix(naturalLit, uSkyColor, fogAmount);
+					// Diagnostic colours describe what is actually bound on the GPU and must
+					// remain readable at night and through distant fog. A tiny normal term
+					// preserves the terrain shape.
+					vec3 diagnostic = uQualityDebugColor * (0.86 + 0.14 * vNdotL);
+					gl_FragColor = vec4(mix(natural, diagnostic, uQualityDebugEnabled), 1.0);
 				}
 			"""
 

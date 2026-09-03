@@ -535,7 +535,38 @@ class FlightJourneyStore(private val context: Context) {
 				put("yawDegrees", safe.windowLook.yawDegrees)
 				put("pitchDegrees", safe.windowLook.pitchDegrees)
 			})
+			putOptional("spatialPose", safe.spatialPose?.let(::photoSpatialPoseToJson))
 		}
+	}
+
+	private fun photoSpatialPoseToJson(pose: FlightPhotoSpatialPose): JSONObject = JSONObject().apply {
+		put("samplePosition", pose.samplePosition)
+		putOptional("timestampMillis", pose.timestampMillis)
+		put("eyeLatitude", pose.eyeLatitude)
+		put("eyeLongitude", pose.eyeLongitude)
+		putOptional("eyeAltitudeMeters", pose.eyeAltitudeMeters)
+		put("aircraftBearingDegrees", pose.aircraftBearingDegrees)
+		put("viewAzimuthDegrees", pose.viewAzimuthDegrees)
+		put("viewElevationDegrees", pose.viewElevationDegrees)
+		put("verticalFieldOfViewDegrees", pose.verticalFieldOfViewDegrees)
+	}
+
+	private fun photoSpatialPoseFromJson(json: JSONObject?): FlightPhotoSpatialPose? {
+		if (json == null) return null
+		val samplePosition = json.optNullableDouble("samplePosition") ?: return null
+		val eyeLatitude = json.optNullableDouble("eyeLatitude") ?: return null
+		val eyeLongitude = json.optNullableDouble("eyeLongitude") ?: return null
+		return FlightPhotoSpatialPose(
+			samplePosition = samplePosition,
+			timestampMillis = json.optNullableLong("timestampMillis"),
+			eyeLatitude = eyeLatitude,
+			eyeLongitude = eyeLongitude,
+			eyeAltitudeMeters = json.optNullableDouble("eyeAltitudeMeters")?.toFloat(),
+			aircraftBearingDegrees = json.optDouble("aircraftBearingDegrees", Double.NaN).toFloat(),
+			viewAzimuthDegrees = json.optDouble("viewAzimuthDegrees", Double.NaN).toFloat(),
+			viewElevationDegrees = json.optDouble("viewElevationDegrees", Double.NaN).toFloat(),
+			verticalFieldOfViewDegrees = json.optDouble("verticalFieldOfViewDegrees", Double.NaN).toFloat()
+		).clampedOrNull()
 	}
 
 	private fun photoWindowAlignmentFromJson(json: JSONObject?): FlightPhotoWindowAlignment? {
@@ -563,7 +594,8 @@ class FlightJourneyStore(private val context: Context) {
 				yawDegrees = lookJson.optDouble("yawDegrees", 0.0).toFloat(),
 				pitchDegrees = lookJson.optDouble("pitchDegrees", 0.0).toFloat()
 			),
-			altitudeOverrideMeters = json.optNullableDouble("altitudeOverrideMeters")?.toFloat()
+			altitudeOverrideMeters = json.optNullableDouble("altitudeOverrideMeters")?.toFloat(),
+			spatialPose = photoSpatialPoseFromJson(json.optJSONObject("spatialPose"))
 		).clamped()
 	}
 
@@ -987,7 +1019,7 @@ class FlightJourneyStore(private val context: Context) {
 
 	companion object {
 		const val ARCHIVE_EXTENSION = "osmandflight"
-		private const val SCHEMA_VERSION = 6
+		private const val SCHEMA_VERSION = 7
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"

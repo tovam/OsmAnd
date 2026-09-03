@@ -6,6 +6,26 @@ package net.osmand.plus.plugins.flightmode
  */
 object FlightTerrainLodPolicy {
 
+	/**
+	 * Combines the normal aircraft-centred rings with an optional gaze-centred ring.
+	 * The gaze centre is at least High even when the global display is Standard.
+	 */
+	fun tierForFoci(
+		requested: FlightSatelliteQuality,
+		radiusKm: Int,
+		aircraftDistanceKm: Double,
+		detailFocusDistanceKm: Double?
+	): FlightTerrainTextureTier {
+		val aircraftTier = tierForDistance(requested, radiusKm, aircraftDistanceKm)
+		val focusQuality = if (requested.ordinal < FlightSatelliteQuality.HIGH.ordinal) {
+			FlightSatelliteQuality.HIGH
+		} else requested
+		val focusTier = detailFocusDistanceKm?.let { distance ->
+			tierForDistance(focusQuality, radiusKm, distance)
+		}
+		return if (focusTier != null && focusTier.ordinal > aircraftTier.ordinal) focusTier else aircraftTier
+	}
+
 	fun tierForDistance(
 		requested: FlightSatelliteQuality,
 		radiusKm: Int,

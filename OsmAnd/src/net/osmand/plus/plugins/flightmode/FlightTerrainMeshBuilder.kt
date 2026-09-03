@@ -47,6 +47,7 @@ object FlightTerrainMeshBuilder {
 		plan: TerrainTilePlan,
 		tiles: Map<TerrainTileId, TerrariumTile>,
 		satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
+		detailFocus: FlightTerrainDetailFocus? = null,
 		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
 		standardSatelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
 		satelliteTextureTiers: Map<TerrainTileId, FlightTerrainTextureTier> = emptyMap(),
@@ -103,6 +104,7 @@ object FlightTerrainMeshBuilder {
 		return FlightTerrainScene(
 			centerLatitude = centerLatitude,
 			centerLongitude = centerLongitude,
+			detailFocus = detailFocus,
 			coordinateOriginLatitude = coordinateOriginLatitude,
 			coordinateOriginLongitude = coordinateOriginLongitude,
 			radiusKm = radiusKm,

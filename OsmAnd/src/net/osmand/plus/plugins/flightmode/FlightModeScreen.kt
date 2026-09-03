@@ -123,6 +123,11 @@ private val FlightOrange = Color(0xFFFF8B38)
 private val FlightBlue = Color(0xFF5DD8FF)
 private val FlightGreen = Color(0xFF7BE0A3)
 private val FlightWarning = Color(0xFFFFCC66)
+private val FlightQualityOverview = Color(0xFF475566)
+private val FlightQualityStandard = Color(0xFF2ED4BF)
+private val FlightQualityHigh = Color(0xFFFFC740)
+private val FlightQualityUltra = Color(0xFFFF572E)
+private val FlightQualityUltraPlus = Color(0xFFB357FF)
 private const val MAXIMUM_PHOTO_PREVIEW_PIXELS = 1_600
 
 private val PHOTO_TIME_COMPARATOR = compareBy<FlightPhotoAttachment>(
@@ -174,6 +179,7 @@ fun FlightModeScreen(
 	onCancelFlightStart: () -> Unit,
 	onRemoveFlightSpan: (Int) -> Unit,
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
+	onSetSatelliteQualityOverlay: (Boolean) -> Unit,
 	onSetRecordingPolicy: (FlightRecordingPolicy) -> Unit,
 	onSetPhotoSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit,
 	onPhotoAction: () -> Unit,
@@ -309,6 +315,7 @@ fun FlightModeScreen(
 					onSetCabinTransparent = onSetCabinTransparent,
 					onSetCabinHidden = onSetCabinHidden,
 					onSetSatelliteQuality = onSetSatelliteQuality,
+					onSetSatelliteQualityOverlay = onSetSatelliteQualityOverlay,
 					onSetShadowsEnabled = { enabled -> onUpdatePlan(state.plan.copy(shadowsEnabled = enabled)) },
 					onSetShadowIntensity = { intensity ->
 						onUpdatePlan(state.plan.copy(shadowIntensity = intensity.coerceIn(0f, 1f)))
@@ -886,6 +893,7 @@ private fun WindowScreen(
 	onSetCabinTransparent: (Boolean) -> Unit,
 	onSetCabinHidden: (Boolean) -> Unit,
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
+	onSetSatelliteQualityOverlay: (Boolean) -> Unit,
 	onSetShadowsEnabled: (Boolean) -> Unit,
 	onSetShadowIntensity: (Float) -> Unit,
 	onSetPhotoOpacity: (Float) -> Unit,
@@ -921,6 +929,7 @@ private fun WindowScreen(
 				shadowIntensity = state.plan.shadowIntensity,
 				satelliteOpacity = state.satelliteOpacity,
 				satelliteQuality = state.plan.satelliteQuality,
+				showSatelliteQualityOverlay = state.showSatelliteQualityOverlay,
 				photo = overlayPhoto,
 				photoOverlay = state.windowPhotoOverlay,
 				onSetSide = onSetSide,
@@ -960,6 +969,12 @@ private fun WindowScreen(
 			WindowPanel.VIEW -> {
 				LazyColumn(Modifier.fillMaxWidth().height(176.dp)) {
 					item { SatelliteQualitySelector(state.plan.satelliteQuality, onSetSatelliteQuality) }
+					item {
+						SatelliteQualityOverlayControl(
+							show = state.showSatelliteQualityOverlay,
+							onSetShow = onSetSatelliteQualityOverlay
+						)
+					}
 					item {
 						WindowSunControls(
 							enabled = state.plan.shadowsEnabled,
@@ -1181,6 +1196,54 @@ private fun SatelliteQualitySelector(
 					fontSize = 8.sp,
 					fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
 				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun SatelliteQualityOverlayControl(show: Boolean, onSetShow: (Boolean) -> Unit) {
+	Row(
+		Modifier.fillMaxWidth().height(34.dp).background(FlightPanelStrong).border(1.dp, FlightLine)
+			.padding(horizontal = 10.dp),
+		verticalAlignment = Alignment.CenterVertically
+	) {
+		Column(Modifier.weight(1f)) {
+			Text(
+				stringResource(R.string.flight_mode_show_loaded_quality),
+				color = if (show) FlightBlue else FlightText,
+				fontSize = 9.sp,
+				fontWeight = FontWeight.Bold,
+				maxLines = 1
+			)
+			Text(
+				stringResource(R.string.flight_mode_show_loaded_quality_help),
+				color = FlightMuted,
+				fontSize = 7.sp,
+				maxLines = 1
+			)
+		}
+		Switch(checked = show, onCheckedChange = onSetShow)
+	}
+}
+
+@Composable
+private fun SatelliteQualityLegend(modifier: Modifier = Modifier) {
+	Column(
+		modifier.background(Color(0xD90A0F13)).border(1.dp, FlightLine)
+			.padding(horizontal = 5.dp, vertical = 4.dp),
+		verticalArrangement = Arrangement.spacedBy(3.dp)
+	) {
+		listOf(
+			FlightQualityUltraPlus to stringResource(R.string.flight_mode_satellite_quality_ultra_plus),
+			FlightQualityUltra to stringResource(R.string.flight_mode_satellite_quality_ultra),
+			FlightQualityHigh to stringResource(R.string.flight_mode_satellite_quality_high),
+			FlightQualityStandard to stringResource(R.string.flight_mode_satellite_quality_standard),
+			FlightQualityOverview to stringResource(R.string.flight_mode_satellite_quality_overview)
+		).forEach { (color, label) ->
+			Row(verticalAlignment = Alignment.CenterVertically) {
+				Box(Modifier.size(8.dp).background(color))
+				Text(label, color = FlightText, fontSize = 7.sp, modifier = Modifier.padding(start = 4.dp))
 			}
 		}
 	}
@@ -2443,6 +2506,7 @@ private fun FlightWindowScene(
 	shadowIntensity: Float,
 	satelliteOpacity: Float,
 	satelliteQuality: FlightSatelliteQuality,
+	showSatelliteQualityOverlay: Boolean,
 	photo: FlightPhotoAttachment?,
 	photoOverlay: FlightWindowPhotoOverlay,
 	onSetSide: (FlightCabinSide) -> Unit,
@@ -2526,6 +2590,7 @@ private fun FlightWindowScene(
 			shadingEnabled = shadingEnabled,
 			shadowIntensity = shadowIntensity,
 			satelliteOpacity = satelliteOpacity,
+			showSatelliteQualityOverlay = showSatelliteQualityOverlay,
 			// Hublot keeps the Terrarium geometry, while the dedicated cached-tile page
 			// owns the coloured 2D relief visualization.
 			terrainOpacity = 0f,
@@ -2535,6 +2600,11 @@ private fun FlightWindowScene(
 			modifier = Modifier.fillMaxSize()
 		)
 		activePhoto?.let { FlightWindowPhotoOverlayImage(it, photoOverlay, Modifier.fillMaxSize()) }
+		if (showSatelliteQualityOverlay) {
+			SatelliteQualityLegend(
+				modifier = Modifier.align(Alignment.CenterStart).padding(start = 7.dp)
+			)
+		}
 		if (!placement.cabinHidden) {
 			FlightCabinWindowOverlay(placement, look, Modifier.fillMaxSize())
 		}
@@ -3564,6 +3634,7 @@ private fun FlightModePreview(state: FlightUiState) {
 		onRetryTerrain = {}, onTerrainRendererError = {}, onTerrainRenderStats = {}, onSetMapFollowing = {}, onShowTrackPoints = {},
 		onMarkFlightStart = {}, onMarkFlightEnd = {}, onCancelFlightStart = {}, onRemoveFlightSpan = {},
 		onSetSatelliteQuality = {},
+		onSetSatelliteQualityOverlay = {},
 		onSetRecordingPolicy = {}, onSetPhotoSources = { _, _, _, _ -> },
 		onPhotoAction = {}, onValidatePhotos = {}, onDiscardPhotos = {}, onSelectPhoto = {},
 		onAssociatePhotoAutomatically = {}, onAssociatePhotoAtCurrentReplay = {},

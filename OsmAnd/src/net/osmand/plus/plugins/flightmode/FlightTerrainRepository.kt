@@ -87,6 +87,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		longitude: Double,
 		radiusKm: Int,
 		satelliteQuality: FlightSatelliteQuality,
+		detailFocus: FlightTerrainDetailFocus?,
 		includeNativeMap: Boolean,
 		previousScene: FlightTerrainScene? = null,
 		onScene: suspend (FlightTerrainScene) -> Unit = {},
@@ -109,6 +110,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			tiles = orderedTiles,
 			latitude = latitude,
 			longitude = longitude,
+			detailFocus = detailFocus,
 			radiusKm = radiusKm,
 			requested = satelliteQuality
 		)
@@ -248,6 +250,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				FlightTerrainMeshBuilder.build(
 					centerLatitude = latitude,
 					centerLongitude = longitude,
+					detailFocus = detailFocus,
 					radiusKm = radiusKm,
 					plan = orderedPlan,
 					tiles = tiles.toMap(),
@@ -382,6 +385,10 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			if (quality == FlightSatelliteQuality.STANDARD || tileId !in tiles || tileId in detailedTexturePaths) {
 				null
 			} else tileId to quality
+		}.let { requests ->
+			if (detailFocus == null) requests else requests.sortedBy { (tileId, _) ->
+				tileNearestDistanceKm(tileId, detailFocus.latitude, detailFocus.longitude)
+			}
 		}
 		if (detailRequests.isNotEmpty()) {
 			coroutineScope {
@@ -456,6 +463,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			FlightTerrainMeshBuilder.build(
 				centerLatitude = latitude,
 				centerLongitude = longitude,
+				detailFocus = detailFocus,
 				radiusKm = radiusKm,
 				plan = orderedPlan,
 				tiles = tiles,
@@ -905,6 +913,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		tiles: List<TerrainTileId>,
 		latitude: Double,
 		longitude: Double,
+		detailFocus: FlightTerrainDetailFocus?,
 		radiusKm: Int,
 		requested: FlightSatelliteQuality
 	): Map<TerrainTileId, FlightTerrainTextureTier> = synchronized(lodLock) {
@@ -913,21 +922,24 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			lodQuality = requested
 		}
 		tiles.associateWith { tile ->
-			val distance = tileNearestDistanceKm(tile, latitude, longitude)
-			val raw = FlightTerrainLodPolicy.tierForDistance(requested, radiusKm, distance)
+			val aircraftDistance = tileNearestDistanceKm(tile, latitude, longitude)
+			val focusDistance = detailFocus?.let { focus ->
+				tileNearestDistanceKm(tile, focus.latitude, focus.longitude)
+			}
+			fun tierAt(distanceFactor: Double): FlightTerrainTextureTier {
+				return FlightTerrainLodPolicy.tierForFoci(
+					requested = requested,
+					radiusKm = radiusKm,
+					aircraftDistanceKm = aircraftDistance * distanceFactor,
+					detailFocusDistanceKm = focusDistance?.times(distanceFactor)
+				)
+			}
+			val raw = tierAt(1.0)
 			val previous = previousTierByTile[tile]
 			val stable = when {
 				previous == null || previous == raw -> raw
-				raw.ordinal < previous.ordinal -> FlightTerrainLodPolicy.tierForDistance(
-					requested,
-					radiusKm,
-					distance / LOD_HYSTERESIS_FACTOR
-				)
-				else -> FlightTerrainLodPolicy.tierForDistance(
-					requested,
-					radiusKm,
-					distance * LOD_HYSTERESIS_FACTOR
-				)
+				raw.ordinal < previous.ordinal -> tierAt(1.0 / LOD_HYSTERESIS_FACTOR)
+				else -> tierAt(LOD_HYSTERESIS_FACTOR)
 			}
 			previousTierByTile[tile] = stable
 			stable

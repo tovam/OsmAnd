@@ -110,6 +110,7 @@ data class FlightTerrainGeometryCacheKey(
 data class FlightTerrainScene(
 	val centerLatitude: Double,
 	val centerLongitude: Double,
+	val detailFocus: FlightTerrainDetailFocus?,
 	val coordinateOriginLatitude: Double,
 	val coordinateOriginLongitude: Double,
 	val radiusKm: Int,

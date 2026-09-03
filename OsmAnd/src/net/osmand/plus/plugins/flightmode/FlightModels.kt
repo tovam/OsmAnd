@@ -346,7 +346,13 @@ data class FlightPhotoWindowAlignment(
 	val offsetYFraction: Float = 0f,
 	val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
 	val windowLook: FlightWindowLook = FlightWindowLook(),
-	val altitudeOverrideMeters: Float? = null
+	val altitudeOverrideMeters: Float? = null,
+	/**
+	 * Absolute snapshot derived from the authoritative trip-relative calibration.
+	 * Keeping both forms lets a corrected track rebuild the pose while an exported
+	 * journal still knows exactly where the eye and optical axis were in WGS84.
+	 */
+	val spatialPose: FlightPhotoSpatialPose? = null
 ) {
 	fun clamped(): FlightPhotoWindowAlignment {
 		val safeOverlay = FlightWindowPhotoOverlay(
@@ -372,13 +378,65 @@ data class FlightPhotoWindowAlignment(
 			windowPlacement = safePlacement,
 			windowLook = safeLook,
 			altitudeOverrideMeters = altitudeOverrideMeters?.takeIf(Float::isFinite)
-				?.coerceIn(MIN_ALTITUDE_OVERRIDE_METERS, MAX_ALTITUDE_OVERRIDE_METERS)
+				?.coerceIn(MIN_ALTITUDE_OVERRIDE_METERS, MAX_ALTITUDE_OVERRIDE_METERS),
+			spatialPose = spatialPose?.clampedOrNull()
 		)
 	}
 
 	companion object {
 		const val MIN_ALTITUDE_OVERRIDE_METERS = -500f
 		const val MAX_ALTITUDE_OVERRIDE_METERS = 15_000f
+	}
+}
+
+/** A reproducible world-space camera pose associated with one calibrated photo. */
+data class FlightPhotoSpatialPose(
+	/** Zero-based continuous position in the journal track. */
+	val samplePosition: Double,
+	val timestampMillis: Long?,
+	val eyeLatitude: Double,
+	val eyeLongitude: Double,
+	val eyeAltitudeMeters: Float?,
+	val aircraftBearingDegrees: Float,
+	val viewAzimuthDegrees: Float,
+	val viewElevationDegrees: Float,
+	val verticalFieldOfViewDegrees: Float
+) {
+	fun clampedOrNull(): FlightPhotoSpatialPose? {
+		if (!samplePosition.isFinite() || samplePosition < 0.0 ||
+			!eyeLatitude.isFinite() || eyeLatitude !in -90.0..90.0 ||
+			!eyeLongitude.isFinite() ||
+			!aircraftBearingDegrees.isFinite() || !viewAzimuthDegrees.isFinite() ||
+			!viewElevationDegrees.isFinite() || !verticalFieldOfViewDegrees.isFinite()
+		) return null
+		return copy(
+			eyeLongitude = normalizeLongitude(eyeLongitude),
+			eyeAltitudeMeters = eyeAltitudeMeters?.takeIf(Float::isFinite)
+				?.coerceIn(FlightPhotoWindowAlignment.MIN_ALTITUDE_OVERRIDE_METERS, MAXIMUM_PHOTO_EYE_ALTITUDE_METERS),
+			aircraftBearingDegrees = normalizeDegrees(aircraftBearingDegrees),
+			viewAzimuthDegrees = normalizeDegrees(viewAzimuthDegrees),
+			viewElevationDegrees = viewElevationDegrees.coerceIn(-90f, 90f),
+			verticalFieldOfViewDegrees = verticalFieldOfViewDegrees.coerceIn(
+				FlightWindowPlacement.MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
+				FlightWindowPlacement.MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
+			)
+		)
+	}
+
+	private fun normalizeDegrees(value: Float): Float {
+		val normalized = value % 360f
+		return if (normalized < 0f) normalized + 360f else normalized
+	}
+
+	private fun normalizeLongitude(value: Double): Double {
+		var normalized = value % 360.0
+		if (normalized > 180.0) normalized -= 360.0
+		if (normalized < -180.0) normalized += 360.0
+		return normalized
+	}
+
+	companion object {
+		private const val MAXIMUM_PHOTO_EYE_ALTITUDE_METERS = 100_000f
 	}
 }
 
@@ -473,6 +531,12 @@ data class FlightJourney(
 	val offlineAssets: FlightOfflineAssets = FlightOfflineAssets()
 )
 
+/** Ground point receiving an additional satellite-detail ring. */
+data class FlightTerrainDetailFocus(
+	val latitude: Double,
+	val longitude: Double
+)
+
 data class FlightJourneySummary(
 	val id: String,
 	val name: String,
@@ -528,6 +592,8 @@ data class FlightUiState(
 	val windowLook: FlightWindowLook = FlightWindowLook(),
 	val windowPhotoOverlay: FlightWindowPhotoOverlay = FlightWindowPhotoOverlay(),
 	val windowAltitudeOverrideMeters: Float? = null,
+	val terrainDetailFocus: FlightTerrainDetailFocus? = null,
+	val showSatelliteQualityOverlay: Boolean = false,
 	val satelliteOpacity: Float = 0.92f,
 	val mapFollowing: Boolean = true,
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),

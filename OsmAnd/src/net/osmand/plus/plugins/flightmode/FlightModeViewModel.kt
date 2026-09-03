@@ -35,6 +35,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var storageJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var photoPersistenceJob: Job? = null
+	private var lookDetailJob: Job? = null
 	private var requestedTerrainCenter: Pair<Double, Double>? = null
 	private val liveSamples = mutableListOf<FlightSample>()
 	private var liveDistanceMeters = 0.0
@@ -57,7 +58,15 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun showPage(page: FlightPage) {
-		uiState = uiState.copy(page = page)
+		val leavingWindow = page != FlightPage.WINDOW && page != FlightPage.WINDOW_SETUP
+		if (leavingWindow) {
+			lookDetailJob?.cancel()
+			exitWindowPhotoEditing()
+			uiState = uiState.copy(page = page, terrainDetailFocus = null)
+		} else {
+			uiState = uiState.copy(page = page)
+			if (page == FlightPage.WINDOW) scheduleTerrainDetailFocus()
+		}
 		if (page == FlightPage.JOURNEYS) refreshStorageUsage()
 	}
 
@@ -176,6 +185,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun startLive() {
 		offlinePreloadJob?.cancel()
+		lookDetailJob?.cancel()
 		pendingDuplicateTrip = null
 		replayEngine = null
 		liveSamples.clear()
@@ -194,6 +204,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			tripLoadError = null,
 			duplicateJourneyWarning = null,
 			windowPhotoOverlay = FlightWindowPhotoOverlay(),
+			terrainDetailFocus = null,
 			flightSpans = emptyList(),
 			pendingFlightStartProgress = null,
 			journeyId = null,
@@ -339,6 +350,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		dirty: Boolean,
 		message: String?
 	) {
+		lookDetailJob?.cancel()
+		requestedTerrainCenter = null
 		// A GPX heading is optional. Resolve it once here for every replay source
 		// (plain GPX, OsmAnd track or saved Flight Journal) so every screen uses
 		// the direction from the current point to the next point in the same leg.
@@ -354,6 +367,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			profile = FlightProfilePlanner.fromTrip(resolvedTrip),
 			snapshot = firstSnapshot,
 			windowPhotoOverlay = FlightWindowPhotoOverlay(),
+			terrainDetailFocus = null,
 			replayProgress = 0f,
 			replayPlaying = false,
 			flightSpans = flightSpans,
@@ -391,8 +405,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun seekReplay(progress: Float) {
 		val safeProgress = progress.coerceIn(0f, 1f)
 		val snapshot = replayEngine?.snapshotAt(safeProgress) ?: return
-		uiState = uiState.copy(replayProgress = safeProgress, snapshot = snapshot)
+		exitWindowPhotoEditing()
+		uiState = uiState.copy(
+			replayProgress = safeProgress,
+			snapshot = snapshot,
+			terrainDetailFocus = null
+		)
 		requestTerrain(snapshot.sample)
+		scheduleTerrainDetailFocus()
 	}
 
 	fun toggleReplayPlaying() {
@@ -444,6 +464,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		} else rawSample
 		if (shouldRecordLiveSample(sample)) appendLiveSample(sample)
 		uiState = uiState.copy(snapshot = FlightSnapshot(sample, progress = 0f))
+		followTerrainDetailFocus(sample)
 		requestTerrain(sample)
 		if (uiState.offlinePreloadStatus.phase == FlightTerrainPhase.IDLE &&
 			offlinePreloadJob?.isActive != true && hasOfflineCorridorSource()
@@ -638,6 +659,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					longitude = sample.longitude,
 					radiusKm = uiState.plan.terrainCorridorKm,
 					satelliteQuality = uiState.plan.satelliteQuality,
+					detailFocus = uiState.terrainDetailFocus,
 					includeNativeMap = includeNativeMap,
 					previousScene = scene,
 					onScene = { partialScene ->
@@ -684,6 +706,69 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
+	/**
+	 * Direction changes are cheap and immediate; detailed imagery is deliberately not.
+	 * Keep the existing textures while the user moves, then retarget only after the
+	 * optical axis has remained untouched for 1.5 seconds.
+	 */
+	private fun scheduleTerrainDetailFocus() {
+		lookDetailJob?.cancel()
+		if (uiState.page != FlightPage.WINDOW) return
+		lookDetailJob = viewModelScope.launch {
+			delay(LOOK_DETAIL_DEBOUNCE_MILLIS)
+			val sample = uiState.snapshot?.sample ?: previewFlightSample() ?: return@launch
+			val focus = FlightViewGeometry.groundDetailFocus(
+				sample = sample,
+				placement = uiState.windowPlacement,
+				look = uiState.windowLook,
+				altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters,
+				maximumDistanceKm = MAXIMUM_LOOK_DETAIL_DISTANCE_KM
+			)
+			if (sameTerrainDetailFocus(uiState.terrainDetailFocus, focus)) return@launch
+			uiState = uiState.copy(terrainDetailFocus = focus)
+			requestTerrain(sample, force = true)
+		}
+	}
+
+	/** Once a live focus is stable, let it follow the aircraft without touch jitter. */
+	private fun followTerrainDetailFocus(sample: FlightSample) {
+		if (uiState.page != FlightPage.WINDOW) return
+		val current = uiState.terrainDetailFocus
+		if (current == null) {
+			if (lookDetailJob?.isActive != true) scheduleTerrainDetailFocus()
+			return
+		}
+		val next = FlightViewGeometry.groundDetailFocus(
+			sample = sample,
+			placement = uiState.windowPlacement,
+			look = uiState.windowLook,
+			altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters,
+			maximumDistanceKm = MAXIMUM_LOOK_DETAIL_DISTANCE_KM
+		) ?: return
+		if (FlightTerrainTilePlanner.distanceKm(
+				current.latitude,
+				current.longitude,
+				next.latitude,
+				next.longitude
+			) < LOOK_DETAIL_FOLLOW_DISTANCE_KM
+		) return
+		uiState = uiState.copy(terrainDetailFocus = next)
+		requestTerrain(sample, force = true)
+	}
+
+	private fun sameTerrainDetailFocus(
+		first: FlightTerrainDetailFocus?,
+		second: FlightTerrainDetailFocus?
+	): Boolean {
+		if (first == null || second == null) return first == second
+		return FlightTerrainTilePlanner.distanceKm(
+			first.latitude,
+			first.longitude,
+			second.latitude,
+			second.longitude
+		) < LOOK_DETAIL_MINIMUM_CHANGE_KM
+	}
+
 	private fun previewFlightSample(): FlightSample? {
 		val from = uiState.plan.stops.firstOrNull() ?: return null
 		val to = uiState.plan.stops.getOrNull(1)
@@ -712,6 +797,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			)
 		)
 		storeActiveWindowPhotoAlignment()
+		scheduleTerrainDetailFocus()
 	}
 
 	fun moveWindow(forwardDeltaMeters: Float, verticalDeltaMeters: Float) {
@@ -743,12 +829,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			).clamped()
 		)
 		storeActiveWindowPhotoAlignment()
+		scheduleTerrainDetailFocus()
 	}
 
 	fun recenterWindowLook() {
 		if (uiState.windowLook != FlightWindowLook()) {
 			uiState = uiState.copy(windowLook = FlightWindowLook())
 			storeActiveWindowPhotoAlignment()
+			scheduleTerrainDetailFocus()
 		}
 	}
 
@@ -775,6 +863,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (persist) windowPlacementStore.save(safePlacement)
 		uiState = uiState.copy(windowPlacement = safePlacement)
 		storeActiveWindowPhotoAlignment()
+		scheduleTerrainDetailFocus()
 	}
 
 	fun setMapFollowing(following: Boolean) {
@@ -820,6 +909,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		updatePlan(uiState.plan.copy(satelliteQuality = quality))
 		requestedTerrainCenter = null
 		(uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, force = true) }
+	}
+
+	fun setSatelliteQualityOverlay(show: Boolean) {
+		if (uiState.showSatelliteQualityOverlay != show) {
+			uiState = uiState.copy(showSatelliteQualityOverlay = show)
+		}
 	}
 
 	fun setRecordingPolicy(policy: FlightRecordingPolicy) {
@@ -1057,7 +1152,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			}
 			val dateRecovered = currentPhoto.timestampMillis == null && photo.timestampMillis != null
 			replacePhoto(
-				photo.copy(matchedSamplePosition = position),
+				photo.copy(
+					matchedSamplePosition = position,
+					windowAlignment = retainedAlignmentForPosition(photo, position)
+				),
 				if (dateRecovered) {
 					"Date retrouvée dans la photo · association à la position GPS interpolée"
 				} else {
@@ -1078,14 +1176,20 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			return
 		}
 		replacePhoto(
-			photo.copy(matchedSamplePosition = position),
+			photo.copy(
+				matchedSamplePosition = position,
+				windowAlignment = retainedAlignmentForPosition(photo, position)
+			),
 			String.format(Locale.US, "Photo associée au point virtuel %.2f", position + 1.0)
 		)
 	}
 
 	fun clearPhotoAssociation(id: String) {
 		val photo = findPhoto(id) ?: return
-		replacePhoto(photo.copy(matchedSamplePosition = null), "Association de la photo supprimée")
+		replacePhoto(
+			photo.copy(matchedSamplePosition = null, windowAlignment = null),
+			"Association de la photo supprimée"
+		)
 	}
 
 	fun rotatePhoto(id: String, deltaDegrees: Float) {
@@ -1101,7 +1205,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun openPhotoOnMap(id: String) {
 		selectPhoto(id)
 		if (findPhoto(id)?.matchedSamplePosition != null) {
-			uiState = uiState.copy(page = FlightPage.MAP, mapFollowing = true)
+			exitWindowPhotoEditing()
+			lookDetailJob?.cancel()
+			uiState = uiState.copy(
+				page = FlightPage.MAP,
+				mapFollowing = true,
+				terrainDetailFocus = null
+			)
 		}
 	}
 
@@ -1139,7 +1249,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					uiState.windowAltitudeOverrideMeters
 				}
 			)
+			// Opening a legacy calibration also backfills its absolute WGS84 pose. For a
+			// new photo with no known FOV, leave the alignment empty until perspective
+			// detection has had a chance to choose the initial camera zoom.
+			if (savedAlignment != null || detectedFov != null) {
+				storeActiveWindowPhotoAlignment()
+			}
 			if (detectedFov == null) detectAndApplyPhotoPerspective(id)
+			scheduleTerrainDetailFocus()
 		}
 	}
 
@@ -1216,6 +1333,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			windowPhotoOverlay = transformed.photoOverlay
 		)
 		storeActiveWindowPhotoAlignment()
+		scheduleTerrainDetailFocus()
 	}
 
 	fun resetWindowPhotoTransform() {
@@ -1230,15 +1348,29 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun clearWindowPhotoOverlay() {
+		exitWindowPhotoEditing()
+	}
+
+	private fun exitWindowPhotoEditing() {
+		if (uiState.windowPhotoOverlay.photoId == null) return
+		storeActiveWindowPhotoAlignment()
 		uiState = uiState.copy(windowPhotoOverlay = FlightWindowPhotoOverlay())
 	}
 
 	private fun findPhoto(id: String): FlightPhotoAttachment? =
 		(uiState.photos + uiState.pendingPhotos).firstOrNull { it.id == id }
 
+	private fun retainedAlignmentForPosition(
+		photo: FlightPhotoAttachment,
+		newPosition: Double
+	): FlightPhotoWindowAlignment? = photo.windowAlignment?.takeIf {
+		photo.matchedSamplePosition?.let { previous -> abs(previous - newPosition) < 0.005 } == true
+	}
+
 	private fun storeActiveWindowPhotoAlignment() {
 		val overlay = uiState.windowPhotoOverlay
 		val photo = overlay.photoId?.let(::findPhoto) ?: return
+		val referencePosition = photo.matchedSamplePosition
 		val alignment = FlightPhotoWindowAlignment(
 			opacity = overlay.opacity,
 			scale = overlay.scale,
@@ -1246,7 +1378,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			offsetYFraction = overlay.offsetYFraction,
 			windowPlacement = uiState.windowPlacement,
 			windowLook = uiState.windowLook,
-			altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters
+			altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters,
+			spatialPose = FlightViewGeometry.photoSpatialPose(
+				trip = uiState.trip,
+				samplePosition = referencePosition,
+				placement = uiState.windowPlacement,
+				look = uiState.windowLook,
+				altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters
+			)
 		).clamped()
 		if (photo.windowAlignment != alignment) {
 			replacePhoto(photo.copy(windowAlignment = alignment), message = null)
@@ -1294,6 +1433,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		storageJob?.cancel()
 		citySearchJob?.cancel()
 		photoPersistenceJob?.cancel()
+		lookDetailJob?.cancel()
 		super.onCleared()
 	}
 
@@ -1311,6 +1451,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		private const val MINIMUM_CITY_QUERY_LENGTH = 2
 		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
 		private const val PHOTO_PERSISTENCE_DEBOUNCE_MILLIS = 450L
+		private const val LOOK_DETAIL_DEBOUNCE_MILLIS = 1_500L
+		private const val MAXIMUM_LOOK_DETAIL_DISTANCE_KM = 100.0
+		private const val LOOK_DETAIL_MINIMUM_CHANGE_KM = 1.5
+		private const val LOOK_DETAIL_FOLLOW_DISTANCE_KM = 8.0
 		private const val TERRAIN_RELOAD_RADIUS_FRACTION = 0.32
 		private const val MINIMUM_RELOAD_DISTANCE_KM = 20.0
 		private const val MINIMUM_WINDOW_ALTITUDE_METERS = -500f
