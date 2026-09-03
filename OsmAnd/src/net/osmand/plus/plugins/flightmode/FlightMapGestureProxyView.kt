@@ -21,7 +21,7 @@ class FlightMapGestureProxyView(
 	private var onExplorationGesture: () -> Unit
 ) : View(context) {
 
-	private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop * 1.5f
+	private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 	private val touchSlopSquared = touchSlop * touchSlop
 	private val sourceLocation = IntArray(2)
 	private val targetLocation = IntArray(2)
@@ -39,6 +39,7 @@ class FlightMapGestureProxyView(
 	private var tiltStartDistance = 0f
 	private var tiltStartAngle = 0f
 	private var tiltStartElevation = 0f
+	private var lastTiltRefreshMillis = 0L
 
 	init {
 		isClickable = true
@@ -115,6 +116,7 @@ class FlightMapGestureProxyView(
 		tiltStartDistance = hypot(tiltStartX2 - tiltStartX1, tiltStartY2 - tiltStartY1)
 		tiltStartAngle = atan2(tiltStartY2 - tiltStartY1, tiltStartX2 - tiltStartX1)
 		tiltStartElevation = target.elevationAngle
+		lastTiltRefreshMillis = 0L
 		tiltCandidate = tiltStartDistance > 0f
 	}
 
@@ -133,17 +135,20 @@ class FlightMapGestureProxyView(
 		val dy1 = event.getY(0) - tiltStartY1
 		val dx2 = event.getX(1) - tiltStartX2
 		val dy2 = event.getY(1) - tiltStartY2
-		val verticalTravel = (abs(dy1) + abs(dy2)) / 2f
+		val centerDeltaX = (dx1 + dx2) / 2f
+		val centerDeltaY = (dy1 + dy2) / 2f
 		val currentDistance = hypot(event.getX(1) - event.getX(0), event.getY(1) - event.getY(0))
 		val distanceChange = abs(currentDistance / tiltStartDistance - 1f)
 		val currentAngle = atan2(event.getY(1) - event.getY(0), event.getX(1) - event.getX(0))
 		val angleChange = abs(normalizeRadians(currentAngle - tiltStartAngle))
-		val sameVerticalDirection = dy1 * dy2 > 0f
-		val mostlyVertical = abs(dx1) <= abs(dy1) * MAX_HORIZONTAL_TO_VERTICAL_RATIO + touchSlop &&
-			abs(dx2) <= abs(dy2) * MAX_HORIZONTAL_TO_VERTICAL_RATIO + touchSlop
+		// The centroid distinguishes a two-finger vertical translation from a pinch or
+		// rotation without requiring both imperfect fingers to follow identical paths.
+		// The previous per-finger test rejected ordinary Pixel-sized hand jitter.
+		val mostlyVertical = abs(centerDeltaX) <=
+			abs(centerDeltaY) * MAX_HORIZONTAL_TO_VERTICAL_RATIO + touchSlop * 0.5f
 		val stableSpacing = distanceChange <= MAX_TILT_DISTANCE_CHANGE && angleChange <= MAX_TILT_ANGLE_CHANGE_RADIANS
 
-		if (verticalTravel < touchSlop || !sameVerticalDirection || !mostlyVertical || !stableSpacing) {
+		if (abs(centerDeltaY) < touchSlop || !mostlyVertical || !stableSpacing) {
 			return false
 		}
 
@@ -157,8 +162,13 @@ class FlightMapGestureProxyView(
 	}
 
 	private fun applyTilt(event: MotionEvent) {
-		val averageDeltaY = ((event.getY(0) - tiltStartY1) + (event.getY(1) - tiltStartY2)) / 2f
-		target.setElevationAngle(tiltStartElevation + averageDeltaY / PIXELS_PER_TILT_DEGREE)
+		val centerDeltaY = ((event.getY(0) - tiltStartY1) + (event.getY(1) - tiltStartY2)) / 2f
+		target.setElevationAngle(tiltStartElevation + centerDeltaY / PIXELS_PER_TILT_DEGREE)
+		val now = SystemClock.uptimeMillis()
+		if (now - lastTiltRefreshMillis >= TILT_REFRESH_INTERVAL_MILLIS) {
+			lastTiltRefreshMillis = now
+			target.refreshMap()
+		}
 	}
 
 	private fun dispatchToMap(targetView: View, event: MotionEvent, forcedAction: Int? = null) {
@@ -196,6 +206,7 @@ class FlightMapGestureProxyView(
 
 	private fun finishGestureIfNeeded(event: MotionEvent) {
 		if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+			if (tiltOverrideActive) target.refreshMap()
 			targetGestureActive = false
 			gestureTargetView = null
 			tiltCandidate = false
@@ -220,10 +231,11 @@ class FlightMapGestureProxyView(
 	}
 
 	private companion object {
-		const val MAX_HORIZONTAL_TO_VERTICAL_RATIO = 0.65f
-		const val MAX_TILT_DISTANCE_CHANGE = 0.12f
-		const val MAX_TILT_ANGLE_CHANGE_RADIANS = 0.18f
+		const val MAX_HORIZONTAL_TO_VERTICAL_RATIO = 0.85f
+		const val MAX_TILT_DISTANCE_CHANGE = 0.24f
+		const val MAX_TILT_ANGLE_CHANGE_RADIANS = 0.35f
 		const val PIXELS_PER_TILT_DEGREE = 8f
+		const val TILT_REFRESH_INTERVAL_MILLIS = 40L
 		const val PI_RADIANS = 3.1415927f
 		const val FULL_TURN_RADIANS = PI_RADIANS * 2f
 	}

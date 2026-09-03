@@ -295,6 +295,8 @@ data class FlightPhotoAttachment(
 	/** Zero-based, continuous point position. The UI displays this value plus one. */
 	val matchedSamplePosition: Double?,
 	val timestampSource: FlightPhotoTimestampSource? = null,
+	/** Vertical camera field of view inferred from EXIF, after applying EXIF orientation. */
+	val cameraVerticalFieldOfViewDegrees: Float? = null,
 	val rotationDegrees: Float = 0f,
 	val includeMainCamera: Boolean = true,
 	val includeSelfie: Boolean = false,
@@ -305,7 +307,9 @@ data class FlightPhotoAttachment(
 
 enum class FlightWindowGestureTarget {
 	VIEW,
-	PHOTO
+	PHOTO,
+	/** Move the virtual camera while keeping the calibrated photo registered to it. */
+	LINKED
 }
 
 data class FlightWindowPhotoOverlay(
@@ -381,6 +385,70 @@ data class FlightPhotoWindowAlignment(
 /** Halves a pinch's logarithmic zoom delta, symmetrically for zoom-in and zoom-out. */
 fun dampedFlightPinchFactor(rawFactor: Float): Float =
 	if (rawFactor.isFinite() && rawFactor > 0f) sqrt(rawFactor) else 1f
+
+data class FlightWindowLinkedTransform(
+	val placement: FlightWindowPlacement,
+	val look: FlightWindowLook,
+	val photoOverlay: FlightWindowPhotoOverlay
+)
+
+/**
+ * Applies one gesture to the 3D camera and its calibrated photo as a single unit.
+ *
+ * The photo scale follows the actual perspective projection rather than the raw
+ * pinch factor. This matters at wide angles: halving a FOV in degrees does not
+ * exactly double its projected size. The photo translation follows only the
+ * camera movement that survived the vertical look limits.
+ */
+fun linkedFlightWindowTransform(
+	placement: FlightWindowPlacement,
+	look: FlightWindowLook,
+	photoOverlay: FlightWindowPhotoOverlay,
+	panXFraction: Float,
+	panYFraction: Float,
+	rawZoomFactor: Float,
+	viewAspectRatio: Float
+): FlightWindowLinkedTransform {
+	val safePlacement = placement.clamped()
+	val safeLook = look.clamped()
+	val safeOverlay = photoOverlay.clamped()
+	val safePanX = panXFraction.takeIf(Float::isFinite) ?: 0f
+	val safePanY = panYFraction.takeIf(Float::isFinite) ?: 0f
+	val verticalFovBefore = safePlacement.verticalFieldOfViewDegrees()
+	val horizontalFovBefore = safePlacement.horizontalFieldOfViewDegrees(viewAspectRatio)
+	val nextLook = safeLook.copy(
+		yawDegrees = safeLook.yawDegrees - safePanX * horizontalFovBefore,
+		pitchDegrees = safeLook.pitchDegrees + safePanY * verticalFovBefore
+	).clamped()
+	val realizedYawDelta = FlightWindowLook.normalizeYaw(nextLook.yawDegrees - safeLook.yawDegrees)
+	val realizedPitchDelta = nextLook.pitchDegrees - safeLook.pitchDegrees
+
+	val dampedZoom = dampedFlightPinchFactor(rawZoomFactor).coerceIn(0.75f, 1.35f)
+	val nextPlacement = safePlacement.copy(zoom = safePlacement.zoom * dampedZoom).clamped()
+	val verticalFovAfter = nextPlacement.verticalFieldOfViewDegrees()
+	val horizontalFovAfter = nextPlacement.horizontalFieldOfViewDegrees(viewAspectRatio)
+	val projectionMagnification = (
+		tan(Math.toRadians((verticalFovBefore / 2f).toDouble())) /
+			tan(Math.toRadians((verticalFovAfter / 2f).toDouble()))
+	).toFloat().takeIf { it.isFinite() && it > 0f } ?: 1f
+	val projectedPanX = -0.5f * projectedTangentRatio(realizedYawDelta, horizontalFovAfter)
+	val projectedPanY = 0.5f * projectedTangentRatio(realizedPitchDelta, verticalFovAfter)
+	val nextOverlay = safeOverlay.copy(
+		scale = safeOverlay.scale * projectionMagnification,
+		offsetXFraction = safeOverlay.offsetXFraction * projectionMagnification + projectedPanX,
+		offsetYFraction = safeOverlay.offsetYFraction * projectionMagnification + projectedPanY,
+		gestureTarget = FlightWindowGestureTarget.LINKED
+	).clamped()
+	return FlightWindowLinkedTransform(nextPlacement, nextLook, nextOverlay)
+}
+
+private fun projectedTangentRatio(angleDegrees: Float, fieldOfViewDegrees: Float): Float {
+	val safeAngle = angleDegrees.coerceIn(-85f, 85f)
+	val denominator = tan(Math.toRadians((fieldOfViewDegrees / 2f).toDouble()))
+	if (!denominator.isFinite() || denominator == 0.0) return 0f
+	return (tan(Math.toRadians(safeAngle.toDouble())) / denominator)
+		.toFloat().takeIf(Float::isFinite) ?: 0f
+}
 
 data class FlightOfflineAssets(
 	val terrainTiles: List<TerrainTileId> = emptyList(),

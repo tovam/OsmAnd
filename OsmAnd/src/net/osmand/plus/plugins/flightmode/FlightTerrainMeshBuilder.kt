@@ -1,13 +1,43 @@
 package net.osmand.plus.plugins.flightmode
 
 import kotlin.math.floor
-import kotlin.math.max
 import kotlin.math.sqrt
+
+/**
+ * Terrain geometry LOD is deliberately independent from satellite texture quality.
+ * The tile containing the aircraft keeps almost every Terrarium sample, nearby tiles
+ * keep every other sample, and distant coverage stays cheap. Changing imagery quality
+ * therefore never churns vertex buffers, while nearby ridgelines retain their shape.
+ */
+object FlightTerrainGeometryLodPolicy {
+
+	fun quadsForDistance(radiusKm: Int, nearestDistanceKm: Double): Int {
+		val radius = radiusKm.coerceAtLeast(1).toDouble()
+		return when {
+			nearestDistanceKm <= minOf(35.0, radius * 0.18) -> FlightTerrainMeshBuilder.MAXIMUM_GRID_QUADS
+			nearestDistanceKm <= minOf(120.0, radius * 0.50) -> 128
+			else -> FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS
+		}
+	}
+
+	fun estimatedBytes(gridQuads: Int): Long {
+		val quads = gridQuads.coerceIn(
+			FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS,
+			FlightTerrainMeshBuilder.MAXIMUM_GRID_QUADS
+		).toLong()
+		val vertices = (quads + 1L) * (quads + 1L)
+		val indices = quads * quads * 6L
+		return vertices * FlightTerrainMeshBuilder.VERTEX_COMPONENTS * FLOAT_BYTES + indices * SHORT_BYTES
+	}
+
+	private const val FLOAT_BYTES = 4L
+	private const val SHORT_BYTES = 2L
+}
 
 object FlightTerrainMeshBuilder {
 
-	private const val GRID_QUADS = 32
-	private const val GRID_SIZE = GRID_QUADS + 1
+	const val DEFAULT_GRID_QUADS = 32
+	const val MAXIMUM_GRID_QUADS = 255
 	const val VERTEX_COMPONENTS = 9
 
 	fun build(
@@ -25,6 +55,7 @@ object FlightTerrainMeshBuilder {
 		nativeMapRequested: Boolean = nativeMapTexturePaths.isNotEmpty(),
 		coordinateOriginLatitude: Double = centerLatitude,
 		coordinateOriginLongitude: Double = centerLongitude,
+		geometryQuadsByTile: Map<TerrainTileId, Int> = emptyMap(),
 		geometryCache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>? = null,
 		geometryGeneration: Long = System.nanoTime(),
 		includePlaceholders: Boolean = false
@@ -33,15 +64,19 @@ object FlightTerrainMeshBuilder {
 		val sampler = TileElevationSampler(plan.zoom, tiles)
 		val meshes = plan.tiles.mapNotNull { tileId ->
 			val terrainAvailable = tiles.containsKey(tileId)
+			val gridQuads = geometryQuadsByTile[tileId]
+				?.coerceIn(DEFAULT_GRID_QUADS, MAXIMUM_GRID_QUADS)
+				?: DEFAULT_GRID_QUADS
 			val geometryCacheKey = FlightTerrainGeometryCacheKey(
 				tileId,
 				coordinateOriginLatitude,
-				coordinateOriginLongitude
+				coordinateOriginLongitude,
+				gridQuads
 			)
 			val geometry = cachedOrBuildGeometry(geometryCache, geometryCacheKey) {
 				val tile = tiles[tileId]
 				when {
-					tile != null -> buildTileGeometry(tile, sampler, projection)
+					tile != null -> buildTileGeometry(tile, sampler, projection, gridQuads)
 					includePlaceholders -> buildPlaceholderGeometry(tileId, projection)
 					else -> null
 				}
@@ -101,7 +136,7 @@ object FlightTerrainMeshBuilder {
 	/**
 	 * A four-vertex Earth-positioned tile shown while its Terrarium payload is still loading.
 	 * It provides complete, stable coverage immediately; the repository invalidates it when
-	 * the real 33 x 33 geometry becomes available.
+	 * the real adaptive geometry becomes available.
 	 */
 	private fun buildPlaceholderGeometry(
 		tileId: TerrainTileId,
@@ -139,35 +174,37 @@ object FlightTerrainMeshBuilder {
 	private fun buildTileGeometry(
 		tile: TerrariumTile,
 		sampler: TileElevationSampler,
-		projection: FlightTerrainCoordinates
+		projection: FlightTerrainCoordinates,
+		gridQuads: Int
 	): FlightTerrainGeometry {
-		val vertices = FloatArray(GRID_SIZE * GRID_SIZE * VERTEX_COMPONENTS)
-		for (row in 0 until GRID_SIZE) {
-			val tileY = tile.id.y + row.toDouble() / GRID_QUADS
+		val gridSize = gridQuads + 1
+		val vertices = FloatArray(gridSize * gridSize * VERTEX_COMPONENTS)
+		for (row in 0 until gridSize) {
+			val tileY = tile.id.y + row.toDouble() / gridQuads
 			val latitude = FlightTerrainTilePlanner.tileYToLatitude(tileY, tile.id.zoom)
-			for (column in 0 until GRID_SIZE) {
-				val tileX = tile.id.x + column.toDouble() / GRID_QUADS
+			for (column in 0 until gridSize) {
+				val tileX = tile.id.x + column.toDouble() / gridQuads
 				val longitude = FlightTerrainTilePlanner.tileXToLongitude(tileX, tile.id.zoom)
 				val elevation = sampler.elevationAt(tileX, tileY, tile) ?: 0f
-				val position = projection.toLocal(latitude, longitude, max(0f, elevation).toDouble())
-				val offset = (row * GRID_SIZE + column) * VERTEX_COMPONENTS
+				val position = projection.toLocal(latitude, longitude, elevation.toDouble())
+				val offset = (row * gridSize + column) * VERTEX_COMPONENTS
 				vertices[offset] = position[0]
 				vertices[offset + 1] = position[1]
 				vertices[offset + 2] = position[2]
 				vertices[offset + 6] = elevation
-				vertices[offset + 7] = column.toFloat() / GRID_QUADS
-				vertices[offset + 8] = row.toFloat() / GRID_QUADS
+				vertices[offset + 7] = column.toFloat() / gridQuads
+				vertices[offset + 8] = row.toFloat() / gridQuads
 			}
 		}
-		calculateNormals(vertices)
+		calculateNormals(vertices, gridSize)
 
-		val indices = ShortArray(GRID_QUADS * GRID_QUADS * 6)
+		val indices = ShortArray(gridQuads * gridQuads * 6)
 		var indexOffset = 0
-		for (row in 0 until GRID_QUADS) {
-			for (column in 0 until GRID_QUADS) {
-				val topLeft = row * GRID_SIZE + column
+		for (row in 0 until gridQuads) {
+			for (column in 0 until gridQuads) {
+				val topLeft = row * gridSize + column
 				val topRight = topLeft + 1
-				val bottomLeft = topLeft + GRID_SIZE
+				val bottomLeft = topLeft + gridSize
 				val bottomRight = bottomLeft + 1
 				indices[indexOffset++] = topLeft.toShort()
 				indices[indexOffset++] = bottomLeft.toShort()
@@ -183,18 +220,22 @@ object FlightTerrainMeshBuilder {
 		)
 	}
 
-	private fun calculateNormals(vertices: FloatArray) {
-		for (row in 0 until GRID_SIZE) {
-			for (column in 0 until GRID_SIZE) {
-				val left = vertexPosition(vertices, row, (column - 1).coerceAtLeast(0))
-				val right = vertexPosition(vertices, row, (column + 1).coerceAtMost(GRID_SIZE - 1))
-				val top = vertexPosition(vertices, (row - 1).coerceAtLeast(0), column)
-				val bottom = vertexPosition(vertices, (row + 1).coerceAtMost(GRID_SIZE - 1), column)
-				val east = floatArrayOf(right[0] - left[0], right[1] - left[1], right[2] - left[2])
-				val south = floatArrayOf(bottom[0] - top[0], bottom[1] - top[1], bottom[2] - top[2])
-				var normalX = south[1] * east[2] - south[2] * east[1]
-				var normalY = south[2] * east[0] - south[0] * east[2]
-				var normalZ = south[0] * east[1] - south[1] * east[0]
+	private fun calculateNormals(vertices: FloatArray, gridSize: Int) {
+		for (row in 0 until gridSize) {
+			for (column in 0 until gridSize) {
+				val leftOffset = (row * gridSize + (column - 1).coerceAtLeast(0)) * VERTEX_COMPONENTS
+				val rightOffset = (row * gridSize + (column + 1).coerceAtMost(gridSize - 1)) * VERTEX_COMPONENTS
+				val topOffset = ((row - 1).coerceAtLeast(0) * gridSize + column) * VERTEX_COMPONENTS
+				val bottomOffset = ((row + 1).coerceAtMost(gridSize - 1) * gridSize + column) * VERTEX_COMPONENTS
+				val eastX = vertices[rightOffset] - vertices[leftOffset]
+				val eastY = vertices[rightOffset + 1] - vertices[leftOffset + 1]
+				val eastZ = vertices[rightOffset + 2] - vertices[leftOffset + 2]
+				val southX = vertices[bottomOffset] - vertices[topOffset]
+				val southY = vertices[bottomOffset + 1] - vertices[topOffset + 1]
+				val southZ = vertices[bottomOffset + 2] - vertices[topOffset + 2]
+				var normalX = southY * eastZ - southZ * eastY
+				var normalY = southZ * eastX - southX * eastZ
+				var normalZ = southX * eastY - southY * eastX
 				val length = sqrt(normalX * normalX + normalY * normalY + normalZ * normalZ).coerceAtLeast(1e-6f)
 				normalX /= length
 				normalY /= length
@@ -204,17 +245,12 @@ object FlightTerrainMeshBuilder {
 					normalY = -normalY
 					normalZ = -normalZ
 				}
-				val offset = (row * GRID_SIZE + column) * VERTEX_COMPONENTS
+				val offset = (row * gridSize + column) * VERTEX_COMPONENTS
 				vertices[offset + 3] = normalX
 				vertices[offset + 4] = normalY
 				vertices[offset + 5] = normalZ
 			}
 		}
-	}
-
-	private fun vertexPosition(vertices: FloatArray, row: Int, column: Int): FloatArray {
-		val offset = (row * GRID_SIZE + column) * VERTEX_COMPONENTS
-		return floatArrayOf(vertices[offset], vertices[offset + 1], vertices[offset + 2])
 	}
 
 	private class TileElevationSampler(

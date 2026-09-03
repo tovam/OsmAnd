@@ -335,7 +335,8 @@ class FlightJourneyStore(private val context: Context) {
 				localPath = destination.absolutePath,
 				timestampMillis = timestamp,
 				matchedSamplePosition = matchPhotoPosition(trip, timestamp),
-				timestampSource = detectedTimestamp?.source
+				timestampSource = detectedTimestamp?.source,
+				cameraVerticalFieldOfViewDegrees = FlightPhotoPerspective.detectVerticalFieldOfViewDegrees(destination)
 			)
 		}.getOrNull()
 	}
@@ -367,6 +368,9 @@ class FlightJourneyStore(private val context: Context) {
 		FlightSampleInterpolator.positionAtTimestamp(trip, timestamp, PHOTO_MATCH_TOLERANCE_MILLIS)
 			?.let(FlightSampleInterpolator::quantizePosition)
 
+	fun detectPhotoVerticalFieldOfViewDegrees(photo: FlightPhotoAttachment): Float? =
+		FlightPhotoPerspective.detectVerticalFieldOfViewDegrees(File(photo.localPath))
+
 	fun createCaptureFile(): File = File(mediaDirectory, "${UUID.randomUUID()}.jpg")
 
 	fun capturedPhoto(
@@ -390,6 +394,7 @@ class FlightJourneyStore(private val context: Context) {
 			timestampSource = if (exifTimestamp != null) {
 				FlightPhotoTimestampSource.EXIF
 			} else FlightPhotoTimestampSource.LIVE_CAPTURE,
+			cameraVerticalFieldOfViewDegrees = FlightPhotoPerspective.detectVerticalFieldOfViewDegrees(file),
 			includeMainCamera = includeMainCamera,
 			includeSelfie = includeSelfie,
 			includeMap = includeMap,
@@ -434,6 +439,7 @@ class FlightJourneyStore(private val context: Context) {
 					putOptional("timestampMillis", photo.timestampMillis)
 					putOptional("timestampSource", photo.timestampSource?.name)
 					putOptional("matchedSamplePosition", photo.matchedSamplePosition)
+					putOptional("cameraVerticalFieldOfViewDegrees", photo.cameraVerticalFieldOfViewDegrees)
 					put("rotationDegrees", normalizePhotoRotation(photo.rotationDegrees))
 					put("includeMainCamera", photo.includeMainCamera)
 					put("includeSelfie", photo.includeSelfie)
@@ -469,6 +475,13 @@ class FlightJourneyStore(private val context: Context) {
 					timestampSource = json.optString("timestampSource").takeIf(String::isNotBlank)?.let { value ->
 						runCatching { FlightPhotoTimestampSource.valueOf(value) }.getOrNull()
 					},
+					cameraVerticalFieldOfViewDegrees = json.optNullableDouble("cameraVerticalFieldOfViewDegrees")
+						?.toFloat()
+						?.takeIf { it.isFinite() }
+						?.coerceIn(
+							FlightWindowPlacement.MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
+							FlightWindowPlacement.MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
+						),
 					rotationDegrees = normalizePhotoRotation(json.optDouble("rotationDegrees", 0.0).toFloat()),
 					includeMainCamera = json.optBoolean("includeMainCamera", true),
 					includeSelfie = json.optBoolean("includeSelfie", false),
@@ -974,7 +987,7 @@ class FlightJourneyStore(private val context: Context) {
 
 	companion object {
 		const val ARCHIVE_EXTENSION = "osmandflight"
-		private const val SCHEMA_VERSION = 5
+		private const val SCHEMA_VERSION = 6
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
 		private const val MEDIA_DIRECTORY = "flight-journey-media"
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"

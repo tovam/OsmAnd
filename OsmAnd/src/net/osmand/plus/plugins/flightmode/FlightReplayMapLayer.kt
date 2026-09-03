@@ -69,6 +69,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private var aircraftModelRequested = false
 	private var aircraftGroundAltitudeMeters = Float.NaN
 	private var lastAircraftVectorUpdateMillis = 0L
+	private var cartographicTopDown = false
 	private val fallbackAircraftBitmap: Bitmap? by lazy(LazyThreadSafetyMode.NONE) {
 		runCatching {
 			context.assets.open(AIRCRAFT_FALLBACK_BITMAP_ASSET).use { stream ->
@@ -160,6 +161,20 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			photoGeometryDirty = true
 			aircraftDirty = true
 			mapRendererChanged = false
+		}
+		val shouldUseCartographicTopDown = view?.elevationAngle?.let {
+			it >= CARTOGRAPHIC_TOP_DOWN_MINIMUM_ANGLE
+		} ?: false
+		if (cartographicTopDown != shouldUseCartographicTopDown) {
+			cartographicTopDown = shouldUseCartographicTopDown
+			// A perspective camera still produces parallax for geometry 12 km above the
+			// ground when looking straight down. In the exact top view, use the native
+			// surface projection so a pan cannot slide the trace over the basemap.
+			clearNativeCollections()
+			routeGeometryDirty = true
+			pointGeometryDirty = true
+			photoGeometryDirty = true
+			aircraftDirty = true
 		}
 
 		if (routeGeometryDirty) rebuildRoute(current.trip)
@@ -287,7 +302,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				points = points,
 				heights = heights
 			)
-			lineId = buildCorridorFramework(collection, lineId, lineScale, samples, range)
+			if (!cartographicTopDown) {
+				lineId = buildCorridorFramework(collection, lineId, lineScale, samples, range)
+			}
 		}
 		if (collection.getLinesCount() > 0) routeLinesCollection = collection
 		routeGeometryDirty = false
@@ -309,9 +326,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			.setLineWidth(width)
 			.setPoints(points)
 			.setHeights(heights)
-			.setElevationScaleFactor(1f)
-			.setElevatedLineVisibility(true)
-			.setSurfaceLineVisibility(false)
+			.setElevationScaleFactor(if (cartographicTopDown) 0f else 1f)
+			.setElevatedLineVisibility(!cartographicTopDown)
+			.setSurfaceLineVisibility(cartographicTopDown)
 			.setOutlineWidth(0.0)
 			.setNearOutlineColor(NativeUtilities.createFColorARGB(Color.TRANSPARENT))
 			.setFarOutlineColor(NativeUtilities.createFColorARGB(Color.TRANSPARENT))
@@ -436,7 +453,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				.setBaseOrder(pointsOrder)
 				.setPosition(point31(samples[index]))
 				.setHeight(nativeHeights[index])
-				.setElevationScaleFactor(1f)
+				.setElevationScaleFactor(if (cartographicTopDown) 0f else 1f)
 				.setIsHidden(false)
 				.setIsAccuracyCircleSupported(false)
 				.setPinIconHorisontalAlignment(MapMarker.PinIconHorisontalAlignment.CenterHorizontal)
@@ -469,7 +486,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				.setBaseOrder(pointsOrder - 2)
 				.setPosition(point31(sample))
 				.setHeight(visualHeightForSample(trip, sample) + PHOTO_MARKER_CLEARANCE_METERS)
-				.setElevationScaleFactor(1f)
+				.setElevationScaleFactor(if (cartographicTopDown) 0f else 1f)
 				.setIsHidden(false)
 				.setIsAccuracyCircleSupported(false)
 				.setPinIconHorisontalAlignment(MapMarker.PinIconHorisontalAlignment.CenterHorizontal)
@@ -488,7 +505,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	) {
 		clearAircraftLinesCollection()
 		aircraftGroundAltitudeMeters = groundAltitudeMeters
-		if (sample == null) {
+		if (sample == null || cartographicTopDown) {
 			aircraftDirty = false
 			return
 		}
@@ -546,7 +563,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				.setBaseOrder(pointsOrder - 8)
 				.setPosition(point31(sample))
 				.setHeight(altitude)
-				.setElevationScaleFactor(1f)
+				.setElevationScaleFactor(if (cartographicTopDown) 0f else 1f)
 				.setIsHidden(false)
 				.setIsAccuracyCircleSupported(false)
 				.setPinIconHorisontalAlignment(MapMarker.PinIconHorisontalAlignment.CenterHorizontal)
@@ -817,6 +834,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val AIRCRAFT_MINIMUM_BITMAP_PIXELS = 48
 		private const val AIRCRAFT_MODEL_DIRECTION_OFFSET_DEGREES = -90f
 		private const val AIRCRAFT_VECTOR_UPDATE_INTERVAL_MILLIS = 200L
+		private const val CARTOGRAPHIC_TOP_DOWN_MINIMUM_ANGLE = 89.5f
 		private const val TETHER_WIDTH_DP = 1.7
 		private const val TETHER_SLEEVE_EXTRA_WIDTH_DP = 2.2
 		private const val TETHER_HORIZONTAL_OFFSET_METERS = 0.10

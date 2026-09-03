@@ -3,6 +3,7 @@ package net.osmand.test.junit
 import net.osmand.plus.plugins.flightmode.FlightLeg
 import net.osmand.plus.plugins.flightmode.FlightCabinSide
 import net.osmand.plus.plugins.flightmode.FlightPlan
+import net.osmand.plus.plugins.flightmode.FlightPhotoPerspective
 import net.osmand.plus.plugins.flightmode.FlightPhotoTimestampParser
 import net.osmand.plus.plugins.flightmode.FlightPhotoWindowAlignment
 import net.osmand.plus.plugins.flightmode.FlightProfilePlanner
@@ -17,6 +18,7 @@ import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
 import net.osmand.plus.plugins.flightmode.FlightTerrainGeometry
 import net.osmand.plus.plugins.flightmode.FlightTerrainGeometryCacheKey
+import net.osmand.plus.plugins.flightmode.FlightTerrainGeometryLodPolicy
 import net.osmand.plus.plugins.flightmode.FlightTerrainLodPolicy
 import net.osmand.plus.plugins.flightmode.FlightTerrainMeshBuilder
 import net.osmand.plus.plugins.flightmode.FlightTerrainTextureTier
@@ -30,6 +32,9 @@ import net.osmand.plus.plugins.flightmode.FlightWindowPhotoOverlay
 import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
 import net.osmand.plus.plugins.flightmode.geometry
 import net.osmand.plus.plugins.flightmode.dampedFlightPinchFactor
+import net.osmand.plus.plugins.flightmode.horizontalFieldOfViewDegrees
+import net.osmand.plus.plugins.flightmode.linkedFlightWindowTransform
+import net.osmand.plus.plugins.flightmode.verticalFieldOfViewDegrees
 import net.osmand.plus.plugins.flightmode.viewAzimuthDegrees
 import net.osmand.plus.plugins.flightmode.TerrainTileId
 import net.osmand.plus.plugins.flightmode.TerrainTilePlan
@@ -296,6 +301,62 @@ class FlightModeLogicTest {
 	}
 
 	@Test
+	fun linkedHublotGestureMovesCameraAndPhotoWithTheSameProjection() {
+		val placement = FlightWindowPlacement(zoom = 1f)
+		val overlay = FlightWindowPhotoOverlay(
+			photoId = "photo-1",
+			scale = 1.2f,
+			offsetXFraction = 0.10f,
+			offsetYFraction = -0.05f,
+			gestureTarget = FlightWindowGestureTarget.LINKED
+		)
+		val result = linkedFlightWindowTransform(
+			placement = placement,
+			look = FlightWindowLook(),
+			photoOverlay = overlay,
+			panXFraction = 0.08f,
+			panYFraction = -0.04f,
+			rawZoomFactor = 1.44f,
+			viewAspectRatio = 1.5f
+		)
+		val expectedMagnification = (
+			kotlin.math.tan(Math.toRadians((placement.verticalFieldOfViewDegrees() / 2f).toDouble())) /
+				kotlin.math.tan(Math.toRadians((result.placement.verticalFieldOfViewDegrees() / 2f).toDouble()))
+		).toFloat()
+		val horizontalFovAfter = result.placement.horizontalFieldOfViewDegrees(1.5f)
+		val expectedPanX = -0.5f * (
+			kotlin.math.tan(Math.toRadians(result.look.yawDegrees.toDouble())) /
+				kotlin.math.tan(Math.toRadians((horizontalFovAfter / 2f).toDouble()))
+		).toFloat()
+		val expectedPanY = 0.5f * (
+			kotlin.math.tan(Math.toRadians(result.look.pitchDegrees.toDouble())) /
+				kotlin.math.tan(Math.toRadians((result.placement.verticalFieldOfViewDegrees() / 2f).toDouble()))
+		).toFloat()
+
+		assertTrue(result.look.yawDegrees < 0f)
+		assertTrue(result.look.pitchDegrees < 0f)
+		assertEquals(1.2f, result.placement.zoom, 0.0001f)
+		assertEquals(overlay.scale * expectedMagnification, result.photoOverlay.scale, 0.0001f)
+		assertEquals(overlay.offsetXFraction * expectedMagnification + expectedPanX, result.photoOverlay.offsetXFraction, 0.0001f)
+		assertEquals(overlay.offsetYFraction * expectedMagnification + expectedPanY, result.photoOverlay.offsetYFraction, 0.0001f)
+		assertEquals(FlightWindowGestureTarget.LINKED, result.photoOverlay.gestureTarget)
+	}
+
+	@Test
+	fun photoPerspectiveUsesEquivalentLensAndDisplayedOrientation() {
+		val landscape = FlightPhotoPerspective.verticalFieldOfViewFrom35mm(24.0, 4_000, 3_000)
+		val portrait = FlightPhotoPerspective.verticalFieldOfViewFrom35mm(24.0, 3_000, 4_000)
+
+		assertTrue(landscape != null && landscape in 55f..58f)
+		assertTrue(portrait != null && portrait in 70f..73f)
+		assertEquals(
+			FlightWindowPlacement.DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES / landscape!!,
+			FlightPhotoPerspective.windowZoomForVerticalFieldOfView(landscape),
+			0.0001f
+		)
+	}
+
+	@Test
 	fun missingGpxBearingsAreDerivedFromTheTrack() {
 		val eastbound = listOf(
 			sample(0, 0L, 48.0, 2.0).copy(bearingDegrees = null),
@@ -378,6 +439,16 @@ class FlightModeLogicTest {
 	}
 
 	@Test
+	fun localTerrainCoordinatesKeepOneMetreOfVerticalScaleAsOneMetre() {
+		val projection = FlightTerrainCoordinates(42.0, 19.0)
+		val point = projection.toLocal(42.0, 19.0, 1_234.5)
+
+		assertEquals(0f, point[0], 0.01f)
+		assertEquals(1_234.5f, point[1], 0.01f)
+		assertEquals(0f, point[2], 0.01f)
+	}
+
+	@Test
 	fun terrainIsBuiltAsTrianglesInsteadOfColumns() {
 		val zoom = 8
 		val tileId = TerrainTileId(
@@ -396,6 +467,55 @@ class FlightModeLogicTest {
 		assertEquals(1, scene.meshes.size)
 		assertEquals(33 * 33 * FlightTerrainMeshBuilder.VERTEX_COMPONENTS, scene.meshes.single().vertices.size)
 		assertEquals(32 * 32 * 6, scene.meshes.single().indices.size)
+	}
+
+	@Test
+	fun terrainGeometryKeepsNearlyEverySourceSampleAroundTheAircraft() {
+		val zoom = 8
+		val tileId = TerrainTileId(
+			zoom,
+			FlightTerrainTilePlanner.longitudeToTileX(19.0, zoom).toInt(),
+			FlightTerrainTilePlanner.latitudeToTileY(42.0, zoom).toInt()
+		)
+		val tile = TerrariumTile(tileId, 256, 256, FloatArray(256 * 256) { it.toFloat() })
+		val scene = FlightTerrainMeshBuilder.build(
+			centerLatitude = 42.0,
+			centerLongitude = 19.0,
+			radiusKm = 300,
+			plan = TerrainTilePlan(zoom, listOf(tileId)),
+			tiles = mapOf(tileId to tile),
+			geometryQuadsByTile = mapOf(tileId to FlightTerrainMeshBuilder.MAXIMUM_GRID_QUADS)
+		)
+
+		assertEquals(
+			256 * 256 * FlightTerrainMeshBuilder.VERTEX_COMPONENTS,
+			scene.meshes.single().vertices.size
+		)
+		assertEquals(255 * 255 * 6, scene.meshes.single().indices.size)
+	}
+
+	@Test
+	fun terrainGeometryLodIsDetailedNearbyAndIndependentFromTextureQuality() {
+		assertEquals(255, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 0.0))
+		assertEquals(128, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 80.0))
+		assertEquals(32, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 200.0))
+	}
+
+	@Test
+	fun terrainGeometryDoesNotClampPlacesBelowSeaLevel() {
+		val tileId = TerrainTileId(8, 141, 95)
+		val north = FlightTerrainTilePlanner.tileYToLatitude(tileId.y.toDouble(), tileId.zoom)
+		val west = FlightTerrainTilePlanner.tileXToLongitude(tileId.x.toDouble(), tileId.zoom)
+		val tile = TerrariumTile(tileId, 256, 256, FloatArray(256 * 256) { -100f })
+		val scene = FlightTerrainMeshBuilder.build(
+			centerLatitude = north,
+			centerLongitude = west,
+			radiusKm = 50,
+			plan = TerrainTilePlan(tileId.zoom, listOf(tileId)),
+			tiles = mapOf(tileId to tile)
+		)
+
+		assertEquals(-100f, scene.meshes.single().vertices[1], 0.05f)
 	}
 
 	@Test

@@ -151,6 +151,9 @@
 	<string name="flight_mode_photo_overlay_close">Retirer</string>
 	<string name="flight_mode_gesture_view">Pincer la vue</string>
 	<string name="flight_mode_gesture_photo">Manipuler la photo</string>
+	<string name="flight_mode_gesture_linked">Vue + photo liées</string>
+	<string name="flight_mode_photo_fov_pair">Vue %1$.0f° · photo ≈%2$.0f°</string>
+	<string name="flight_mode_photo_fov_view_only">Vue %1$.0f° · objectif inconnu</string>
 	<string name="flight_mode_reset">Réinitialiser</string>
 	<string name="flight_mode_photo_unmatch">Dissocier</string>
 	<string name="flight_mode_photo_preview_loading">Chargement de l’aperçu…</string>

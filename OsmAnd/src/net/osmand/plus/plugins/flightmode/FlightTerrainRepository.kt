@@ -47,10 +47,25 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		0.75f,
 		true
 	) {
-		override fun removeEldestEntry(
-			eldest: MutableMap.MutableEntry<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>?
-		): Boolean =
-			size > MAXIMUM_GEOMETRY_CACHE_TILES
+		override fun put(
+			key: FlightTerrainGeometryCacheKey,
+			value: FlightTerrainGeometry
+		): FlightTerrainGeometry? {
+			val previous = super.put(key, value)
+			var bytes = values.sumOf { geometry -> geometryBytes(geometry) }
+			val iterator = entries.iterator()
+			while (iterator.hasNext() &&
+				(size > MAXIMUM_GEOMETRY_CACHE_TILES || bytes > MAXIMUM_GEOMETRY_CACHE_BYTES)
+			) {
+				val entry = iterator.next()
+				bytes -= geometryBytes(entry.value)
+				iterator.remove()
+			}
+			return previous
+		}
+
+		private fun geometryBytes(geometry: FlightTerrainGeometry): Long =
+			geometry.vertices.size.toLong() * FLOAT_BYTES + geometry.indices.size.toLong() * SHORT_BYTES
 	}
 	private val geometryGeneration = AtomicLong(1L)
 	private val coordinateOriginLock = Any()
@@ -84,6 +99,12 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val origin = coordinateOriginFor(latitude, longitude)
 		val orderedTiles = plan.tiles.sortedBy { tile -> tileDistanceKm(tile, latitude, longitude) }
 		val orderedPlan = plan.copy(tiles = orderedTiles)
+		val geometryQuadsByTile = orderedTiles.associateWith { tile ->
+			FlightTerrainGeometryLodPolicy.quadsForDistance(
+				radiusKm,
+				tileNearestDistanceKm(tile, latitude, longitude)
+			)
+		}
 		val targetTierByTile = selectTextureTiers(
 			tiles = orderedTiles,
 			latitude = latitude,
@@ -161,7 +182,11 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			orderedTiles.count { activeTextureTiers[it] == tier }
 
 		fun estimatedVisibleGpuBytes(): Long {
-			val geometryBytes = tiles.size.toLong() * ESTIMATED_GEOMETRY_BYTES_PER_TILE
+			val geometryBytes = tiles.keys.sumOf { tileId ->
+				FlightTerrainGeometryLodPolicy.estimatedBytes(
+					geometryQuadsByTile[tileId] ?: FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS
+				)
+			}
 			val placeholderBytes = (orderedTiles.size - tiles.size).coerceAtLeast(0).toLong() *
 				ESTIMATED_PLACEHOLDER_GEOMETRY_BYTES_PER_TILE
 			val standardBaseBytes = orderedTiles.count { standardTexturePaths[it] != null }.toLong() *
@@ -235,8 +260,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					nativeMapRequested = includeNativeMap,
 					coordinateOriginLatitude = origin.first,
 					coordinateOriginLongitude = origin.second,
+					geometryQuadsByTile = geometryQuadsByTile,
 					geometryCache = geometryCache,
-					geometryGeneration = sceneGeometryGeneration(tiles.keys),
+					geometryGeneration = sceneGeometryGeneration(tiles.keys, geometryQuadsByTile),
 					includePlaceholders = true
 				)
 			}
@@ -442,8 +468,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				nativeMapRequested = includeNativeMap,
 				coordinateOriginLatitude = origin.first,
 				coordinateOriginLongitude = origin.second,
+				geometryQuadsByTile = geometryQuadsByTile,
 				geometryCache = geometryCache,
-				geometryGeneration = sceneGeometryGeneration(tiles.keys),
+				geometryGeneration = sceneGeometryGeneration(tiles.keys, geometryQuadsByTile),
 				includePlaceholders = true
 			)
 		}
@@ -850,12 +877,16 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		}
 	}
 
-	private fun sceneGeometryGeneration(tileIds: Collection<TerrainTileId>): Long {
+	private fun sceneGeometryGeneration(
+		tileIds: Collection<TerrainTileId>,
+		geometryQuadsByTile: Map<TerrainTileId, Int>
+	): Long {
 		var result = geometryGeneration.get()
 		tileIds.sortedWith(compareBy<TerrainTileId>({ it.zoom }, { it.y }, { it.x })).forEach { tile ->
 			result = result * 31L + tile.zoom
 			result = result * 31L + tile.x
 			result = result * 31L + tile.y
+			result = result * 31L + (geometryQuadsByTile[tile] ?: FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS)
 		}
 		return result
 	}
@@ -1054,13 +1085,13 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		private const val MAX_TILE_BYTES = 4L * 1_024L * 1_024L
 		private const val COMPOSITE_JPEG_QUALITY = 92
 		private const val MAXIMUM_DECODED_TERRAIN_TILES = 384
-		private const val MAXIMUM_GEOMETRY_CACHE_TILES = 768
+		private const val MAXIMUM_GEOMETRY_CACHE_TILES = 384
+		private const val MAXIMUM_GEOMETRY_CACHE_BYTES = 96L * 1_024L * 1_024L
 		private const val MAXIMUM_LOD_HISTORY_TILES = 2_048
 		private const val LOD_HYSTERESIS_FACTOR = 1.18
 		// Keeps a continental trip resident while bounding float-coordinate error in
 		// the GLES 2.0 view and shadow matrices on very long flights.
 		private const val COORDINATE_ORIGIN_RESET_DISTANCE_KM = 2_000.0
-		private const val ESTIMATED_GEOMETRY_BYTES_PER_TILE = 51_500L
 		private const val ESTIMATED_PLACEHOLDER_GEOMETRY_BYTES_PER_TILE = 156L
 		private const val FLOAT_BYTES = 4L
 		private const val SHORT_BYTES = 2L

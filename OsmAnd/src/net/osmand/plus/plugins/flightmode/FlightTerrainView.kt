@@ -852,9 +852,15 @@ class FlightTerrainView @JvmOverloads constructor(
 		}
 
 		private fun evictGeometryCache(activeTileIds: Set<TerrainTileId>) {
-			while (geometryCache.size > MAXIMUM_RENDER_GEOMETRIES) {
+			var totalBytes = geometryCache.values.sumOf { it.bytes }
+			while (geometryCache.size > MAXIMUM_RENDER_GEOMETRIES ||
+				totalBytes > MAXIMUM_RENDER_GEOMETRY_BYTES
+			) {
 				val candidate = geometryCache.entries.firstOrNull { it.key !in activeTileIds } ?: break
-				geometryCache.remove(candidate.key)?.let(::releaseGeometry)
+				geometryCache.remove(candidate.key)?.let { geometry ->
+					totalBytes -= geometry.bytes
+					releaseGeometry(geometry)
+				}
 			}
 		}
 
@@ -959,6 +965,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SHORT_BYTES = 2
 			private const val RGB_565_BYTES_PER_PIXEL = 2L
 			private const val MAXIMUM_RENDER_GEOMETRIES = 768
+			private const val MAXIMUM_RENDER_GEOMETRY_BYTES = 96L * 1_024L * 1_024L
 			private const val MAXIMUM_TEXTURE_CACHE_BYTES = 128L * 1_024L * 1_024L
 			private const val MAXIMUM_TEXTURE_UPLOADS_PER_FRAME = 2
 			private const val MAXIMUM_TEXTURE_UPLOAD_BYTES_PER_FRAME = 8L * 1_024L * 1_024L

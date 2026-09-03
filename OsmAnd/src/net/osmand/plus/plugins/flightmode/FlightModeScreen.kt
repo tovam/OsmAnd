@@ -189,6 +189,7 @@ fun FlightModeScreen(
 	onSetWindowPhotoOpacity: (Float) -> Unit,
 	onSetWindowGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onTransformWindowPhoto: (Float, Float, Float) -> Unit,
+	onTransformLinkedWindowView: (Float, Float, Float, Float) -> Unit,
 	onResetWindowPhotoTransform: () -> Unit,
 	onClearWindowPhotoOverlay: () -> Unit,
 	onUpdateJourneyName: (String) -> Unit,
@@ -315,6 +316,7 @@ fun FlightModeScreen(
 					onSetPhotoOpacity = onSetWindowPhotoOpacity,
 					onSetGestureTarget = onSetWindowGestureTarget,
 					onTransformPhoto = onTransformWindowPhoto,
+					onTransformLinkedView = onTransformLinkedWindowView,
 					onRotatePhoto = onRotatePhoto,
 					onResetPhotoTransform = onResetWindowPhotoTransform,
 					onClearPhoto = onClearWindowPhotoOverlay,
@@ -889,6 +891,7 @@ private fun WindowScreen(
 	onSetPhotoOpacity: (Float) -> Unit,
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onTransformPhoto: (Float, Float, Float) -> Unit,
+	onTransformLinkedView: (Float, Float, Float, Float) -> Unit,
 	onRotatePhoto: (String, Float) -> Unit,
 	onResetPhotoTransform: () -> Unit,
 	onClearPhoto: () -> Unit,
@@ -925,6 +928,7 @@ private fun WindowScreen(
 				onRecenterLook = onRecenterLook,
 				onChangeZoom = onChangeZoom,
 				onTransformPhoto = onTransformPhoto,
+				onTransformLinkedView = onTransformLinkedView,
 				onSetPhotoOpacity = onSetPhotoOpacity,
 				onSetGestureTarget = onSetGestureTarget,
 				onResetPhotoTransform = onResetPhotoTransform,
@@ -2446,6 +2450,7 @@ private fun FlightWindowScene(
 	onRecenterLook: () -> Unit,
 	onChangeZoom: (Float) -> Unit,
 	onTransformPhoto: (Float, Float, Float) -> Unit,
+	onTransformLinkedView: (Float, Float, Float, Float) -> Unit,
 	onSetPhotoOpacity: (Float) -> Unit,
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onResetPhotoTransform: () -> Unit,
@@ -2462,6 +2467,7 @@ private fun FlightWindowScene(
 	val latestChangeZoom by rememberUpdatedState(onChangeZoom)
 	val latestPhotoOverlay by rememberUpdatedState(photoOverlay)
 	val latestTransformPhoto by rememberUpdatedState(onTransformPhoto)
+	val latestTransformLinkedView by rememberUpdatedState(onTransformLinkedView)
 	val latestRotatePhoto by rememberUpdatedState(onRotatePhoto)
 	var sceneAspectRatio by remember { mutableStateOf(1f) }
 	val activePhoto = photo?.takeIf { photoOverlay.photoId == it.id }
@@ -2474,28 +2480,40 @@ private fun FlightWindowScene(
 			}
 			.pointerInput(Unit) {
 				detectTransformGestures { _, pan, zoom, rotationDegrees ->
-					val manipulatePhoto = latestPhotoOverlay.photoId != null &&
-						latestPhotoOverlay.gestureTarget == FlightWindowGestureTarget.PHOTO
-					if (manipulatePhoto) {
-						latestTransformPhoto(
-							pan.x / size.width.coerceAtLeast(1),
-							pan.y / size.height.coerceAtLeast(1),
-							zoom
-						)
-						if (abs(rotationDegrees) >= 0.01f) {
-							latestActivePhotoId?.let { latestRotatePhoto(it, rotationDegrees) }
+					val photoPresent = latestPhotoOverlay.photoId != null
+					when {
+						photoPresent && latestPhotoOverlay.gestureTarget == FlightWindowGestureTarget.PHOTO -> {
+							latestTransformPhoto(
+								pan.x / size.width.coerceAtLeast(1),
+								pan.y / size.height.coerceAtLeast(1),
+								zoom
+							)
+							if (abs(rotationDegrees) >= 0.01f) {
+								latestActivePhotoId?.let { latestRotatePhoto(it, rotationDegrees) }
+							}
 						}
-					} else if (pan != Offset.Zero) {
-						val horizontalFov = latestPlacement.horizontalFieldOfViewDegrees(
-							size.width.toFloat() / size.height.coerceAtLeast(1)
-						)
-						val verticalFov = latestPlacement.verticalFieldOfViewDegrees()
-						latestMoveLook(
-							-pan.x / size.width.coerceAtLeast(1) * horizontalFov,
-							pan.y / size.height.coerceAtLeast(1) * verticalFov
-						)
+						photoPresent && latestPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED -> {
+							latestTransformLinkedView(
+								pan.x / size.width.coerceAtLeast(1),
+								pan.y / size.height.coerceAtLeast(1),
+								zoom,
+								size.width.toFloat() / size.height.coerceAtLeast(1)
+							)
+						}
+						else -> {
+							if (pan != Offset.Zero) {
+								val horizontalFov = latestPlacement.horizontalFieldOfViewDegrees(
+									size.width.toFloat() / size.height.coerceAtLeast(1)
+								)
+								val verticalFov = latestPlacement.verticalFieldOfViewDegrees()
+								latestMoveLook(
+									-pan.x / size.width.coerceAtLeast(1) * horizontalFov,
+									pan.y / size.height.coerceAtLeast(1) * verticalFov
+								)
+							}
+							if (abs(zoom - 1f) > 0.002f) latestChangeZoom(zoom)
+						}
 					}
-					if (!manipulatePhoto && abs(zoom - 1f) > 0.002f) latestChangeZoom(zoom)
 				}
 			}
 	) {
@@ -2556,6 +2574,7 @@ private fun FlightWindowScene(
 			WindowPhotoOverlayControls(
 				photo = overlayPhoto,
 				overlay = photoOverlay,
+				viewVerticalFovDegrees = placement.verticalFieldOfViewDegrees(),
 				onSetOpacity = onSetPhotoOpacity,
 				onSetGestureTarget = onSetGestureTarget,
 				onResetTransform = onResetPhotoTransform,
@@ -2666,6 +2685,7 @@ private fun FlightWindowPhotoOverlayImage(
 private fun WindowPhotoOverlayControls(
 	photo: FlightPhotoAttachment,
 	overlay: FlightWindowPhotoOverlay,
+	viewVerticalFovDegrees: Float,
 	onSetOpacity: (Float) -> Unit,
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onResetTransform: () -> Unit,
@@ -2686,6 +2706,15 @@ private fun WindowPhotoOverlayControls(
 				modifier = Modifier.weight(1f)
 			)
 			Text(
+				text = photo.cameraVerticalFieldOfViewDegrees?.let { photoFov ->
+					stringResource(R.string.flight_mode_photo_fov_pair, viewVerticalFovDegrees, photoFov)
+				} ?: stringResource(R.string.flight_mode_photo_fov_view_only, viewVerticalFovDegrees),
+				color = FlightBlue,
+				fontSize = 7.sp,
+				maxLines = 1,
+				modifier = Modifier.padding(horizontal = 4.dp)
+			)
+			Text(
 				stringResource(R.string.flight_mode_photo_overlay_close).uppercase(),
 				color = FlightMuted,
 				fontSize = 8.sp,
@@ -2701,7 +2730,8 @@ private fun WindowPhotoOverlayControls(
 		Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
 			listOf(
 				FlightWindowGestureTarget.VIEW to stringResource(R.string.flight_mode_gesture_view),
-				FlightWindowGestureTarget.PHOTO to stringResource(R.string.flight_mode_gesture_photo)
+				FlightWindowGestureTarget.PHOTO to stringResource(R.string.flight_mode_gesture_photo),
+				FlightWindowGestureTarget.LINKED to stringResource(R.string.flight_mode_gesture_linked)
 			).forEach { (target, label) ->
 				val selected = overlay.gestureTarget == target
 				Box(
@@ -3539,7 +3569,8 @@ private fun FlightModePreview(state: FlightUiState) {
 		onAssociatePhotoAutomatically = {}, onAssociatePhotoAtCurrentReplay = {},
 		onClearPhotoAssociation = {}, onRotatePhoto = { _, _ -> }, onOpenPhotoOnMap = {}, onOpenPhotoInWindow = {},
 		onSetWindowPhotoOpacity = {}, onSetWindowGestureTarget = {},
-		onTransformWindowPhoto = { _, _, _ -> }, onResetWindowPhotoTransform = {}, onClearWindowPhotoOverlay = {},
+		onTransformWindowPhoto = { _, _, _ -> }, onTransformLinkedWindowView = { _, _, _, _ -> },
+		onResetWindowPhotoTransform = {}, onClearWindowPhotoOverlay = {},
 		onUpdateJourneyName = {}, onSaveJourney = {}, onExportJourney = {}, onOpenJourney = {},
 		onOpenDuplicateJourney = {}, onContinueDuplicateImport = {}, onDismissDuplicateImport = {}
 	)

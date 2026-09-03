@@ -1110,6 +1110,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		selectPhoto(id)
 		if (photo.matchedSamplePosition != null) {
 			val savedAlignment = photo.windowAlignment?.clamped()
+			val detectedFov = photo.cameraVerticalFieldOfViewDegrees
+			val initialPlacement = savedAlignment?.windowPlacement ?: detectedFov?.let { verticalFov ->
+				uiState.windowPlacement.copy(
+					zoom = FlightPhotoPerspective.windowZoomForVerticalFieldOfView(verticalFov)
+				).clamped()
+			} ?: uiState.windowPlacement
 			uiState = uiState.copy(
 				page = FlightPage.WINDOW,
 				windowPhotoOverlay = savedAlignment?.let { alignment ->
@@ -1119,13 +1125,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 						scale = alignment.scale,
 						offsetXFraction = alignment.offsetXFraction,
 						offsetYFraction = alignment.offsetYFraction,
-						gestureTarget = FlightWindowGestureTarget.PHOTO
+						gestureTarget = FlightWindowGestureTarget.LINKED
 					).clamped()
 				} ?: FlightWindowPhotoOverlay(
 					photoId = id,
 					gestureTarget = FlightWindowGestureTarget.PHOTO
 				),
-				windowPlacement = savedAlignment?.windowPlacement ?: uiState.windowPlacement,
+				windowPlacement = initialPlacement,
 				windowLook = savedAlignment?.windowLook ?: uiState.windowLook,
 				windowAltitudeOverrideMeters = if (savedAlignment != null) {
 					savedAlignment.altitudeOverrideMeters
@@ -1133,6 +1139,30 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					uiState.windowAltitudeOverrideMeters
 				}
 			)
+			if (detectedFov == null) detectAndApplyPhotoPerspective(id)
+		}
+	}
+
+	private fun detectAndApplyPhotoPerspective(id: String) {
+		viewModelScope.launch {
+			val photo = findPhoto(id) ?: return@launch
+			val detectedFov = withContext(Dispatchers.IO) {
+				journeyStore.detectPhotoVerticalFieldOfViewDegrees(photo)
+			} ?: return@launch
+			val latestPhoto = findPhoto(id) ?: return@launch
+			if (latestPhoto.cameraVerticalFieldOfViewDegrees == null) {
+				replacePhoto(
+					latestPhoto.copy(cameraVerticalFieldOfViewDegrees = detectedFov),
+					message = null
+				)
+			}
+			if (uiState.windowPhotoOverlay.photoId == id && latestPhoto.windowAlignment == null) {
+				val placement = uiState.windowPlacement.copy(
+					zoom = FlightPhotoPerspective.windowZoomForVerticalFieldOfView(detectedFov)
+				).clamped()
+				uiState = uiState.copy(windowPlacement = placement)
+				storeActiveWindowPhotoAlignment()
+			}
 		}
 	}
 
@@ -1144,7 +1174,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun setWindowGestureTarget(target: FlightWindowGestureTarget) {
-		if (target == FlightWindowGestureTarget.PHOTO && uiState.windowPhotoOverlay.photoId == null) return
+		if (target != FlightWindowGestureTarget.VIEW && uiState.windowPhotoOverlay.photoId == null) return
 		uiState = uiState.copy(
 			windowPhotoOverlay = uiState.windowPhotoOverlay.copy(gestureTarget = target)
 		)
@@ -1159,6 +1189,31 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				offsetXFraction = current.offsetXFraction + panXFraction,
 				offsetYFraction = current.offsetYFraction + panYFraction
 			).clamped()
+		)
+		storeActiveWindowPhotoAlignment()
+	}
+
+	fun transformLinkedWindowView(
+		panXFraction: Float,
+		panYFraction: Float,
+		zoomFactor: Float,
+		viewAspectRatio: Float
+	) {
+		val current = uiState.windowPhotoOverlay
+		if (current.photoId == null) return
+		val transformed = linkedFlightWindowTransform(
+			placement = uiState.windowPlacement,
+			look = uiState.windowLook,
+			photoOverlay = current,
+			panXFraction = panXFraction,
+			panYFraction = panYFraction,
+			rawZoomFactor = zoomFactor,
+			viewAspectRatio = viewAspectRatio
+		)
+		uiState = uiState.copy(
+			windowPlacement = transformed.placement,
+			windowLook = transformed.look,
+			windowPhotoOverlay = transformed.photoOverlay
 		)
 		storeActiveWindowPhotoAlignment()
 	}

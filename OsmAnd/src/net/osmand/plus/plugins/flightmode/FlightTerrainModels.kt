@@ -103,7 +103,8 @@ data class FlightTerrainGeometry(
 data class FlightTerrainGeometryCacheKey(
 	val tileId: TerrainTileId,
 	val coordinateOriginLatitude: Double,
-	val coordinateOriginLongitude: Double
+	val coordinateOriginLongitude: Double,
+	val gridQuads: Int = FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS
 )
 
 data class FlightTerrainScene(
