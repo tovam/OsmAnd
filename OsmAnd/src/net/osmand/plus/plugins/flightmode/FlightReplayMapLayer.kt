@@ -2,7 +2,6 @@ package net.osmand.plus.plugins.flightmode
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -10,10 +9,10 @@ import android.graphics.RectF
 import net.osmand.core.jni.MapMarker
 import net.osmand.core.jni.MapMarkerBuilder
 import net.osmand.core.jni.MapMarkersCollection
+import net.osmand.core.jni.Model3D
 import net.osmand.core.jni.PointI
 import net.osmand.core.jni.QListFloat
 import net.osmand.core.jni.QVectorPointI
-import net.osmand.core.jni.SwigUtilities
 import net.osmand.core.jni.VectorLine
 import net.osmand.core.jni.VectorLineBuilder
 import net.osmand.core.jni.VectorLinesCollection
@@ -64,16 +63,10 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private var aircraftMarkerCollection: MapMarkersCollection? = null
 	private var aircraftMarker: MapMarker? = null
 	private var aircraftMarkerSizePx = 0
+	private var aircraftModel: Model3D? = null
+	private var aircraftModelRequested = false
 	private var aircraftGroundAltitudeMeters = Float.NaN
 	private var lastAircraftVectorUpdateMillis = 0L
-	private val aircraftSurfaceIconKey = SwigUtilities.getOnSurfaceIconKey(1)
-	private val aircraftSourceBitmap: Bitmap? by lazy(LazyThreadSafetyMode.NONE) {
-		runCatching {
-			context.assets.open(AIRCRAFT_BITMAP_ASSET).use { stream ->
-				BitmapFactory.decodeStream(stream)
-			}
-		}.getOrNull()
-	}
 
 	fun update(
 		trip: FlightTrip?,
@@ -100,6 +93,28 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	override fun initLayer(view: OsmandMapTileView) {
 		super.initLayer(view)
 		setPointsOrder(REPLAY_POINTS_Z_ORDER)
+		requestAircraftModel()
+	}
+
+	private fun requestAircraftModel() {
+		if (aircraftModelRequested) return
+		aircraftModelRequested = true
+		if (!FlightAircraftModelProvider.ensureInstalled(application)) return
+
+		val loadedImmediately = application.model3dHelper.getModel(FlightAircraftModelProvider.MODEL_KEY) { model ->
+			if (model != null && aircraftModel !== model) {
+				aircraftModel = model
+				clearAircraftMarkerCollection()
+				aircraftDirty = true
+				view?.refreshMap()
+			}
+			true
+		}
+		if (loadedImmediately != null) {
+			aircraftModel = loadedImmediately
+			clearAircraftMarkerCollection()
+			aircraftDirty = true
+		}
 	}
 
 	override fun onPrepareBufferImage(
@@ -434,11 +449,11 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			aircraftMarker?.setIsHidden(true)
 			return
 		}
+		val model = aircraftModel ?: return
 		val altitude = visualHeightForSample(trip, sample)
 		val direction = sample.bearingDegrees ?: estimateBearing(trip, sample) ?: 0f
 		if (aircraftMarker == null || aircraftMarkerSizePx != iconSizePx) {
 			clearAircraftMarkerCollection()
-			val bitmap = createAircraftMarkerBitmap(iconSizePx) ?: return
 			val collection = aircraftMarkerCollection ?: MapMarkersCollection().also {
 				aircraftMarkerCollection = it
 			}
@@ -452,22 +467,16 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				.setIsAccuracyCircleSupported(false)
 				.setPinIconHorisontalAlignment(MapMarker.PinIconHorisontalAlignment.CenterHorizontal)
 				.setPinIconVerticalAlignment(MapMarker.PinIconVerticalAlignment.CenterVertical)
-				.addOnMapSurfaceIcon(
-					aircraftSurfaceIconKey,
-					NativeUtilities.createSkImageFromBitmap(bitmap)
-				)
+				.setModel3D(model)
+				.setModel3DMaxSizeInPixels(iconSizePx)
 				.buildAndAddToCollection(collection)
 			aircraftMarkerSizePx = iconSizePx
 		}
 		val marker = aircraftMarker ?: return
 		marker.setPosition(point31(sample))
 		marker.setHeight(altitude)
-		// OsmAnd's on-surface icon convention treats the bitmap's bottom edge as the
-		// forward direction; this artwork has its nose at the top.
-		marker.setOnMapSurfaceIconDirection(
-			aircraftSurfaceIconKey,
-			(direction + AIRCRAFT_ICON_DIRECTION_OFFSET_DEGREES) % 360f
-		)
+		// OsmAnd's model convention points along +X; this OBJ's nose points along +Z.
+		marker.setModel3DDirection(direction + AIRCRAFT_MODEL_DIRECTION_OFFSET_DEGREES)
 		marker.setIsHidden(false)
 	}
 
@@ -600,11 +609,6 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		}
 	}
 
-	private fun createAircraftMarkerBitmap(targetSizePx: Int): Bitmap? = aircraftSourceBitmap?.let { source ->
-		if (source.width == targetSizePx && source.height == targetSizePx) source
-		else Bitmap.createScaledBitmap(source, targetSizePx, targetSizePx, true)
-	}
-
 	private fun estimatedFlightAltitude(progress: Float): Float {
 		val arc = sin(progress.coerceIn(0f, 1f) * PI).toFloat().coerceAtLeast(0f)
 		return UNKNOWN_ENDPOINT_ALTITUDE_METERS + arc * UNKNOWN_CRUISE_ALTITUDE_METERS
@@ -720,14 +724,13 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val POINT_BITMAP_DP = 10f
 		private const val PHOTO_BITMAP_DP = 26f
 		private const val PHOTO_MARKER_CLEARANCE_METERS = 36f
-		private const val AIRCRAFT_BITMAP_ASSET = "flightmode/aircraft/flight_airliner_black.png"
 		private const val AIRCRAFT_MINIMUM_ZOOM = 3.0
 		private const val AIRCRAFT_MAXIMUM_ZOOM = 20.0
 		private const val AIRCRAFT_MINIMUM_ICON_DP = 42.0
 		private const val AIRCRAFT_MAXIMUM_ICON_DP = 110.0
 		private const val AIRCRAFT_ICON_SIZE_QUANTUM_DP = 4.0
 		private const val AIRCRAFT_MINIMUM_BITMAP_PIXELS = 48
-		private const val AIRCRAFT_ICON_DIRECTION_OFFSET_DEGREES = 180f
+		private const val AIRCRAFT_MODEL_DIRECTION_OFFSET_DEGREES = -90f
 		private const val AIRCRAFT_VECTOR_UPDATE_INTERVAL_MILLIS = 200L
 		private const val TETHER_WIDTH_DP = 1.7
 		private const val TETHER_SLEEVE_EXTRA_WIDTH_DP = 2.2

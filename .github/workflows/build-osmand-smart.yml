@@ -64,6 +64,17 @@ jobs:
           java-version: "17"
           distribution: adopt
 
+      - name: Apply flight altitude support to OsmAnd core
+        run: |
+          git -C core apply --check ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
+          git -C core apply ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
+
+      - name: Build patched OsmAnd core for ARM64
+        run: |
+          bash build/arm64-v8a-android-clang.sh debug
+          cmake --build baked/arm64-v8a-android-clang-debug.make --target OsmAndCoreWithJNI --parallel 2
+          test -s binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
+
       - name: Make Gradle executable
         working-directory: android
         run: chmod +x gradlew
@@ -82,8 +93,8 @@ jobs:
           export APK_NUMBER_VERSION=$((6000000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
           export APK_VERSION_SUFFIX="#smart${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           echo "Building update-compatible versionCode ${APK_NUMBER_VERSION}"
-          ./gradlew :OsmAnd:compileAndroidFullOpenglArm64DebugKotlin 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
-          ./gradlew assembleAndroidFullOpenglArm64Debug 2>&1 | tee -a "${RUNNER_TEMP}/gradle-build.log"
+          ./gradlew -PusePatchedOsmAndCoreNative=true :OsmAnd:compileAndroidFullOpenglArm64DebugKotlin 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
+          ./gradlew -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug 2>&1 | tee -a "${RUNNER_TEMP}/gradle-build.log"
 
       - name: Publish Gradle failure details
         if: failure()

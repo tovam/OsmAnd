@@ -1,0 +1,126 @@
+diff --git a/include/OsmAndCore/Map/Model3DMapSymbol.h b/include/OsmAndCore/Map/Model3DMapSymbol.h
+--- a/include/OsmAndCore/Map/Model3DMapSymbol.h
++++ b/include/OsmAndCore/Map/Model3DMapSymbol.h
+@@ -17,6 +17,7 @@ namespace OsmAnd
+         virtual ~Model3DMapSymbol();
+ 
+         Model3D::BBox bbox;
++        float elevation;
+         int maxSizeInPixels;
+         FColorARGB mainColor;
+     };
+diff --git a/src/Map/Model3DMapSymbol.cpp b/src/Map/Model3DMapSymbol.cpp
+--- a/src/Map/Model3DMapSymbol.cpp
++++ b/src/Map/Model3DMapSymbol.cpp
+@@ -2,6 +2,7 @@
+ 
+ OsmAnd::Model3DMapSymbol::Model3DMapSymbol(const std::shared_ptr<MapSymbolsGroup>& group)
+     : OnSurfaceVectorMapSymbol(group)
++    , elevation(NAN)
+ {
+ }
+ 
+diff --git a/src/Map/MapMarker_P.cpp b/src/Map/MapMarker_P.cpp
+--- a/src/Map/MapMarker_P.cpp
++++ b/src/Map/MapMarker_P.cpp
+@@ -392,6 +392,8 @@ bool OsmAnd::MapMarker_P::applyChanges()
+                 {
+                     symbol->setPosition31(_position);
+                     symbol->direction = _model3DDirection;
++                    symbol->elevation = _height;
++                    symbol->setElevationScaleFactor(_elevationScaleFactor);
+                     symbol->maxSizeInPixels = _model3DMaxSizeInPixels;
+                 }
+ 
+@@ -628,6 +630,8 @@ std::shared_ptr<OsmAnd::MapMarker::SymbolsGroup> OsmAnd::MapMarker_P::createSymb
+         VectorMapSymbol::generateModel3DPrimitive(*model3DMapSymbol, owner->model3D, owner->model3DCustomMaterialColors);
+         model3DMapSymbol->isHidden = _isHidden;
+         model3DMapSymbol->direction = _model3DDirection;
++        model3DMapSymbol->elevation = _height;
++        model3DMapSymbol->elevationScaleFactor = _elevationScaleFactor;
+         model3DMapSymbol->bbox = owner->model3D->bbox;
+         model3DMapSymbol->mainColor = owner->model3D->mainColor;
+         model3DMapSymbol->maxSizeInPixels = _model3DMaxSizeInPixels;
+diff --git a/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp b/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp
+--- a/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp
++++ b/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp
+@@ -82,6 +82,21 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
+     const auto offsetFromTarget = Utilities::convert31toFloat(offsetFromTarget31, currentState.zoomLevel);
+     const auto positionOnPlane = offsetFromTarget * AtlasMapRenderer::TileSize3D;
+ 
++    double metersPerUnit;
++    if (currentState.flatEarth)
++    {
++        PointF offsetInTileN;
++        const auto tileId = Utilities::normalizeTileId(Utilities::getTileId(
++            position31, currentState.zoomLevel, &offsetInTileN), currentState.zoomLevel);
++        const auto upperMetersPerUnit = Utilities::getMetersPerTileUnit(
++            currentState.zoomLevel, tileId.y, AtlasMapRenderer::TileSize3D);
++        const auto lowerMetersPerUnit = Utilities::getMetersPerTileUnit(
++            currentState.zoomLevel, tileId.y + 1, AtlasMapRenderer::TileSize3D);
++        metersPerUnit = glm::mix(upperMetersPerUnit, lowerMetersPerUnit, offsetInTileN.y);
++    }
++    else
++        metersPerUnit = internalState.metersPerUnit;
++
+     const auto mScale = glm::scale(glm::vec3(scale));
+     const auto directionAngle = static_cast<float>(Utilities::normalizedAngleDegrees(90.0f - direction));
+     const auto mDirectionInWorld = glm::rotate(qDegreesToRadians(directionAngle), glm::vec3(0.0f, 1.0f, 0.0f));
+@@ -111,7 +126,14 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
+ 
+     // Replace with sum of points on lines from above 
+     const auto avgHeight = (farLeftElevation + farRightElevation + nearLeftElevation + nearRightElevation) / 4.0f;
+-    const auto height = centerElevation > avgHeight ? (avgHeight + centerElevation) / 2.0f : avgHeight;
++    const auto terrainHeight = centerElevation > avgHeight ? (avgHeight + centerElevation) / 2.0f : avgHeight;
++    auto height = terrainHeight;
++    if (!qIsNaN(model3DMapSymbol->elevation))
++    {
++        const auto terrainElevationInMeters = terrainHeight * metersPerUnit;
++        height += model3DMapSymbol->getElevationScaleFactor()
++            * (model3DMapSymbol->elevation - terrainElevationInMeters) / metersPerUnit;
++    }
+     const auto mElevationTranslate = glm::translate(glm::vec3(0.0f, height, 0.0f));
+ 
+     const auto leftHeightsHalfSize = leftHeights.size() / 2;
+@@ -151,7 +173,9 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
+ 
+     bool modelElevated = !qFuzzyIsNull(height);
+ 
+-    const auto mRotateOnRelief = mRotationX * mRotationZ;
++    auto mRotateOnRelief = glm::mat4(1.0f);
++    if (qIsNaN(model3DMapSymbol->elevation))
++        mRotateOnRelief = mRotationX * mRotationZ;
+     auto mLocalModel = mDirectionInWorld * mRotateOnRelief * mScale;
+ 
+     // Test against visible frustum area (if allowed)
+@@ -181,7 +205,8 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
+                 PointI elevatedModelPoint31;
+                 for (auto& modelPoint31 : modelPoints31)
+                 {
+-                    const auto modelPointHeight = getRenderer()->getHeightOfLocation(currentState, modelPoint31);
++                    const auto modelPointHeight = qIsNaN(model3DMapSymbol->elevation)
++                        ? getRenderer()->getHeightOfLocation(currentState, modelPoint31) : height;
+                     if (getRenderer()->getProjectedLocation(
+                         internalState, currentState, modelPoint31, modelPointHeight, elevatedModelPoint31))
+                     {
+@@ -260,17 +285,3 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
+         assert(gpuMeshResource->position31 == nullptr);
+     }
+ 
+-    double metersPerUnit;
+-    if (currentState.flatEarth)
+-    {
+-        PointF offsetInTileN;
+-        const auto tileId = Utilities::normalizeTileId(Utilities::getTileId(
+-            position31, currentState.zoomLevel, &offsetInTileN), currentState.zoomLevel);
+-        const auto upperMetersPerUnit = Utilities::getMetersPerTileUnit(
+-            currentState.zoomLevel, tileId.y, AtlasMapRenderer::TileSize3D);
+-        const auto lowerMetersPerUnit = Utilities::getMetersPerTileUnit(
+-            currentState.zoomLevel, tileId.y + 1, AtlasMapRenderer::TileSize3D);
+-        metersPerUnit = glm::mix(upperMetersPerUnit, lowerMetersPerUnit, offsetInTileN.y);
+-    }
+-    else
+-        metersPerUnit = internalState.metersPerUnit;
+     const auto elevationInMeters = height * metersPerUnit;
+ 
+     // Don't render fully transparent symbols

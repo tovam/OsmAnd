@@ -76,7 +76,7 @@ class FlightJourneyStore(private val context: Context) {
 		val knownPrivateBytes = allJournalBytes + allPhotosBytes + treeSize(terrainRoot)
 
 		val installedGraphicsBytes = (context.applicationContext as? OsmandApplication)?.let { app ->
-			treeSize(File(app.getAppPath(IndexConstants.MODEL_3D_DIR), FLIGHT_AIRCRAFT_MODEL_DIRECTORY))
+			treeSize(File(app.getAppPath(IndexConstants.MODEL_3D_DIR), FlightAircraftModelProvider.MODEL_DIRECTORY_NAME))
 		} ?: 0L
 		return FlightStorageUsage(
 			currentJournalBytes = currentJournalBytes,
@@ -922,7 +922,6 @@ class FlightJourneyStore(private val context: Context) {
 		private const val FLIGHT_TERRAIN_DIRECTORY = "flight-terrain"
 		private const val TERRARIUM_DIRECTORY = "flight-terrain/terrarium"
 		private const val FLIGHT_GRAPHICS_ASSET_DIRECTORY = "flightmode"
-		private const val FLIGHT_AIRCRAFT_MODEL_DIRECTORY = "flight_aircraft_v1"
 		private const val JOURNEY_FILE_EXTENSION = "json"
 		private const val JOURNEY_JSON_ENTRY = "journey.json"
 		private const val TRACK_GPX_ENTRY = "track.gpx"
