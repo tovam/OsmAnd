@@ -103,7 +103,7 @@ diff --git a/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp b/src/Map/AtlasMapR
                      if (getRenderer()->getProjectedLocation(
                          internalState, currentState, modelPoint31, modelPointHeight, elevatedModelPoint31))
                      {
-@@ -260,17 +285,3 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
+@@ -289,20 +314,6 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
          assert(gpuMeshResource->position31 == nullptr);
      }
  
