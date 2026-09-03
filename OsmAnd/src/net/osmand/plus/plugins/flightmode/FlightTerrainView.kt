@@ -305,7 +305,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glUniform3f(cameraLocation, camera[0], camera[1], camera[2])
 			GLES20.glUniform3f(lightLocation, sun.east, sun.up, -sun.north)
 			GLES20.glUniform1f(fogDistanceLocation, currentScene.radiusKm * 1_000f * 0.92f)
-			GLES20.glUniform1f(shadingLocation, if (shadingEnabled) shadowIntensity else 0f)
+			// Keep directional relief lighting deliberately subtle. Cast-shadow strength
+			// is controlled separately below; using the full shadow slider here used to
+			// dim every slope and made the toggle look like a global dark overlay.
+			GLES20.glUniform1f(
+				shadingLocation,
+				if (shadingEnabled) RELIEF_LIGHTING_STRENGTH * shadowIntensity else 0f
+			)
 			GLES20.glUniform3f(skyColorLocation, sky[0], sky[1], sky[2])
 			GLES20.glUniform1f(daylightLocation, daylight)
 			GLES20.glUniform1f(satelliteOpacityLocation, satelliteOpacity)
@@ -711,6 +717,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SHADOW_DEPTH_MULTIPLIER = 2.2f
 			private const val SHADOW_POLYGON_OFFSET_FACTOR = 2f
 			private const val SHADOW_POLYGON_OFFSET_UNITS = 4f
+			private const val RELIEF_LIGHTING_STRENGTH = 0.18f
 			private const val MINIMUM_SHADOW_SUN_UP = 0.015f
 			private const val SHADOW_FADE_SUN_RANGE = 0.10f
 			private const val SHADOW_DIRECTION_EPSILON_SQUARED = 1e-7f
@@ -750,7 +757,9 @@ class FlightTerrainView @JvmOverloads constructor(
 				void main() {
 					vec3 normal = normalize(aNormal);
 					vNdotL = max(dot(normal, normalize(uLightDirection)), 0.0);
-					float directional = 0.28 + 0.72 * vNdotL;
+					// Ambient light stays dominant. Terrain occlusion is handled by the
+					// shadow map, not by globally blackening every face away from the sun.
+					float directional = 0.78 + 0.22 * vNdotL;
 					vLight = mix(1.0, directional, uShadingEnabled);
 					vElevation = aElevation;
 					vSlope = 1.0 - clamp(normal.y, 0.0, 1.0);
@@ -808,7 +817,9 @@ class FlightTerrainView @JvmOverloads constructor(
 							visible += step(currentDepth, storedDepth);
 						}
 					}
-					float realShadow = mix(0.26, 1.0, visible / 9.0);
+					// Preserve enough ambient light inside a cast shadow to keep satellite
+					// imagery readable; only shadow-map occlusion receives this attenuation.
+					float realShadow = mix(0.52, 1.0, visible / 9.0);
 					float edgeDistance = min(
 						min(
 							min(projected.x, 1.0 - projected.x),

@@ -25,6 +25,7 @@ class FlightMapGestureProxyView(
 	private var downY = 0f
 	private var explorationReported = false
 	private var targetGestureActive = false
+	private var gestureTargetView: View? = null
 
 	init {
 		isClickable = true
@@ -37,52 +38,73 @@ class FlightMapGestureProxyView(
 	}
 
 	override fun onTouchEvent(event: MotionEvent): Boolean {
+		var reportExploration = false
 		when (event.actionMasked) {
 			MotionEvent.ACTION_DOWN -> {
-			targetGestureActive = true
+				gestureTargetView = target.view
+				targetGestureActive = true
 				downX = event.x
 				downY = event.y
 				explorationReported = false
+				parent?.requestDisallowInterceptTouchEvent(true)
 			}
 			MotionEvent.ACTION_MOVE -> {
 				val deltaX = event.x - downX
 				val deltaY = event.y - downY
 				if (!explorationReported && (event.pointerCount > 1 || deltaX * deltaX + deltaY * deltaY >= touchSlopSquared)) {
 					explorationReported = true
-					onExplorationGesture()
+					reportExploration = true
 				}
 			}
 			MotionEvent.ACTION_POINTER_DOWN -> {
 				if (!explorationReported) {
 					explorationReported = true
-					onExplorationGesture()
+					reportExploration = true
 				}
 			}
 		}
 
 		getLocationOnScreen(sourceLocation)
-		val targetView = target.view ?: return true
+		// Keep one Android View for the complete pointer stream. Forwarding straight to
+		// OsmandMapTileView bypasses View.dispatchTouchEvent(), which breaks capture of
+		// multi-pointer zoom/rotation/tilt on the OpenGL map surface.
+		val targetView = gestureTargetView ?: target.view
+		if (targetView == null) {
+			finishGestureIfNeeded(event)
+			return true
+		}
 		targetView.getLocationOnScreen(targetLocation)
 		val forwarded = MotionEvent.obtain(event)
 		forwarded.offsetLocation(
 			(sourceLocation[0] - targetLocation[0]).toFloat(),
 			(sourceLocation[1] - targetLocation[1]).toFloat()
 		)
-		target.onTouchEvent(forwarded)
+		targetView.dispatchTouchEvent(forwarded)
 		forwarded.recycle()
+		// Changing follow mode causes a Compose update. Do it only after OsmAnd has
+		// received the current event, never halfway through forwarding that event.
+		if (reportExploration) onExplorationGesture()
+		finishGestureIfNeeded(event)
+		return true
+	}
+
+	private fun finishGestureIfNeeded(event: MotionEvent) {
 		if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
 			targetGestureActive = false
+			gestureTargetView = null
+			parent?.requestDisallowInterceptTouchEvent(false)
 		}
-		return true
 	}
 
 	override fun onDetachedFromWindow() {
 		if (targetGestureActive) {
 			val now = SystemClock.uptimeMillis()
 			val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
-			target.onTouchEvent(cancel)
+			(gestureTargetView ?: target.view)?.dispatchTouchEvent(cancel)
 			cancel.recycle()
 			targetGestureActive = false
+			gestureTargetView = null
+			parent?.requestDisallowInterceptTouchEvent(false)
 		}
 		super.onDetachedFromWindow()
 	}

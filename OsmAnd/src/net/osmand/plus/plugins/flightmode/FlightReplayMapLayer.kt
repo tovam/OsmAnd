@@ -462,7 +462,12 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val marker = aircraftMarker ?: return
 		marker.setPosition(point31(sample))
 		marker.setHeight(altitude)
-		marker.setOnMapSurfaceIconDirection(aircraftSurfaceIconKey, direction)
+		// OsmAnd's on-surface icon convention treats the bitmap's bottom edge as the
+		// forward direction; this artwork has its nose at the top.
+		marker.setOnMapSurfaceIconDirection(
+			aircraftSurfaceIconKey,
+			(direction + AIRCRAFT_ICON_DIRECTION_OFFSET_DEGREES) % 360f
+		)
 		marker.setIsHidden(false)
 	}
 
@@ -722,6 +727,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val AIRCRAFT_MAXIMUM_ICON_DP = 110.0
 		private const val AIRCRAFT_ICON_SIZE_QUANTUM_DP = 4.0
 		private const val AIRCRAFT_MINIMUM_BITMAP_PIXELS = 48
+		private const val AIRCRAFT_ICON_DIRECTION_OFFSET_DEGREES = 180f
 		private const val AIRCRAFT_VECTOR_UPDATE_INTERVAL_MILLIS = 200L
 		private const val TETHER_WIDTH_DP = 1.7
 		private const val TETHER_SLEEVE_EXTRA_WIDTH_DP = 2.2
