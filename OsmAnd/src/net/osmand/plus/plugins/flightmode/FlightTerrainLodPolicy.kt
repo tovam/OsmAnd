@@ -113,5 +113,5 @@ object FlightTerrainLodPolicy {
 
 	private const val STANDARD_TEXTURE_EDGE = 256
 	private const val MAXIMUM_MIPMAPPED_EDGE = 4_096
-	const val NEARBY_DETAIL_RETENTION_KM = 50.0
+	const val NEARBY_DETAIL_RETENTION_KM = FlightSceneStreamingPolicy.NEARBY_RESOURCE_RETENTION_KM
 }

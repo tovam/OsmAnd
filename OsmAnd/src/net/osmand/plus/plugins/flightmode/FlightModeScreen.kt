@@ -3894,7 +3894,16 @@ private fun terrainStatusText(status: FlightTerrainStatus): String = when (statu
 	FlightTerrainPhase.PLANNING -> "Calcul des tuiles nécessaires…"
 	FlightTerrainPhase.DOWNLOADING -> buildString {
 		status.message?.takeIf { it.isNotBlank() }?.let { append("$it · ") }
-		append("${status.availableTiles}/${status.requestedTiles} tuiles")
+		if (status.coarseRequestedTiles > 0) {
+			append("base ${status.coarseAvailableTiles}/${status.coarseRequestedTiles}")
+			val refinedRequested = (status.requestedTiles - status.coarseRequestedTiles).coerceAtLeast(0)
+			if (refinedRequested > 0) {
+				val refinedAvailable = (status.availableTiles - status.coarseAvailableTiles).coerceAtLeast(0)
+				append(" · fin $refinedAvailable/$refinedRequested")
+			}
+		} else {
+			append("${status.availableTiles}/${status.requestedTiles} tuiles")
+		}
 		if (status.satelliteTiles > 0) append(" · satellite ${status.satelliteTiles}")
 		if (status.satelliteFailedTiles > 0) append(" · ${status.satelliteFailedTiles} satellite manquantes")
 		status.zoom?.let { append(" · z$it") }
@@ -4075,7 +4084,10 @@ private fun terrainRuntimeStatusText(
 	renderStats: FlightTerrainRenderStats
 ): String = buildString {
 	status.message?.takeIf { it.isNotBlank() }?.let { append(it).append('\n') }
-	append("z${status.zoom ?: "?"} · relief ${status.availableTiles}/${status.requestedTiles}")
+	val refinedAvailable = (status.availableTiles - status.coarseAvailableTiles).coerceAtLeast(0)
+	val refinedRequested = (status.requestedTiles - status.coarseRequestedTiles).coerceAtLeast(0)
+	append("z${status.zoom ?: "?"} · MNT grossier ${status.coarseAvailableTiles}/${status.coarseRequestedTiles}")
+	append(" · MNT fin $refinedAvailable/$refinedRequested")
 	if (status.failedTiles > 0) append(" · ÉCHECS MNT ${status.failedTiles}")
 	if (status.satelliteFailedTiles > 0) append(" · échecs satellite ${status.satelliteFailedTiles}")
 	append(" · ").append(terrainTierDetails(status)).append('\n')

@@ -16,6 +16,7 @@ import net.osmand.plus.plugins.flightmode.FlightSample
 import net.osmand.plus.plugins.flightmode.FlightSampleInterpolator
 import net.osmand.plus.plugins.flightmode.FlightSatelliteSource
 import net.osmand.plus.plugins.flightmode.FlightSatelliteQuality
+import net.osmand.plus.plugins.flightmode.FlightSceneStreamingPolicy
 import net.osmand.plus.plugins.flightmode.FlightStop
 import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
@@ -58,6 +59,33 @@ import java.util.Date
 import java.util.Locale
 
 class FlightModeLogicTest {
+
+	@Test
+	fun sceneStreamingPolicyKeepsMovementAndRetentionConstraintsCentralized() {
+		assertEquals(8.0, FlightSceneStreamingPolicy.AIRCRAFT_RETARGET_DISTANCE_KM, 0.0)
+		assertEquals(1.5, FlightSceneStreamingPolicy.DETAIL_FOCUS_MINIMUM_CHANGE_KM, 0.0)
+		assertEquals(100.0, FlightSceneStreamingPolicy.MAXIMUM_GAZE_FOCUS_DISTANCE_KM, 0.0)
+		assertEquals(50.0, FlightSceneStreamingPolicy.NEARBY_RESOURCE_RETENTION_KM, 0.0)
+		assertEquals(700L, FlightSceneStreamingPolicy.MANUAL_MOVEMENT_SETTLE_MILLIS)
+		assertEquals(1_500L, FlightSceneStreamingPolicy.CAMERA_MOVEMENT_SETTLE_MILLIS)
+		assertEquals(
+			FlightSceneStreamingPolicy.NEARBY_RESOURCE_RETENTION_KM,
+			FlightTerrainLodPolicy.NEARBY_DETAIL_RETENTION_KM,
+			0.0
+		)
+	}
+
+	@Test
+	fun sceneStreamingPolicyIgnoresCameraJitterButAcceptsARealRetarget() {
+		val origin = FlightTerrainDetailFocus(48.8566, 2.3522)
+		val jitter = FlightTerrainDetailFocus(48.8616, 2.3522)
+		val retarget = FlightTerrainDetailFocus(48.8766, 2.3522)
+
+		assertFalse(FlightSceneStreamingPolicy.focusChanged(origin, jitter))
+		assertTrue(FlightSceneStreamingPolicy.focusChanged(origin, retarget))
+		assertTrue(FlightSceneStreamingPolicy.focusChanged(null, origin))
+		assertFalse(FlightSceneStreamingPolicy.focusChanged(null, null))
+	}
 
 	@Test
 	fun terrainGeometryWorkersAdaptToCpuCountWhileLeavingUiHeadroom() {
