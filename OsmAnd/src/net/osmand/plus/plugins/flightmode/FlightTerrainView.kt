@@ -1,12 +1,15 @@
 package net.osmand.plus.plugins.flightmode
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.AttributeSet
+import net.osmand.plus.media.MediaMetadataUtils
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.LinkedHashMap
@@ -18,6 +21,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.tan
 
 class FlightTerrainView @JvmOverloads constructor(
 	context: Context,
@@ -52,6 +56,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		showSatelliteQualityOverlay: Boolean,
 		terrainOpacity: Float,
 		nativeMapOpacity: Float,
+		spatialPhoto: FlightSpatialPhotoOverlay?,
 		onRendererError: (String) -> Unit,
 		onRenderStats: (FlightTerrainRenderStats) -> Unit
 	) {
@@ -68,7 +73,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			satelliteOpacity,
 			showSatelliteQualityOverlay,
 			terrainOpacity,
-			nativeMapOpacity
+			nativeMapOpacity,
+			spatialPhoto
 		)
 		requestRender()
 	}
@@ -101,9 +107,14 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var terrainOpacity: Float = 0.70f
 		@Volatile
 		private var nativeMapOpacity: Float = 0.58f
+		@Volatile
+		private var spatialPhoto: FlightSpatialPhotoOverlay? = null
+		private var renderedWindowLook = FlightWindowLook()
+		private var renderedLookInitialized = false
 
 		private var program = 0
 		private var shadowProgram = 0
+		private var photoProgram = 0
 		private var surfaceWidth = 1
 		private var surfaceHeight = 1
 		private var uploadedGeneration = Long.MIN_VALUE
@@ -144,6 +155,19 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var shadowTextureLocation = -1
 		private var shadowTexelSizeLocation = -1
 		private var shadowsEnabledLocation = -1
+		private var photoPositionLocation = -1
+		private var photoTextureCoordinateLocation = -1
+		private var photoMvpLocation = -1
+		private var photoTextureLocation = -1
+		private var photoOpacityLocation = -1
+		private var photoColorRow0Location = -1
+		private var photoColorRow1Location = -1
+		private var photoColorRow2Location = -1
+		private var photoColorRow3Location = -1
+		private var photoColorOffsetLocation = -1
+		private var photoTexture: UploadedPhotoTexture? = null
+		private var failedPhotoTexturePath: String? = null
+		private var maximumTextureEdge = DEFAULT_MAXIMUM_TEXTURE_EDGE
 
 		private var shadowPositionLocation = -1
 		private var shadowMvpLocation = -1
@@ -172,7 +196,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			satelliteOpacity: Float,
 			showSatelliteQualityOverlay: Boolean,
 			terrainOpacity: Float,
-			nativeMapOpacity: Float
+			nativeMapOpacity: Float,
+			spatialPhoto: FlightSpatialPhotoOverlay?
 		) {
 			this.scene = scene
 			this.sample = sample
@@ -185,12 +210,14 @@ class FlightTerrainView @JvmOverloads constructor(
 			this.showSatelliteQualityOverlay = showSatelliteQualityOverlay
 			this.terrainOpacity = terrainOpacity.coerceIn(0f, 1f)
 			this.nativeMapOpacity = nativeMapOpacity.coerceIn(0f, 1f)
+			this.spatialPhoto = spatialPhoto?.clamped()
 		}
 
 		override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
 			try {
 				program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
 				shadowProgram = createProgram(SHADOW_VERTEX_SHADER, SHADOW_FRAGMENT_SHADER)
+				photoProgram = createProgram(PHOTO_VERTEX_SHADER, PHOTO_FRAGMENT_SHADER)
 				positionLocation = GLES20.glGetAttribLocation(program, "aPosition")
 				normalLocation = GLES20.glGetAttribLocation(program, "aNormal")
 				elevationLocation = GLES20.glGetAttribLocation(program, "aElevation")
@@ -217,6 +244,16 @@ class FlightTerrainView @JvmOverloads constructor(
 				shadowTextureLocation = GLES20.glGetUniformLocation(program, "uShadowMap")
 				shadowTexelSizeLocation = GLES20.glGetUniformLocation(program, "uShadowTexelSize")
 				shadowsEnabledLocation = GLES20.glGetUniformLocation(program, "uShadowsEnabled")
+				photoPositionLocation = GLES20.glGetAttribLocation(photoProgram, "aPosition")
+				photoTextureCoordinateLocation = GLES20.glGetAttribLocation(photoProgram, "aTexCoord")
+				photoMvpLocation = GLES20.glGetUniformLocation(photoProgram, "uMvp")
+				photoTextureLocation = GLES20.glGetUniformLocation(photoProgram, "uPhotoTexture")
+				photoOpacityLocation = GLES20.glGetUniformLocation(photoProgram, "uOpacity")
+				photoColorRow0Location = GLES20.glGetUniformLocation(photoProgram, "uColorRow0")
+				photoColorRow1Location = GLES20.glGetUniformLocation(photoProgram, "uColorRow1")
+				photoColorRow2Location = GLES20.glGetUniformLocation(photoProgram, "uColorRow2")
+				photoColorRow3Location = GLES20.glGetUniformLocation(photoProgram, "uColorRow3")
+				photoColorOffsetLocation = GLES20.glGetUniformLocation(photoProgram, "uColorOffset")
 				shadowPositionLocation = GLES20.glGetAttribLocation(shadowProgram, "aPosition")
 				shadowMvpLocation = GLES20.glGetUniformLocation(shadowProgram, "uLightMvp")
 				shadowAvailable = createShadowResources()
@@ -228,6 +265,12 @@ class FlightTerrainView @JvmOverloads constructor(
 				lastReportedStats = null
 				lastStatsReportNanos = 0L
 				shadowSceneGeneration = Long.MIN_VALUE
+				photoTexture = null
+				failedPhotoTexturePath = null
+				renderedLookInitialized = false
+				val textureLimits = IntArray(1)
+				GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, textureLimits, 0)
+				maximumTextureEdge = textureLimits[0].coerceAtLeast(MINIMUM_TEXTURE_EDGE)
 				GLES20.glEnable(GLES20.GL_DEPTH_TEST)
 				GLES20.glDepthFunc(GLES20.GL_LEQUAL)
 				GLES20.glDisable(GLES20.GL_CULL_FACE)
@@ -253,7 +296,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			val currentScene = scene
 			val currentSample = sample
 			val currentWindowPlacement = windowPlacement
-			val currentWindowLook = windowLook
+			val currentWindowLook = smoothedWindowLook(windowLook)
+			val currentSpatialPhoto = spatialPhoto
 			val latitude = currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
 			val longitude = currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
 			val sun = FlightSunPosition.direction(
@@ -422,7 +466,29 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + NATIVE_MAP_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+			drawSpatialPhoto(currentScene, currentSpatialPhoto, mvp)
 			if (pendingTextureUploads.isNotEmpty()) requestFrame()
+		}
+
+		private fun smoothedWindowLook(target: FlightWindowLook): FlightWindowLook {
+			val safeTarget = target.clamped()
+			if (!renderedLookInitialized) {
+				renderedWindowLook = safeTarget
+				renderedLookInitialized = true
+				return safeTarget
+			}
+			val yawDelta = FlightWindowLook.normalizeYaw(safeTarget.yawDegrees - renderedWindowLook.yawDegrees)
+			val pitchDelta = safeTarget.pitchDegrees - renderedWindowLook.pitchDegrees
+			if (abs(yawDelta) <= LOOK_SNAP_DEGREES && abs(pitchDelta) <= LOOK_SNAP_DEGREES) {
+				renderedWindowLook = safeTarget
+				return safeTarget
+			}
+			renderedWindowLook = FlightWindowLook(
+				yawDegrees = renderedWindowLook.yawDegrees + yawDelta * LOOK_SMOOTHING_FRACTION,
+				pitchDegrees = renderedWindowLook.pitchDegrees + pitchDelta * LOOK_SMOOTHING_FRACTION
+			).clamped()
+			requestFrame()
+			return renderedWindowLook
 		}
 
 		private fun windowProjection(placement: FlightWindowPlacement, radiusKm: Int): FloatArray {
@@ -500,12 +566,148 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glDrawElements(GLES20.GL_TRIANGLES, geometry.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
 		}
 
+		private fun drawSpatialPhoto(
+			scene: FlightTerrainScene,
+			photo: FlightSpatialPhotoOverlay?,
+			mvp: FloatArray
+		) {
+			if (photo == null) {
+				releasePhotoTexture()
+				return
+			}
+			if (photoProgram == 0 || photo.opacity <= 0f) return
+			val texture = ensurePhotoTexture(photo.localPath) ?: return
+			val pose = photo.pose.clampedOrNull() ?: return
+			val coordinates = FlightTerrainCoordinates(
+				scene.coordinateOriginLatitude,
+				scene.coordinateOriginLongitude
+			)
+			val eyeAltitude = pose.eyeAltitudeMeters ?: DEFAULT_FLIGHT_ALTITUDE_METERS
+			val eye = coordinates.toLocal(pose.eyeLatitude, pose.eyeLongitude, eyeAltitude.toDouble())
+			val azimuth = Math.toRadians(pose.viewAzimuthDegrees.toDouble())
+			val elevation = Math.toRadians(pose.viewElevationDegrees.toDouble())
+			val horizontal = cos(elevation)
+			val direction = normalized(
+				coordinates.vectorToLocal(
+					pose.eyeLatitude,
+					pose.eyeLongitude,
+					(sin(azimuth) * horizontal).toFloat(),
+					sin(elevation).toFloat(),
+					(-cos(azimuth) * horizontal).toFloat()
+				)
+			) ?: return
+			val localUp = normalized(
+				coordinates.vectorToLocal(pose.eyeLatitude, pose.eyeLongitude, 0f, 1f, 0f)
+			) ?: return
+			val cameraRight = normalized(cross(direction, localUp)) ?: return
+			val cameraUp = normalized(cross(cameraRight, direction)) ?: return
+
+			val roll = Math.toRadians(photo.rotationDegrees.toDouble())
+			val rollCos = cos(roll).toFloat()
+			val rollSin = sin(roll).toFloat()
+			val right = FloatArray(3) { index ->
+				cameraRight[index] * rollCos + cameraUp[index] * rollSin
+			}
+			val up = FloatArray(3) { index ->
+				-cameraRight[index] * rollSin + cameraUp[index] * rollCos
+			}
+			val distance = (abs(eyeAltitude) * PHOTO_PLANE_ALTITUDE_FACTOR)
+				.coerceIn(MINIMUM_PHOTO_PLANE_DISTANCE_METERS, MAXIMUM_PHOTO_PLANE_DISTANCE_METERS)
+			val baseHalfHeight = distance * tan(
+				Math.toRadians((pose.verticalFieldOfViewDegrees / 2f).toDouble())
+			).toFloat()
+			val aspect = texture.width.toFloat() / texture.height.coerceAtLeast(1)
+			val halfHeight = baseHalfHeight * photo.scale
+			val halfWidth = halfHeight * aspect
+			val viewHalfWidth = baseHalfHeight * surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1)
+			val center = FloatArray(3) { index ->
+				eye[index] + direction[index] * distance +
+					right[index] * photo.offsetXFraction * viewHalfWidth * 2f -
+					up[index] * photo.offsetYFraction * baseHalfHeight * 2f
+			}
+			val positions = FloatArray(12)
+			fun putCorner(corner: Int, horizontalSign: Float, verticalSign: Float) {
+				for (axis in 0 until 3) {
+					positions[corner * 3 + axis] = center[axis] +
+						right[axis] * halfWidth * horizontalSign +
+						up[axis] * halfHeight * verticalSign
+				}
+			}
+			putCorner(0, -1f, 1f)
+			putCorner(1, -1f, -1f)
+			putCorner(2, 1f, 1f)
+			putCorner(3, 1f, -1f)
+			val positionBuffer = directFloatBuffer(positions)
+			val textureBuffer = directFloatBuffer(
+				floatArrayOf(0f, 0f, 0f, 1f, 1f, 0f, 1f, 1f)
+			)
+			val color = FlightPhotoColorMatrix.values(photo.imageAdjustments)
+
+			GLES20.glUseProgram(photoProgram)
+			GLES20.glUniformMatrix4fv(photoMvpLocation, 1, false, mvp, 0)
+			GLES20.glUniform1f(photoOpacityLocation, photo.opacity)
+			GLES20.glUniform4f(photoColorRow0Location, color[0], color[1], color[2], color[3])
+			GLES20.glUniform4f(photoColorRow1Location, color[5], color[6], color[7], color[8])
+			GLES20.glUniform4f(photoColorRow2Location, color[10], color[11], color[12], color[13])
+			GLES20.glUniform4f(photoColorRow3Location, color[15], color[16], color[17], color[18])
+			GLES20.glUniform4f(
+				photoColorOffsetLocation,
+				color[4] / 255f,
+				color[9] / 255f,
+				color[14] / 255f,
+				color[19] / 255f
+			)
+			GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+			GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+			GLES20.glEnableVertexAttribArray(photoPositionLocation)
+			GLES20.glVertexAttribPointer(photoPositionLocation, 3, GLES20.GL_FLOAT, false, 0, positionBuffer)
+			GLES20.glEnableVertexAttribArray(photoTextureCoordinateLocation)
+			GLES20.glVertexAttribPointer(photoTextureCoordinateLocation, 2, GLES20.GL_FLOAT, false, 0, textureBuffer)
+			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + PHOTO_TEXTURE_UNIT)
+			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.id)
+			GLES20.glUniform1i(photoTextureLocation, PHOTO_TEXTURE_UNIT)
+			GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+			GLES20.glDepthMask(false)
+			GLES20.glEnable(GLES20.GL_BLEND)
+			GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+			GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+			GLES20.glDisable(GLES20.GL_BLEND)
+			GLES20.glDepthMask(true)
+			GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+			GLES20.glDisableVertexAttribArray(photoPositionLocation)
+			GLES20.glDisableVertexAttribArray(photoTextureCoordinateLocation)
+			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+		}
+
+		private fun directFloatBuffer(values: FloatArray) = ByteBuffer
+			.allocateDirect(values.size * FLOAT_BYTES)
+			.order(ByteOrder.nativeOrder())
+			.asFloatBuffer()
+			.apply { put(values).position(0) }
+
+		private fun normalized(vector: FloatArray): FloatArray? {
+			val length = sqrt(
+				vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]
+			)
+			if (!length.isFinite() || length < 1e-5f) return null
+			return FloatArray(3) { index -> vector[index] / length }
+		}
+
+		private fun cross(first: FloatArray, second: FloatArray): FloatArray = floatArrayOf(
+			first[1] * second[2] - first[2] * second[1],
+			first[2] * second[0] - first[0] * second[2],
+			first[0] * second[1] - first[1] * second[0]
+		)
+
 		private fun qualityDebugColor(tier: FlightTerrainTextureTier): FloatArray = when (tier) {
 			FlightTerrainTextureTier.OVERVIEW -> QUALITY_DEBUG_OVERVIEW
 			FlightTerrainTextureTier.STANDARD -> QUALITY_DEBUG_STANDARD
 			FlightTerrainTextureTier.HIGH -> QUALITY_DEBUG_HIGH
 			FlightTerrainTextureTier.ULTRA -> QUALITY_DEBUG_ULTRA
 			FlightTerrainTextureTier.ULTRA_PLUS -> QUALITY_DEBUG_ULTRA_PLUS
+			FlightTerrainTextureTier.ULTRA_PLUS_PLUS -> QUALITY_DEBUG_ULTRA_PLUS_PLUS
+			FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS -> QUALITY_DEBUG_ULTRA_PLUS_PLUS_PLUS
 		}
 
 		private fun clearDefaultFrameBuffer(sky: FloatArray) {
@@ -710,9 +912,16 @@ class FlightTerrainView @JvmOverloads constructor(
 		}
 
 		private fun createTexture(path: String): UploadedTexture? {
+			val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+			BitmapFactory.decodeFile(path, bounds)
+			if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+			val sampleSize = textureSampleSize(bounds.outWidth, bounds.outHeight, maximumTextureEdge)
 			val bitmap = BitmapFactory.decodeFile(
 				path,
-				BitmapFactory.Options().apply { inPreferredConfig = android.graphics.Bitmap.Config.RGB_565 }
+				BitmapFactory.Options().apply {
+					inPreferredConfig = Bitmap.Config.RGB_565
+					inSampleSize = sampleSize
+				}
 			) ?: return null
 			try {
 				val textureIds = IntArray(1)
@@ -722,24 +931,109 @@ class FlightTerrainView @JvmOverloads constructor(
 				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
 				val powerOfTwo = isPowerOfTwo(bitmap.width) && isPowerOfTwo(bitmap.height)
+				val useMipmaps = powerOfTwo && max(bitmap.width, bitmap.height) <= MAXIMUM_MIPMAPPED_TEXTURE_EDGE
 				GLES20.glTexParameteri(
 					GLES20.GL_TEXTURE_2D,
 					GLES20.GL_TEXTURE_MIN_FILTER,
-					if (powerOfTwo) GLES20.GL_LINEAR_MIPMAP_LINEAR else GLES20.GL_LINEAR
+					if (useMipmaps) GLES20.GL_LINEAR_MIPMAP_LINEAR else GLES20.GL_LINEAR
 				)
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 				GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
-				if (powerOfTwo) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+				if (useMipmaps) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
 				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 				val baseBytes = bitmap.width.toLong() * bitmap.height * RGB_565_BYTES_PER_PIXEL
 				return UploadedTexture(
 					id = textureId,
-					bytes = if (powerOfTwo) baseBytes * 4L / 3L else baseBytes
+					bytes = if (useMipmaps) baseBytes * 4L / 3L else baseBytes
 				)
 			} finally {
 				bitmap.recycle()
 			}
+		}
+
+		private fun ensurePhotoTexture(path: String): UploadedPhotoTexture? {
+			photoTexture?.takeIf { it.path == path }?.let { return it }
+			if (failedPhotoTexturePath == path) return null
+			releasePhotoTexture()
+			val attempt = runCatching { createPhotoTexture(path) }
+			val uploaded = attempt.getOrNull()
+			if (uploaded == null) {
+				failedPhotoTexturePath = path
+				onError(attempt.exceptionOrNull()?.message ?: "Impossible de charger la photo dans la vue 3D")
+				return null
+			}
+			failedPhotoTexturePath = null
+			photoTexture = uploaded
+			return uploaded
+		}
+
+		private fun createPhotoTexture(path: String): UploadedPhotoTexture? {
+			val file = File(path)
+			if (!file.isFile) return null
+			val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+			BitmapFactory.decodeFile(path, bounds)
+			if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+			val targetEdge = min(maximumTextureEdge, MAXIMUM_PHOTO_TEXTURE_EDGE)
+			val decoded = BitmapFactory.decodeFile(
+				path,
+				BitmapFactory.Options().apply {
+					inPreferredConfig = Bitmap.Config.ARGB_8888
+					inSampleSize = textureSampleSize(bounds.outWidth, bounds.outHeight, targetEdge)
+				}
+			) ?: return null
+			val oriented = orientPhotoBitmap(decoded, MediaMetadataUtils.getExifOrientation(file))
+			try {
+				val textureIds = IntArray(1)
+				GLES20.glGenTextures(1, textureIds, 0)
+				val textureId = textureIds[0]
+				if (textureId == 0) return null
+				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+				GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, oriented, 0)
+				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+				return UploadedPhotoTexture(textureId, path, oriented.width, oriented.height)
+			} finally {
+				oriented.recycle()
+				if (oriented !== decoded && !decoded.isRecycled) decoded.recycle()
+			}
+		}
+
+		private fun orientPhotoBitmap(source: Bitmap, exifOrientation: Int): Bitmap {
+			val degrees = when (exifOrientation) {
+				3 -> 180f
+				6 -> 90f
+				8 -> 270f
+				else -> return source
+			}
+			return runCatching {
+				Bitmap.createBitmap(
+					source,
+					0,
+					0,
+					source.width,
+					source.height,
+					android.graphics.Matrix().apply { postRotate(degrees) },
+					true
+				)
+			}.getOrElse { source }
+		}
+
+		private fun textureSampleSize(width: Int, height: Int, targetEdge: Int): Int {
+			var sampleSize = 1
+			while (max(width, height) / sampleSize > targetEdge) sampleSize *= 2
+			return sampleSize
+		}
+
+		private fun releasePhotoTexture() {
+			photoTexture?.id?.takeIf { it != 0 }?.let { id ->
+				GLES20.glDeleteTextures(1, intArrayOf(id), 0)
+			}
+			photoTexture = null
+			failedPhotoTexturePath = null
 		}
 
 		private fun isPowerOfTwo(value: Int): Boolean = value > 0 && (value and (value - 1)) == 0
@@ -883,8 +1177,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 			BitmapFactory.decodeFile(path, options)
 			if (options.outWidth <= 0 || options.outHeight <= 0) return 0L
-			val base = options.outWidth.toLong() * options.outHeight * RGB_565_BYTES_PER_PIXEL
-			return if (isPowerOfTwo(options.outWidth) && isPowerOfTwo(options.outHeight)) base * 4L / 3L else base
+			val sampleSize = textureSampleSize(options.outWidth, options.outHeight, maximumTextureEdge)
+			val width = (options.outWidth / sampleSize).coerceAtLeast(1)
+			val height = (options.outHeight / sampleSize).coerceAtLeast(1)
+			val base = width.toLong() * height * RGB_565_BYTES_PER_PIXEL
+			val useMipmaps = isPowerOfTwo(width) && isPowerOfTwo(height) &&
+				max(width, height) <= MAXIMUM_MIPMAPPED_TEXTURE_EDGE
+			return if (useMipmaps) base * 4L / 3L else base
 		}
 
 		private fun evictGeometryCache(activeTileIds: Set<TerrainTileId>) {
@@ -987,6 +1286,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			val bytes: Long
 		)
 
+		private data class UploadedPhotoTexture(
+			val id: Int,
+			val path: String,
+			val width: Int,
+			val height: Int
+		)
+
 		private data class RenderMesh(
 			val geometry: CachedGeometry,
 			val refinementLevel: Int,
@@ -1001,6 +1307,10 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val FLOAT_BYTES = 4
 			private const val SHORT_BYTES = 2
 			private const val RGB_565_BYTES_PER_PIXEL = 2L
+			private const val MINIMUM_TEXTURE_EDGE = 256
+			private const val DEFAULT_MAXIMUM_TEXTURE_EDGE = 2_048
+			private const val MAXIMUM_MIPMAPPED_TEXTURE_EDGE = 4_096
+			private const val MAXIMUM_PHOTO_TEXTURE_EDGE = 4_096
 			private const val MAXIMUM_RENDER_GEOMETRIES = 768
 			private const val MAXIMUM_RENDER_GEOMETRY_BYTES = 128L * 1_024L * 1_024L
 			private const val MAXIMUM_TEXTURE_CACHE_BYTES = 128L * 1_024L * 1_024L
@@ -1010,6 +1320,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SATELLITE_TEXTURE_UNIT = 0
 			private const val SHADOW_TEXTURE_UNIT = 1
 			private const val NATIVE_MAP_TEXTURE_UNIT = 2
+			private const val PHOTO_TEXTURE_UNIT = 3
 			private const val PREFERRED_SHADOW_MAP_SIZE = 2_048
 			private const val MINIMUM_SHADOW_MAP_SIZE = 512
 			private const val MINIMUM_SHADOW_EXTENT_METERS = 20_000f
@@ -1026,6 +1337,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val SHADOW_DIRECTION_EPSILON_SQUARED = 1e-7f
 			private const val SHADOW_FOCUS_UPDATE_DISTANCE_SQUARED = 4_000f * 4_000f
 			private const val DEFAULT_FLIGHT_ALTITUDE_METERS = 10_000f
+			private const val PHOTO_PLANE_ALTITUDE_FACTOR = 1.20f
+			private const val MINIMUM_PHOTO_PLANE_DISTANCE_METERS = 600f
+			private const val MAXIMUM_PHOTO_PLANE_DISTANCE_METERS = 30_000f
+			private const val LOOK_SMOOTHING_FRACTION = 0.38f
+			private const val LOOK_SNAP_DEGREES = 0.015f
 			private const val MINIMUM_GROUND_CLEARANCE_METERS = 60f
 			private const val DEFAULT_BEARING_DEGREES = 0f
 			private const val NEAR_PLANE_METERS = 10f
@@ -1044,6 +1360,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			private val QUALITY_DEBUG_HIGH = floatArrayOf(1.00f, 0.78f, 0.25f)
 			private val QUALITY_DEBUG_ULTRA = floatArrayOf(1.00f, 0.34f, 0.18f)
 			private val QUALITY_DEBUG_ULTRA_PLUS = floatArrayOf(0.70f, 0.34f, 1.00f)
+			private val QUALITY_DEBUG_ULTRA_PLUS_PLUS = floatArrayOf(1.00f, 0.31f, 0.76f)
+			private val QUALITY_DEBUG_ULTRA_PLUS_PLUS_PLUS = floatArrayOf(0.96f, 0.97f, 0.98f)
 			private const val VERTEX_SHADER = """
 				uniform mat4 uMvp;
 				uniform float uDepthBias;
@@ -1203,6 +1521,40 @@ class FlightTerrainView @JvmOverloads constructor(
 				}
 				void main() {
 					gl_FragColor = packDepth(gl_FragCoord.z);
+				}
+			"""
+
+			private const val PHOTO_VERTEX_SHADER = """
+				uniform mat4 uMvp;
+				attribute vec3 aPosition;
+				attribute vec2 aTexCoord;
+				varying vec2 vTexCoord;
+				void main() {
+					gl_Position = uMvp * vec4(aPosition, 1.0);
+					vTexCoord = aTexCoord;
+				}
+			"""
+
+			private const val PHOTO_FRAGMENT_SHADER = """
+				precision mediump float;
+				uniform sampler2D uPhotoTexture;
+				uniform float uOpacity;
+				uniform vec4 uColorRow0;
+				uniform vec4 uColorRow1;
+				uniform vec4 uColorRow2;
+				uniform vec4 uColorRow3;
+				uniform vec4 uColorOffset;
+				varying vec2 vTexCoord;
+				void main() {
+					vec4 source = texture2D(uPhotoTexture, vTexCoord);
+					vec4 adjusted = vec4(
+						dot(uColorRow0, source),
+						dot(uColorRow1, source),
+						dot(uColorRow2, source),
+						dot(uColorRow3, source)
+					) + uColorOffset;
+					adjusted = clamp(adjusted, 0.0, 1.0);
+					gl_FragColor = vec4(adjusted.rgb, adjusted.a * uOpacity);
 				}
 			"""
 		}

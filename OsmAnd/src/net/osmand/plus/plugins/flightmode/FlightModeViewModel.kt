@@ -800,7 +800,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				MAXIMUM_WINDOW_ALTITUDE_METERS
 			)
 		)
-		storeActiveWindowPhotoAlignment()
+		storeActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -832,14 +832,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				pitchDegrees = current.pitchDegrees + pitchDeltaDegrees
 			).clamped()
 		)
-		storeActiveWindowPhotoAlignment()
+		storeActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
 	fun recenterWindowLook() {
 		if (uiState.windowLook != FlightWindowLook()) {
 			uiState = uiState.copy(windowLook = FlightWindowLook())
-			storeActiveWindowPhotoAlignment()
+			storeActiveWindowPhotoAlignmentIfLinked()
 			scheduleTerrainDetailFocus()
 		}
 	}
@@ -866,7 +866,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val safePlacement = placement.clamped()
 		if (persist) windowPlacementStore.save(safePlacement)
 		uiState = uiState.copy(windowPlacement = safePlacement)
-		storeActiveWindowPhotoAlignment()
+		storeActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -1322,7 +1322,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(
 			windowPhotoOverlay = uiState.windowPhotoOverlay.copy(opacity = opacity).clamped()
 		)
-		storeActiveWindowPhotoAlignment()
+		storeActiveWindowPhotoAlignment(updateViewPose = false)
 	}
 
 	fun setWindowGestureTarget(target: FlightWindowGestureTarget) {
@@ -1342,7 +1342,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				offsetYFraction = current.offsetYFraction + panYFraction
 			).clamped()
 		)
-		storeActiveWindowPhotoAlignment()
+		storeActiveWindowPhotoAlignment(updateViewPose = false)
 	}
 
 	fun transformLinkedWindowView(
@@ -1376,7 +1376,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.copy(
 			windowPhotoOverlay = current.copy(scale = 1f, offsetXFraction = 0f, offsetYFraction = 0f)
 		)
-		storeActiveWindowPhotoAlignment()
+		storeActiveWindowPhotoAlignment(updateViewPose = false)
 		current.photoId?.let(::findPhoto)?.takeIf { it.rotationDegrees != 0f }?.let { photo ->
 			replacePhoto(photo.copy(rotationDegrees = 0f), "Position et rotation de la photo réinitialisées")
 		}
@@ -1388,7 +1388,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	private fun exitWindowPhotoEditing() {
 		if (uiState.windowPhotoOverlay.photoId == null) return
-		storeActiveWindowPhotoAlignment()
+		storeActiveWindowPhotoAlignment(updateViewPose = false)
 		uiState = uiState.copy(windowPhotoOverlay = FlightWindowPhotoOverlay())
 	}
 
@@ -1402,28 +1402,43 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		photo.matchedSamplePosition?.let { previous -> abs(previous - newPosition) < 0.005 } == true
 	}
 
-	private fun storeActiveWindowPhotoAlignment() {
+	private fun storeActiveWindowPhotoAlignment(updateViewPose: Boolean = true) {
 		val overlay = uiState.windowPhotoOverlay
 		val photo = overlay.photoId?.let(::findPhoto) ?: return
 		val referencePosition = photo.matchedSamplePosition
+		val previous = photo.windowAlignment?.clamped()
+		val preserveViewPose = !updateViewPose && previous != null
 		val alignment = FlightPhotoWindowAlignment(
 			opacity = overlay.opacity,
 			scale = overlay.scale,
 			offsetXFraction = overlay.offsetXFraction,
 			offsetYFraction = overlay.offsetYFraction,
-			windowPlacement = uiState.windowPlacement,
-			windowLook = uiState.windowLook,
-			altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters,
-			spatialPose = FlightViewGeometry.photoSpatialPose(
-				trip = uiState.trip,
-				samplePosition = referencePosition,
-				placement = uiState.windowPlacement,
-				look = uiState.windowLook,
-				altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters
-			)
+			windowPlacement = if (preserveViewPose) previous.windowPlacement else uiState.windowPlacement,
+			windowLook = if (preserveViewPose) previous.windowLook else uiState.windowLook,
+			altitudeOverrideMeters = if (preserveViewPose) {
+				previous.altitudeOverrideMeters
+			} else uiState.windowAltitudeOverrideMeters,
+			spatialPose = if (preserveViewPose) {
+				previous.spatialPose
+			} else {
+				FlightViewGeometry.photoSpatialPose(
+					trip = uiState.trip,
+					samplePosition = referencePosition,
+					placement = uiState.windowPlacement,
+					look = uiState.windowLook,
+					altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters
+				)
+			}
 		).clamped()
 		if (photo.windowAlignment != alignment) {
 			replacePhoto(photo.copy(windowAlignment = alignment), message = null)
+		}
+	}
+
+	/** VIEW/PHOTO leave the saved camera pose fixed; LINKED deliberately moves it. */
+	private fun storeActiveWindowPhotoAlignmentIfLinked() {
+		if (uiState.windowPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED) {
+			storeActiveWindowPhotoAlignment()
 		}
 	}
 

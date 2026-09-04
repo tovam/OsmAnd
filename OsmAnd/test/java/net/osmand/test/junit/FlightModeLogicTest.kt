@@ -767,6 +767,14 @@ class FlightModeLogicTest {
 			FlightTerrainTextureTier.HIGH,
 			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA_PLUS, 300, 80.0)
 		)
+		assertEquals(
+			FlightTerrainTextureTier.ULTRA_PLUS_PLUS,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA_PLUS_PLUS, 300, 2.0)
+		)
+		assertEquals(
+			FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS,
+			FlightTerrainLodPolicy.tierForDistance(FlightSatelliteQuality.ULTRA_PLUS_PLUS_PLUS, 300, 1.0)
+		)
 	}
 
 	@Test

@@ -17,6 +17,7 @@ fun FlightTerrainSurface(
 	showSatelliteQualityOverlay: Boolean,
 	terrainOpacity: Float,
 	nativeMapOpacity: Float,
+	spatialPhoto: FlightSpatialPhotoOverlay?,
 	onRendererError: (String) -> Unit,
 	onRenderStats: (FlightTerrainRenderStats) -> Unit,
 	modifier: Modifier = Modifier
@@ -37,6 +38,7 @@ fun FlightTerrainSurface(
 				showSatelliteQualityOverlay = showSatelliteQualityOverlay,
 				terrainOpacity = terrainOpacity,
 				nativeMapOpacity = nativeMapOpacity,
+				spatialPhoto = spatialPhoto,
 				onRendererError = onRendererError,
 				onRenderStats = onRenderStats
 			)

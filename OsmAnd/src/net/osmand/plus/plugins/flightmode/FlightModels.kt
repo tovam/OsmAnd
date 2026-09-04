@@ -34,7 +34,9 @@ enum class FlightSatelliteQuality(val zoomDelta: Int) {
 	STANDARD(0),
 	HIGH(1),
 	ULTRA(2),
-	ULTRA_PLUS(3)
+	ULTRA_PLUS(3),
+	ULTRA_PLUS_PLUS(4),
+	ULTRA_PLUS_PLUS_PLUS(5)
 }
 
 data class FlightWindowPlacement(
@@ -167,7 +169,7 @@ data class FlightPlan(
 ) {
 	companion object {
 		const val MIN_TERRAIN_DETAIL_ZOOM = 9
-		const val MAX_TERRAIN_DETAIL_ZOOM = 12
+		const val MAX_TERRAIN_DETAIL_ZOOM = 14
 		const val DEFAULT_TERRAIN_FINE_ZOOM = 12
 		const val DEFAULT_TERRAIN_MIDDLE_ZOOM = 11
 
@@ -334,6 +336,34 @@ data class FlightPhotoImageAdjustments(
 	fun isNeutral(): Boolean = this == FlightPhotoImageAdjustments()
 
 	private fun Float.finiteUnitValue(): Float = takeIf(Float::isFinite)?.coerceIn(-1f, 1f) ?: 0f
+}
+
+/** A calibrated photo ready to be projected as a fixed plane in the 3D world. */
+data class FlightSpatialPhotoOverlay(
+	val id: String,
+	val localPath: String,
+	val pose: FlightPhotoSpatialPose,
+	val opacity: Float,
+	val scale: Float,
+	val offsetXFraction: Float,
+	val offsetYFraction: Float,
+	val rotationDegrees: Float,
+	val imageAdjustments: FlightPhotoImageAdjustments
+) {
+	fun clamped(): FlightSpatialPhotoOverlay = copy(
+		opacity = opacity.coerceIn(0f, 1f),
+		scale = scale.coerceIn(FlightWindowPhotoOverlay.MIN_SCALE, FlightWindowPhotoOverlay.MAX_SCALE),
+		offsetXFraction = offsetXFraction.coerceIn(
+			-FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION,
+			FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION
+		),
+		offsetYFraction = offsetYFraction.coerceIn(
+			-FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION,
+			FlightWindowPhotoOverlay.MAX_OFFSET_FRACTION
+		),
+		rotationDegrees = rotationDegrees.takeIf(Float::isFinite) ?: 0f,
+		imageAdjustments = imageAdjustments.clamped()
+	)
 }
 
 /** Builds the 4×5 colour matrix consumed directly by the GPU-backed Compose image layer. */

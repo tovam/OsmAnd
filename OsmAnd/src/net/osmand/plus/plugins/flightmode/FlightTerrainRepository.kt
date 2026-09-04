@@ -232,9 +232,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				FlightTerrainLodPolicy.estimatedTextureBytes(FlightTerrainTextureTier.STANDARD)
 			val detailBytes = orderedTiles.sumOf { tileId ->
 				val tier = activeTextureTiers[tileId] ?: FlightTerrainTextureTier.OVERVIEW
-				if (tier == FlightTerrainTextureTier.HIGH || tier == FlightTerrainTextureTier.ULTRA ||
-					tier == FlightTerrainTextureTier.ULTRA_PLUS
-				) FlightTerrainLodPolicy.estimatedTextureBytes(tier) else 0L
+				if (tier.ordinal >= FlightTerrainTextureTier.HIGH.ordinal) {
+					FlightTerrainLodPolicy.estimatedTextureBytes(tier)
+				} else 0L
 			}
 			return geometryBytes + refinementGeometryBytes + placeholderBytes + standardBaseBytes + detailBytes
 		}
@@ -262,6 +262,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			highTextureTiles = tierCount(FlightTerrainTextureTier.HIGH),
 			ultraTextureTiles = tierCount(FlightTerrainTextureTier.ULTRA),
 			ultraPlusTextureTiles = tierCount(FlightTerrainTextureTier.ULTRA_PLUS),
+			ultraPlusPlusTextureTiles = tierCount(FlightTerrainTextureTier.ULTRA_PLUS_PLUS),
+			ultraPlusPlusPlusTextureTiles = tierCount(FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS),
 			memoryCacheHits = memoryCacheHits,
 			diskCacheHits = diskCacheHits,
 			networkRequests = networkRequests,
@@ -899,25 +901,24 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			}
 			val cachedChildren = childTiles.map { ensureSatelliteSourceFile(it, allowDownload) }
 			val downloadedBytes = cachedChildren.sumOf { it.downloadedBytes }
-			val bitmaps = mutableListOf<Bitmap>()
+			val firstBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+			BitmapFactory.decodeFile(cachedChildren.first().file.absolutePath, firstBounds)
+			val tileWidth = firstBounds.outWidth
+			val tileHeight = firstBounds.outHeight
+			if (tileWidth <= 0 || tileHeight <= 0) throw IOException("Texture satellite source illisible")
+			val composed = Bitmap.createBitmap(tileWidth * factor, tileHeight * factor, Bitmap.Config.RGB_565)
 			try {
-				cachedChildren.forEach { cached ->
-					bitmaps += BitmapFactory.decodeFile(
+				val canvas = Canvas(composed)
+				val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+				cachedChildren.forEachIndexed { index, cached ->
+					val bitmap = BitmapFactory.decodeFile(
 						cached.file.absolutePath,
 						BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
-					)
-						?: throw IOException("Texture satellite source illisible")
-				}
-				val tileWidth = bitmaps.first().width
-				val tileHeight = bitmaps.first().height
-				if (bitmaps.any { it.width != tileWidth || it.height != tileHeight }) {
-					throw IOException("Textures satellite de tailles incompatibles")
-				}
-				val composed = Bitmap.createBitmap(tileWidth * factor, tileHeight * factor, Bitmap.Config.RGB_565)
-				try {
-					val canvas = Canvas(composed)
-					val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-					bitmaps.forEachIndexed { index, bitmap ->
+					) ?: throw IOException("Texture satellite source illisible")
+					try {
+						if (bitmap.width != tileWidth || bitmap.height != tileHeight) {
+							throw IOException("Textures satellite de tailles incompatibles")
+						}
 						val childX = index % factor
 						val childY = index / factor
 						canvas.drawBitmap(
@@ -931,26 +932,26 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 							),
 							paint
 						)
-					}
-					val parent = destination.parentFile ?: throw IOException("Dossier satellite invalide")
-					if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de créer le cache satellite")
-					val partial = File(parent, destination.name + PARTIAL_SUFFIX)
-					if (partial.exists() && !partial.delete()) throw IOException("Texture satellite temporaire verrouillée")
-					try {
-						FileOutputStream(partial).buffered().use { output ->
-							if (!composed.compress(Bitmap.CompressFormat.JPEG, COMPOSITE_JPEG_QUALITY, output)) {
-								throw IOException("Impossible de composer la texture satellite")
-							}
-						}
-						if (!partial.renameTo(destination)) throw IOException("Impossible de finaliser la texture satellite")
 					} finally {
-						if (partial.exists()) partial.delete()
+						bitmap.recycle()
 					}
+				}
+				val parent = destination.parentFile ?: throw IOException("Dossier satellite invalide")
+				if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de créer le cache satellite")
+				val partial = File(parent, destination.name + PARTIAL_SUFFIX)
+				if (partial.exists() && !partial.delete()) throw IOException("Texture satellite temporaire verrouillée")
+				try {
+					FileOutputStream(partial).buffered().use { output ->
+						if (!composed.compress(Bitmap.CompressFormat.JPEG, COMPOSITE_JPEG_QUALITY, output)) {
+							throw IOException("Impossible de composer la texture satellite")
+						}
+					}
+					if (!partial.renameTo(destination)) throw IOException("Impossible de finaliser la texture satellite")
 				} finally {
-					composed.recycle()
+					if (partial.exists()) partial.delete()
 				}
 			} finally {
-				bitmaps.forEach(Bitmap::recycle)
+				composed.recycle()
 			}
 			CachedAsset(
 				file = destination,

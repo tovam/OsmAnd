@@ -135,18 +135,8 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 				File(context.applicationContext.filesDir, FlightSatelliteSource.CACHE_DIRECTORY),
 				detailLayer = 0
 			)
-			val detailQualities = when (requestedQuality) {
-				FlightSatelliteQuality.STANDARD -> emptyList()
-				FlightSatelliteQuality.HIGH -> listOf(FlightSatelliteQuality.HIGH)
-				FlightSatelliteQuality.ULTRA -> listOf(
-					FlightSatelliteQuality.HIGH,
-					FlightSatelliteQuality.ULTRA
-				)
-				FlightSatelliteQuality.ULTRA_PLUS -> listOf(
-					FlightSatelliteQuality.HIGH,
-					FlightSatelliteQuality.ULTRA,
-					FlightSatelliteQuality.ULTRA_PLUS
-				)
+			val detailQualities = FlightSatelliteQuality.values().filter { candidate ->
+				candidate != FlightSatelliteQuality.STANDARD && candidate.ordinal <= requestedQuality.ordinal
 			}
 			val detailed = detailQualities.flatMapIndexed { index, detailQuality ->
 				scan(

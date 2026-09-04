@@ -29,7 +29,7 @@
 	<string name="flight_mode_shadow_intensity">Intensité</string>
 	<string name="flight_mode_resume">Reprendre ce voyage après redémarrage</string>
 	<string name="flight_mode_terrain_source">Relief Terrain Tiles + satellite Sentinel-2</string>
-	<string name="flight_mode_preload_explanation">Automatique : le relief et le satellite Standard du corridor sont enregistrés avec le Journal. Haute, Ultra et Ultra+ restent des rendus locaux régénérables.</string>
+	<string name="flight_mode_preload_explanation">Automatique : le relief et le satellite Standard du corridor sont enregistrés avec le Journal. Les niveaux Haute à Ultra+++ restent des rendus locaux régénérables.</string>
 	<string name="flight_mode_terrain_loading">Chargement…</string>
 	<string name="flight_mode_terrain_attribution">Relief Terrain Tiles © Mapzen · Satellite Sentinel-2 cloudless — s2maps.eu par EOX IT Services GmbH (données Copernicus Sentinel modifiées 2016–2017).</string>
 	<string name="flight_mode_satellite_attribution_short">Relief : Terrain Tiles / Mapzen · Satellite : Sentinel-2 cloudless / EOX / Copernicus</string>
@@ -67,16 +67,20 @@
 	<string name="flight_mode_satellite_quality_high">Haute</string>
 	<string name="flight_mode_satellite_quality_ultra">Ultra</string>
 	<string name="flight_mode_satellite_quality_ultra_plus">Ultra+</string>
+	<string name="flight_mode_satellite_quality_ultra_plus_plus">Ultra++</string>
+	<string name="flight_mode_satellite_quality_ultra_plus_plus_plus">Ultra+++</string>
 	<string name="flight_mode_satellite_quality_overview">Aperçu</string>
-	<string name="flight_mode_satellite_quality_help">Ce réglage concerne uniquement l’image satellite : Standard = 256×256 px par tuile de scène, Haute = 512×512, Ultra = 1024×1024 et Ultra+ = 2048×2048. Chaque cran assemble 4 fois plus de tuiles source. Le relief et son maillage ne changent pas.</string>
-	<string name="flight_mode_satellite_ground_resolution">Avec la scène z%1$d actuelle, le pas d’affichage vaut environ %2$d / %3$d / %4$d / %5$d m par pixel pour Standard / Haute / Ultra / Ultra+.</string>
+	<string name="flight_mode_satellite_quality_help">Image satellite uniquement : Standard = 256² px par tuile de scène, Haute = 512², Ultra = 1024², Ultra+ = 2048², Ultra++ = 4096² et Ultra+++ = 8192². Chaque cran assemble 4 fois plus de tuiles source. Le relief ne change pas.</string>
+	<string name="flight_mode_satellite_ground_resolution">Scène z%1$d : environ %2$d / %3$d / %4$d / %5$d / %6$d / %7$d m par pixel pour Standard / Haute / Ultra / Ultra+ / Ultra++ / Ultra+++.</string>
 	<string name="flight_mode_satellite_rings_standard">Sur le rayon de %1$d km : Standard de 0 à %2$d km, puis Aperçu.</string>
 	<string name="flight_mode_satellite_rings_high">Sur le rayon de %1$d km : Haute de 0 à %2$d km · Standard jusqu’à %3$d km · Aperçu ensuite.</string>
 	<string name="flight_mode_satellite_rings_ultra">Sur le rayon de %1$d km : Ultra de 0 à %2$d km · Haute jusqu’à %3$d km · Standard jusqu’à %4$d km · Aperçu ensuite.</string>
 	<string name="flight_mode_satellite_rings_ultra_plus">Sur le rayon de %1$d km : Ultra+ de 0 à %2$d km · Ultra jusqu’à %3$d km · Haute jusqu’à %4$d km · Standard jusqu’à %5$d km · Aperçu ensuite.</string>
+	<string name="flight_mode_satellite_rings_ultra_plus_plus">Sur le rayon de %1$d km : Ultra++ de 0 à %2$d km · Ultra+ jusqu’à %3$d km · Ultra jusqu’à %4$d km · Haute jusqu’à %5$d km · Standard jusqu’à %6$d km · Aperçu ensuite.</string>
+	<string name="flight_mode_satellite_rings_ultra_plus_plus_plus">Sur le rayon de %1$d km : Ultra+++ de 0 à %2$d km · Ultra++ jusqu’à %3$d km · Ultra+ jusqu’à %4$d km · Ultra jusqu’à %5$d km · Haute jusqu’à %6$d km · Standard jusqu’à %7$d km · Aperçu ensuite.</string>
 	<string name="flight_mode_satellite_gaze_help">Les mêmes anneaux suivent aussi le point regardé après 1,5 s d’arrêt du geste ; cette zone est au minimum en qualité Haute.</string>
 	<string name="flight_mode_terrain_detail_title">Relief 3D : source et maillage</string>
-	<string name="flight_mode_terrain_zoom_help">Les boutons z9–z12 règlent uniquement la source d’altitude Terrarium : +1 divise la taille des tuiles et le pas des mesures par 2, mais multiplie leur nombre par 4. Le maillage est la grille 3D posée sur chaque tuile : 255×255 signifie 65 025 cases, chacune coupée en 2 triangles. Une grille plus dense ne peut pas inventer les détails absents de la source.</string>
+	<string name="flight_mode_terrain_zoom_help">Les boutons z9–z14 règlent uniquement la source d’altitude Terrarium : +1 divise la taille des tuiles et le pas des mesures par 2, mais multiplie leur nombre par 4. Le maillage est la grille 3D posée sur chaque tuile : 255×255 signifie 65 025 cases, chacune coupée en 2 triangles. Une grille plus dense ne peut pas inventer les détails absents de la source.</string>
 	<string name="flight_mode_terrain_fine_zone">Noyau : avion + point regardé · rayon 10 km</string>
 	<string name="flight_mode_terrain_middle_zone">Anneau autour · rayon 35 km</string>
 	<string name="flight_mode_terrain_far_zone">Zone lointaine · niveau calculé automatiquement</string>

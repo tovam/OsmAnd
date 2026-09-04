@@ -26,6 +26,8 @@ data class FlightTerrainStatus(
 	val highTextureTiles: Int = 0,
 	val ultraTextureTiles: Int = 0,
 	val ultraPlusTextureTiles: Int = 0,
+	val ultraPlusPlusTextureTiles: Int = 0,
+	val ultraPlusPlusPlusTextureTiles: Int = 0,
 	val memoryCacheHits: Int = 0,
 	val diskCacheHits: Int = 0,
 	val networkRequests: Int = 0,
@@ -48,7 +50,9 @@ enum class FlightTerrainTextureTier {
 	STANDARD,
 	HIGH,
 	ULTRA,
-	ULTRA_PLUS
+	ULTRA_PLUS,
+	ULTRA_PLUS_PLUS,
+	ULTRA_PLUS_PLUS_PLUS
 }
 
 data class FlightTerrainRenderStats(

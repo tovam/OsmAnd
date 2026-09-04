@@ -59,6 +59,23 @@ object FlightTerrainLodPolicy {
 				fraction <= 0.68 -> FlightTerrainTextureTier.STANDARD
 				else -> FlightTerrainTextureTier.OVERVIEW
 			}
+			FlightSatelliteQuality.ULTRA_PLUS_PLUS -> when {
+				fraction <= 0.014 -> FlightTerrainTextureTier.ULTRA_PLUS_PLUS
+				fraction <= 0.045 -> FlightTerrainTextureTier.ULTRA_PLUS
+				fraction <= 0.18 -> FlightTerrainTextureTier.ULTRA
+				fraction <= 0.36 -> FlightTerrainTextureTier.HIGH
+				fraction <= 0.68 -> FlightTerrainTextureTier.STANDARD
+				else -> FlightTerrainTextureTier.OVERVIEW
+			}
+			FlightSatelliteQuality.ULTRA_PLUS_PLUS_PLUS -> when {
+				fraction <= 0.007 -> FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS
+				fraction <= 0.020 -> FlightTerrainTextureTier.ULTRA_PLUS_PLUS
+				fraction <= 0.055 -> FlightTerrainTextureTier.ULTRA_PLUS
+				fraction <= 0.18 -> FlightTerrainTextureTier.ULTRA
+				fraction <= 0.36 -> FlightTerrainTextureTier.HIGH
+				fraction <= 0.68 -> FlightTerrainTextureTier.STANDARD
+				else -> FlightTerrainTextureTier.OVERVIEW
+			}
 		}
 	}
 
@@ -68,15 +85,20 @@ object FlightTerrainLodPolicy {
 		FlightTerrainTextureTier.HIGH -> FlightSatelliteQuality.HIGH
 		FlightTerrainTextureTier.ULTRA -> FlightSatelliteQuality.ULTRA
 		FlightTerrainTextureTier.ULTRA_PLUS -> FlightSatelliteQuality.ULTRA_PLUS
+		FlightTerrainTextureTier.ULTRA_PLUS_PLUS -> FlightSatelliteQuality.ULTRA_PLUS_PLUS
+		FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS -> FlightSatelliteQuality.ULTRA_PLUS_PLUS_PLUS
 	}
 
 	fun estimatedTextureBytes(tier: FlightTerrainTextureTier): Long {
 		if (tier == FlightTerrainTextureTier.OVERVIEW) return 0L
 		val zoomDelta = satelliteQuality(tier)?.zoomDelta ?: 0
 		val edge = STANDARD_TEXTURE_EDGE shl zoomDelta
-		// RGB_565 plus the complete mip chain (approximately another third).
-		return edge.toLong() * edge * 2L * 4L / 3L
+		val baseBytes = edge.toLong() * edge * 2L
+		// The renderer keeps mipmaps through 4096². At 8192² it deliberately preserves
+		// the full-resolution base image without a 33% mip-chain memory surcharge.
+		return if (edge <= MAXIMUM_MIPMAPPED_EDGE) baseBytes * 4L / 3L else baseBytes
 	}
 
 	private const val STANDARD_TEXTURE_EDGE = 256
+	private const val MAXIMUM_MIPMAPPED_EDGE = 4_096
 }

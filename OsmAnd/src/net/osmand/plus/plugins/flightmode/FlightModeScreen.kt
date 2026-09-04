@@ -130,6 +130,8 @@ private val FlightQualityStandard = Color(0xFF2ED4BF)
 private val FlightQualityHigh = Color(0xFFFFC740)
 private val FlightQualityUltra = Color(0xFFFF572E)
 private val FlightQualityUltraPlus = Color(0xFFB357FF)
+private val FlightQualityUltraPlusPlus = Color(0xFFFF4FC3)
+private val FlightQualityUltraPlusPlusPlus = Color(0xFFF4F7F8)
 private const val MAXIMUM_PHOTO_PREVIEW_PIXELS = 1_600
 
 private val PHOTO_TIME_COMPARATOR = compareBy<FlightPhotoAttachment>(
@@ -1232,6 +1234,8 @@ private fun SatelliteQualitySelector(
 							FlightSatelliteQuality.HIGH -> stringResource(R.string.flight_mode_satellite_quality_high)
 							FlightSatelliteQuality.ULTRA -> stringResource(R.string.flight_mode_satellite_quality_ultra)
 							FlightSatelliteQuality.ULTRA_PLUS -> stringResource(R.string.flight_mode_satellite_quality_ultra_plus)
+							FlightSatelliteQuality.ULTRA_PLUS_PLUS -> stringResource(R.string.flight_mode_satellite_quality_ultra_plus_plus)
+							FlightSatelliteQuality.ULTRA_PLUS_PLUS_PLUS -> stringResource(R.string.flight_mode_satellite_quality_ultra_plus_plus_plus)
 						},
 						color = if (selected) FlightBlue else FlightText,
 						fontSize = 8.sp,
@@ -1261,7 +1265,9 @@ private fun SatelliteQualitySelector(
 					metersPerPixel[0],
 					metersPerPixel[1],
 					metersPerPixel[2],
-					metersPerPixel[3]
+					metersPerPixel[3],
+					metersPerPixel[4],
+					metersPerPixel[5]
 				),
 				color = FlightMuted,
 				fontSize = 7.sp,
@@ -1310,6 +1316,25 @@ private fun satelliteQualityRingsText(quality: FlightSatelliteQuality, radiusKm:
 			R.string.flight_mode_satellite_rings_ultra_plus,
 			radius,
 			at(0.03),
+			at(0.18),
+			at(0.36),
+			at(0.68)
+		)
+		FlightSatelliteQuality.ULTRA_PLUS_PLUS -> stringResource(
+			R.string.flight_mode_satellite_rings_ultra_plus_plus,
+			radius,
+			at(0.014),
+			at(0.045),
+			at(0.18),
+			at(0.36),
+			at(0.68)
+		)
+		FlightSatelliteQuality.ULTRA_PLUS_PLUS_PLUS -> stringResource(
+			R.string.flight_mode_satellite_rings_ultra_plus_plus_plus,
+			radius,
+			at(0.007),
+			at(0.020),
+			at(0.055),
 			at(0.18),
 			at(0.36),
 			at(0.68)
@@ -1473,6 +1498,8 @@ private fun SatelliteQualityLegend(modifier: Modifier = Modifier) {
 		verticalArrangement = Arrangement.spacedBy(3.dp)
 	) {
 		listOf(
+			FlightQualityUltraPlusPlusPlus to stringResource(R.string.flight_mode_satellite_quality_ultra_plus_plus_plus),
+			FlightQualityUltraPlusPlus to stringResource(R.string.flight_mode_satellite_quality_ultra_plus_plus),
 			FlightQualityUltraPlus to stringResource(R.string.flight_mode_satellite_quality_ultra_plus),
 			FlightQualityUltra to stringResource(R.string.flight_mode_satellite_quality_ultra),
 			FlightQualityHigh to stringResource(R.string.flight_mode_satellite_quality_high),
@@ -2778,6 +2805,19 @@ private fun FlightWindowScene(
 	val activePhoto = photo?.takeIf { photoOverlay.photoId == it.id }
 	val latestActivePhotoId by rememberUpdatedState(activePhoto?.id)
 	val photoOverlayVisible = activePhoto != null
+	val spatialPhoto = activePhoto?.windowAlignment?.spatialPose?.let { pose ->
+		FlightSpatialPhotoOverlay(
+			id = activePhoto.id,
+			localPath = activePhoto.localPath,
+			pose = pose,
+			opacity = photoOverlay.opacity,
+			scale = photoOverlay.scale,
+			offsetXFraction = photoOverlay.offsetXFraction,
+			offsetYFraction = photoOverlay.offsetYFraction,
+			rotationDegrees = activePhoto.rotationDegrees,
+			imageAdjustments = activePhoto.imageAdjustments
+		).clamped()
+	}
 	Box(
 		modifier = modifier.background(FlightBackground)
 			.onSizeChanged { size ->
@@ -2836,11 +2876,16 @@ private fun FlightWindowScene(
 			// owns the coloured 2D relief visualization.
 			terrainOpacity = 0f,
 			nativeMapOpacity = 0f,
+			spatialPhoto = spatialPhoto,
 			onRendererError = onRendererError,
 			onRenderStats = onRenderStats,
 			modifier = Modifier.fillMaxSize()
 		)
-		activePhoto?.let { FlightWindowPhotoOverlayImage(it, photoOverlay, Modifier.fillMaxSize()) }
+		// A just-imported legacy photo can need one frame before its absolute pose is
+		// backfilled. Only that transient state uses the old screen-space fallback.
+		if (spatialPhoto == null) {
+			activePhoto?.let { FlightWindowPhotoOverlayImage(it, photoOverlay, Modifier.fillMaxSize()) }
+		}
 		if (showSatelliteQualityOverlay) {
 			SatelliteQualityLegend(
 				modifier = Modifier.align(Alignment.CenterStart).padding(start = 7.dp)
@@ -4001,6 +4046,8 @@ private fun terrainTextureTierLabel(tier: FlightTerrainTextureTier): String = wh
 	FlightTerrainTextureTier.HIGH -> "Haute"
 	FlightTerrainTextureTier.ULTRA -> "Ultra"
 	FlightTerrainTextureTier.ULTRA_PLUS -> "Ultra+"
+	FlightTerrainTextureTier.ULTRA_PLUS_PLUS -> "Ultra++"
+	FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS -> "Ultra+++"
 }
 
 private fun terrainTextureTierPixels(tier: FlightTerrainTextureTier): Int = when (tier) {
@@ -4009,6 +4056,8 @@ private fun terrainTextureTierPixels(tier: FlightTerrainTextureTier): Int = when
 	FlightTerrainTextureTier.HIGH -> 512
 	FlightTerrainTextureTier.ULTRA -> 1_024
 	FlightTerrainTextureTier.ULTRA_PLUS -> 2_048
+	FlightTerrainTextureTier.ULTRA_PLUS_PLUS -> 4_096
+	FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS -> 8_192
 }
 
 private fun terrainTextureTierZoomDelta(tier: FlightTerrainTextureTier): Int = when (tier) {
@@ -4017,6 +4066,8 @@ private fun terrainTextureTierZoomDelta(tier: FlightTerrainTextureTier): Int = w
 	FlightTerrainTextureTier.HIGH -> 1
 	FlightTerrainTextureTier.ULTRA -> 2
 	FlightTerrainTextureTier.ULTRA_PLUS -> 3
+	FlightTerrainTextureTier.ULTRA_PLUS_PLUS -> 4
+	FlightTerrainTextureTier.ULTRA_PLUS_PLUS_PLUS -> 5
 }
 
 private fun terrainRuntimeStatusText(
@@ -4049,7 +4100,8 @@ private fun terrainRuntimeStatusText(
 
 private fun terrainTierDetails(status: FlightTerrainStatus): String =
 	"Aperçu ${status.overviewTextureTiles} · Standard ${status.standardTextureTiles} · " +
-		"Haute ${status.highTextureTiles} · Ultra ${status.ultraTextureTiles} · Ultra+ ${status.ultraPlusTextureTiles}"
+		"Haute ${status.highTextureTiles} · Ultra ${status.ultraTextureTiles} · Ultra+ ${status.ultraPlusTextureTiles} · " +
+		"Ultra++ ${status.ultraPlusPlusTextureTiles} · Ultra+++ ${status.ultraPlusPlusPlusTextureTiles}"
 
 private fun formatDataSize(bytes: Long): String = when {
 	bytes >= 1_048_576L -> "%.1f Mio".format(bytes / 1_048_576.0)
