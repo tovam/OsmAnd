@@ -1,5 +1,6 @@
 package net.osmand.test.junit
 
+import kotlinx.coroutines.runBlocking
 import net.osmand.plus.plugins.flightmode.FlightLeg
 import net.osmand.plus.plugins.flightmode.FlightCabinSide
 import net.osmand.plus.plugins.flightmode.FlightPlan
@@ -18,6 +19,7 @@ import net.osmand.plus.plugins.flightmode.FlightSatelliteQuality
 import net.osmand.plus.plugins.flightmode.FlightStop
 import net.osmand.plus.plugins.flightmode.FlightSunPosition
 import net.osmand.plus.plugins.flightmode.FlightTerrainCoordinates
+import net.osmand.plus.plugins.flightmode.FlightTerrainCpuScheduler
 import net.osmand.plus.plugins.flightmode.FlightTerrainDetailFocus
 import net.osmand.plus.plugins.flightmode.FlightTerrainGeometry
 import net.osmand.plus.plugins.flightmode.FlightTerrainGeometryCacheKey
@@ -56,6 +58,46 @@ import java.util.Date
 import java.util.Locale
 
 class FlightModeLogicTest {
+
+	@Test
+	fun terrainGeometryWorkersAdaptToCpuCountWhileLeavingUiHeadroom() {
+		assertEquals(1, FlightTerrainCpuScheduler.geometryWorkerCount(1))
+		assertEquals(1, FlightTerrainCpuScheduler.geometryWorkerCount(2))
+		assertEquals(2, FlightTerrainCpuScheduler.geometryWorkerCount(4))
+		assertEquals(6, FlightTerrainCpuScheduler.geometryWorkerCount(8))
+		assertEquals(7, FlightTerrainCpuScheduler.geometryWorkerCount(9))
+		assertEquals(8, FlightTerrainCpuScheduler.geometryWorkerCount(16))
+	}
+
+	@Test
+	fun parallelTerrainConstructionPreservesRequestedTileOrderAndGeometry() = runBlocking {
+		val zoom = 8
+		val tileIds = listOf(
+			TerrainTileId(zoom, 141, 95),
+			TerrainTileId(zoom, 142, 95),
+			TerrainTileId(zoom, 141, 96),
+			TerrainTileId(zoom, 142, 96)
+		)
+		val tiles = tileIds.associateWith { tileId ->
+			TerrariumTile(tileId, 256, 256, FloatArray(256 * 256) { 120f })
+		}
+		val parallel = FlightTerrainMeshBuilder.buildParallel(
+			centerLatitude = 42.0,
+			centerLongitude = 19.0,
+			radiusKm = 300,
+			plan = TerrainTilePlan(zoom, tileIds),
+			tiles = tiles,
+			workerCount = 4
+		)
+
+		assertEquals(tileIds, parallel.meshes.map { it.tileId })
+		assertEquals(tiles.size, parallel.loadedTiles)
+		assertEquals(0, parallel.missingTiles)
+		parallel.meshes.forEach { mesh ->
+			assertEquals(120f, mesh.minimumElevationMeters, 0f)
+			assertEquals(120f, mesh.maximumElevationMeters, 0f)
+		}
+	}
 
 	@Test
 	fun neutralPhotoAdjustmentsProduceIdentityColorMatrix() {
@@ -625,6 +667,8 @@ class FlightModeLogicTest {
 		assertEquals(255, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 0.0))
 		assertEquals(128, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 80.0))
 		assertEquals(32, FlightTerrainGeometryLodPolicy.quadsForDistance(300, 200.0))
+		assertEquals(255, FlightTerrainGeometryLodPolicy.stableQuadsForDistance(300, 40.0, 255))
+		assertEquals(128, FlightTerrainGeometryLodPolicy.stableQuadsForDistance(300, 50.01, 255))
 		assertEquals(255, FlightTerrainRefinementPolicy.FINE_GRID_QUADS)
 		assertEquals(128, FlightTerrainRefinementPolicy.MIDDLE_GRID_QUADS)
 	}
@@ -655,6 +699,20 @@ class FlightModeLogicTest {
 		assertTrue(plan.tiles.isNotEmpty())
 		assertTrue(plan.tiles.size <= FlightTerrainRefinementPolicy.MAXIMUM_FINE_TILES)
 		assertTrue(plan.tiles.all { it.zoom == 12 })
+	}
+
+	@Test
+	fun refinementPlannerAcceptsZoomFourteenWithoutSilentlyClampingIt() {
+		val plan = FlightTerrainTilePlanner.refinementPlan(
+			foci = listOf(FlightTerrainDetailFocus(48.0, 2.0)),
+			radiusKm = 1.0,
+			zoom = 14,
+			maxTiles = 12
+		)
+
+		assertEquals(14, plan.zoom)
+		assertTrue(plan.tiles.isNotEmpty())
+		assertTrue(plan.tiles.all { it.zoom == 14 })
 	}
 
 	@Test
@@ -795,6 +853,31 @@ class FlightModeLogicTest {
 				radiusKm = 300,
 				aircraftDistanceKm = 0.0,
 				detailFocusDistanceKm = 80.0
+			)
+		)
+	}
+
+	@Test
+	fun detailedTextureOnlyStepsDownAfterItsWholeTileLeavesFiftyKilometres() {
+		assertTrue(
+			FlightTerrainLodPolicy.shouldRetainNearbyDetail(
+				previous = FlightTerrainTextureTier.ULTRA_PLUS,
+				raw = FlightTerrainTextureTier.STANDARD,
+				aircraftNearestDistanceKm = 50.0
+			)
+		)
+		assertFalse(
+			FlightTerrainLodPolicy.shouldRetainNearbyDetail(
+				previous = FlightTerrainTextureTier.ULTRA_PLUS,
+				raw = FlightTerrainTextureTier.STANDARD,
+				aircraftNearestDistanceKm = 50.01
+			)
+		)
+		assertFalse(
+			FlightTerrainLodPolicy.shouldRetainNearbyDetail(
+				previous = FlightTerrainTextureTier.STANDARD,
+				raw = FlightTerrainTextureTier.ULTRA,
+				aircraftNearestDistanceKm = 0.0
 			)
 		)
 	}

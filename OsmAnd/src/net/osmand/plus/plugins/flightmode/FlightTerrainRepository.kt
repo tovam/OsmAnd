@@ -5,12 +5,16 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import net.osmand.osm.io.NetworkUtils
 import net.osmand.plus.OsmandApplication
@@ -20,12 +24,14 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.HttpURLConnection
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
 
 class FlightTerrainRepository(private val app: OsmandApplication) {
 
@@ -33,7 +39,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	private val satelliteDirectory = File(app.filesDir, FlightSatelliteSource.CACHE_DIRECTORY)
 	private val satelliteRenderDirectory = File(app.filesDir, FlightSatelliteSource.RENDER_CACHE_DIRECTORY)
 	private val nativeMapTextureRepository = FlightNativeMapTextureRepository(app)
-	private val assetLocks = ConcurrentHashMap<String, Any>()
+	private val assetLocks = ConcurrentHashMap<String, ReentrantLock>()
 	private val decodedTerrainCache = object : LinkedHashMap<TerrainTileId, TerrariumTile>(
 		MAXIMUM_DECODED_TERRAIN_TILES + 1,
 		0.75f,
@@ -68,6 +74,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			geometry.vertices.size.toLong() * FLOAT_BYTES + geometry.indices.size.toLong() * SHORT_BYTES
 	}
 	private val geometryGeneration = AtomicLong(1L)
+	private val geometryWorkerCount = FlightTerrainCpuScheduler.geometryWorkerCount()
 	private val coordinateOriginLock = Any()
 	private var coordinateOrigin: Pair<Double, Double>? = null
 	private val lodLock = Any()
@@ -80,6 +87,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		override fun removeEldestEntry(
 			eldest: MutableMap.MutableEntry<TerrainTileId, FlightTerrainTextureTier>?
 		): Boolean = size > MAXIMUM_LOD_HISTORY_TILES
+	}
+	private val previousGeometryQuadsByTile = object : LinkedHashMap<TerrainTileId, Int>(
+		MAXIMUM_LOD_HISTORY_TILES + 1,
+		0.75f,
+		true
+	) {
+		override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TerrainTileId, Int>?): Boolean =
+			size > MAXIMUM_LOD_HISTORY_TILES
 	}
 
 	suspend fun loadScene(
@@ -96,7 +111,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		onStatus: suspend (FlightTerrainStatus) -> Unit
 	): FlightTerrainScene {
 		onStatus(FlightTerrainStatus(phase = FlightTerrainPhase.PLANNING))
-		val plan = withContext(Dispatchers.Default) {
+		val plan = runInterruptible(Dispatchers.Default) {
 			FlightTerrainTilePlanner.scenePlan(latitude, longitude, radiusKm)
 		}
 		val origin = coordinateOriginFor(latitude, longitude)
@@ -130,12 +145,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			.flatMap { it.quadsByTile.entries }
 			.associate { it.toPair() }
 		val requestedRefinementTiles = refinementLayers.flatMapTo(linkedSetOf()) { it.plan.tiles }
-		val geometryQuadsByTile = orderedTiles.associateWith { tile ->
-			FlightTerrainGeometryLodPolicy.quadsForDistance(
-				radiusKm,
-				tileNearestDistanceKm(tile, latitude, longitude)
-			)
-		}
+		val geometryQuadsByTile = selectGeometryQuads(orderedTiles, latitude, longitude, radiusKm)
 		val targetTierByTile = selectTextureTiers(
 			tiles = orderedTiles,
 			latitude = latitude,
@@ -211,6 +221,21 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			}
 			updateActiveTexture(tileId)
 		}
+		requestedRefinementTiles.forEach { tileId ->
+			cachedDecodedTerrain(tileId)?.let { tile ->
+				refinementTiles[tileId] = tile
+				memoryCacheHits++
+			}
+		}
+
+		suspend fun <T> interruptibleResult(block: () -> T): Result<T> = try {
+			Result.success(runInterruptible(Dispatchers.IO) { block() })
+		} catch (error: CancellationException) {
+			throw error
+		} catch (error: Throwable) {
+			currentCoroutineContext().ensureActive()
+			Result.failure(error)
+		}
 
 		fun tierCount(tier: FlightTerrainTextureTier): Int =
 			orderedTiles.count { activeTextureTiers[it] == tier }
@@ -280,8 +305,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		suspend fun buildBaseScene(
 			nativeMapTexturePaths: Map<TerrainTileId, String> = emptyMap(),
 			nativeMapFailedTiles: Int = 0
-		): FlightTerrainScene = withContext(Dispatchers.Default) {
-			FlightTerrainMeshBuilder.build(
+		): FlightTerrainScene = FlightTerrainMeshBuilder.buildParallel(
 				centerLatitude = latitude,
 				centerLongitude = longitude,
 				detailFocus = detailFocus,
@@ -302,14 +326,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				geometryQuadsByTile = geometryQuadsByTile,
 				geometryCache = geometryCache,
 				geometryGeneration = sceneGeometryGeneration(tiles.keys, geometryQuadsByTile),
-				includePlaceholders = true
+				includePlaceholders = true,
+				workerCount = geometryWorkerCount
 			)
-		}
 
 		suspend fun withRefinementMeshes(
 			baseScene: FlightTerrainScene,
 			retainPreviousRefinements: Boolean
-		): FlightTerrainScene = withContext(Dispatchers.Default) {
+		): FlightTerrainScene {
 			val meshes = baseScene.meshes.filter { it.refinementLevel == 0 }.toMutableList()
 			var boundaryZoom = plan.zoom
 			var boundaryTiles: Map<TerrainTileId, TerrariumTile> = tiles.toMap()
@@ -319,7 +343,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				}.toMap()
 				if (availableTiles.isNotEmpty()) {
 					val availablePlan = layer.plan.copy(tiles = layer.plan.tiles.filter(availableTiles::containsKey))
-					meshes += FlightTerrainMeshBuilder.buildRefinementMeshes(
+					meshes += FlightTerrainMeshBuilder.buildRefinementMeshesParallel(
 						baseZoom = plan.zoom,
 						plan = availablePlan,
 						tiles = availableTiles,
@@ -331,7 +355,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						coordinateOriginLatitude = origin.first,
 						coordinateOriginLongitude = origin.second,
 						geometryQuadsByTile = layer.quadsByTile,
-						geometryCache = geometryCache
+						geometryCache = geometryCache,
+						workerCount = geometryWorkerCount
 					)
 					boundaryZoom = layer.plan.zoom
 					boundaryTiles = availableTiles
@@ -345,7 +370,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				meshes += previousScene.meshes.filter { it.refinementLevel > 0 && it.tileId !in present }
 			}
 			val combinedQuads = geometryQuadsByTile + refinementQuadsByTile
-			baseScene.copy(
+			return baseScene.copy(
 				meshes = meshes.sortedBy { it.tileId.zoom },
 				loadedTiles = tiles.size + refinementTiles.size,
 				missingTiles = (orderedTiles.size - tiles.size).coerceAtLeast(0) +
@@ -404,22 +429,71 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		onStatus(status(FlightTerrainPhase.DOWNLOADING, "Cache local et relief…"))
 		publishProgressiveScene(force = true, retainPreviousCoverage = true)
 
-		val terrainRequests = orderedTiles.filterNot(tiles::containsKey)
+		// One queue owns both coarse coverage and detailed elevation. Distance is the
+		// primary key; inside each 5 km band, cheap base coverage is completed before
+		// expensive refinement. A cancelled scene discards this entire queue, and the
+		// replacement scene rebuilds it around the latest aircraft position.
+		val terrainRequests = buildList {
+			orderedTiles.filterNot(tiles::containsKey).forEach { tileId ->
+				val quads = geometryQuadsByTile[tileId] ?: FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS
+				add(
+					TerrainElevationWork(
+						tileId = tileId,
+						refinement = false,
+						distanceKm = tileNearestDistanceKm(tileId, latitude, longitude),
+						complexity = estimatedGeometryComplexity(quads)
+					)
+				)
+			}
+			requestedRefinementTiles.filterNot(refinementTiles::containsKey).forEach { tileId ->
+				val quads = refinementQuadsByTile[tileId] ?: FlightTerrainRefinementPolicy.MIDDLE_GRID_QUADS
+				add(
+					TerrainElevationWork(
+						tileId = tileId,
+						refinement = true,
+						distanceKm = tileNearestDistanceKm(tileId, latitude, longitude),
+						complexity = estimatedGeometryComplexity(quads)
+					)
+				)
+			}
+		}.sortedWith(
+			compareBy<TerrainElevationWork>(
+				{ (it.distanceKm / PRIORITY_DISTANCE_BUCKET_KM).toInt() },
+				{ if (it.refinement) 1 else 0 },
+				{ it.complexity },
+				{ it.distanceKm },
+				{ it.tileId.zoom },
+				{ it.tileId.y },
+				{ it.tileId.x }
+			)
+		)
 		if (terrainRequests.isNotEmpty()) coroutineScope {
-			val work = Channel<TerrainTileId>(PARALLEL_DOWNLOADS * 2)
-			val results = Channel<Result<LoadedTerrainTile>>(PARALLEL_DOWNLOADS * 2)
+			val work = Channel<TerrainElevationWork>(PARALLEL_DOWNLOADS * 2)
+			val results = Channel<TerrainElevationResult>(PARALLEL_DOWNLOADS * 2)
 			val producer = launch {
-				terrainRequests.forEach { work.send(it) }
+				terrainRequests.forEach { request -> work.send(request) }
 				work.close()
 			}
 			val workers = List(PARALLEL_DOWNLOADS) {
-				launch(Dispatchers.IO) {
-					for (tileId in work) results.send(runCatching { loadTerrainTile(tileId) })
+				launch {
+					for (request in work) {
+						results.send(
+							TerrainElevationResult(
+								request,
+								interruptibleResult { loadTerrainTile(request.tileId) }
+							)
+						)
+					}
 				}
 			}
 			repeat(terrainRequests.size) { index ->
-				results.receive().onSuccess { loaded ->
-					tiles[loaded.tile.id] = loaded.tile
+				val completed = results.receive()
+				completed.result.onSuccess { loaded ->
+					if (completed.work.refinement) {
+						refinementTiles[loaded.tile.id] = loaded.tile
+					} else {
+						tiles[loaded.tile.id] = loaded.tile
+					}
 					invalidateGeometryAround(loaded.tile.id)
 					memoryCacheHits += loaded.memoryCacheHits
 					diskCacheHits += loaded.diskCacheHits
@@ -428,11 +502,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					bytesDownloaded += loaded.downloadedBytes
 					downloadRate.record(loaded.downloadedBytes)
 					visualUpdates++
-				}.onFailure { failed++ }
+				}.onFailure {
+					if (completed.work.refinement) refinementFailed++ else failed++
+				}
 				onStatus(
 					status(
 						FlightTerrainPhase.DOWNLOADING,
-						message = "Relief ${tiles.size}/${orderedTiles.size}",
+						message = "Relief prioritaire ${tiles.size + refinementTiles.size}/" +
+							"${orderedTiles.size + requestedRefinementTiles.size} · proche · grossier avant fin",
 						textureQueue = orderedTiles.size - standardTexturePaths.size
 					)
 				)
@@ -450,74 +527,97 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			publishProgressiveScene(force = true, retainPreviousCoverage = true)
 		}
 
-		// Elevation refinement is independent from imagery and is loaded before the
-		// satellite queue. The complete coarse scene remains visible while bounded
-		// z11/z12 patches appear around the aircraft and stable gaze focus.
-		requestedRefinementTiles.forEach { tileId ->
-			cachedDecodedTerrain(tileId)?.let { tile ->
-				refinementTiles[tileId] = tile
-				memoryCacheHits++
-			}
-		}
-		if (refinementTiles.isNotEmpty()) {
-			val cachedRefinedScene = withRefinementMeshes(buildBaseScene(), retainPreviousRefinements = true)
-			latestScene = cachedRefinedScene
-			onScene(cachedRefinedScene)
-		}
-		refinementLayers.forEach { layer ->
-			val missingLayerTiles = layer.plan.tiles.filterNot(refinementTiles::containsKey)
-			for (chunk in missingLayerTiles.chunked(PARALLEL_DOWNLOADS)) {
-				val results = coroutineScope {
-					chunk.map { tileId ->
-						async(Dispatchers.IO) { runCatching { loadTerrainTile(tileId) } }
-					}.awaitAll()
-				}
-				results.forEach { result ->
-					result.onSuccess { loaded ->
-						refinementTiles[loaded.tile.id] = loaded.tile
-						invalidateGeometryAround(loaded.tile.id)
-						memoryCacheHits += loaded.memoryCacheHits
-						diskCacheHits += loaded.diskCacheHits
-						networkRequests += loaded.networkRequests
-						if (loaded.networkRequests > 0) downloadedTileIds += loaded.tile.id
-						bytesDownloaded += loaded.downloadedBytes
-						downloadRate.record(loaded.downloadedBytes)
-					}.onFailure { refinementFailed++ }
-				}
-				onStatus(
-					status(
-						phase = FlightTerrainPhase.DOWNLOADING,
-						message = "Relief z${layer.plan.zoom} ${layer.plan.tiles.count(refinementTiles::containsKey)}/${layer.plan.tiles.size}"
-					)
+		// Standard and detailed imagery use separate worker lanes but a single result
+		// queue. Four cheap Standard workers keep distant coverage moving while two
+		// expensive detail workers refine the nearest tiles; all state publication stays
+		// serialized here. This avoids making the aircraft wait for the full 300 km base.
+		val standardRequests = orderedTiles
+			.filter { it !in standardTexturePaths }
+			.map { tileId ->
+				SatelliteTextureWork(
+					tileId = tileId,
+					quality = FlightSatelliteQuality.STANDARD,
+					distanceKm = tileNearestDistanceKm(tileId, latitude, longitude),
+					complexity = 1L
 				)
-				val refinedScene = withRefinementMeshes(buildBaseScene(), retainPreviousRefinements = true)
-				latestScene = refinedScene
-				onScene(refinedScene)
 			}
-		}
-
-		// Standard is the durable base texture for the complete visible scene. It is
-		// downloaded separately from geometry, so missing imagery never delays relief.
-		val standardRequests = orderedTiles.filter { it !in standardTexturePaths }
-		if (standardRequests.isNotEmpty()) coroutineScope {
-			val work = Channel<TerrainTileId>(PARALLEL_DOWNLOADS * 2)
-			val results = Channel<Result<LoadedSatelliteTexture>>(PARALLEL_DOWNLOADS * 2)
-			val producer = launch {
-				standardRequests.forEach { work.send(it) }
-				work.close()
+			.sortedWith(SATELLITE_WORK_COMPARATOR)
+		val detailRequests = orderedTiles.mapNotNull { tileId ->
+			val tier = targetTierByTile[tileId] ?: return@mapNotNull null
+			val quality = FlightTerrainLodPolicy.satelliteQuality(tier) ?: return@mapNotNull null
+			if (quality == FlightSatelliteQuality.STANDARD || tileId !in tiles || tileId in detailedTexturePaths) {
+				null
+			} else {
+				SatelliteTextureWork(
+					tileId = tileId,
+					quality = quality,
+					distanceKm = tileNearestDistanceKm(tileId, latitude, longitude),
+					complexity = estimatedTextureComplexity(quality)
+				)
 			}
-			val workers = List(PARALLEL_DOWNLOADS) {
-				launch(Dispatchers.IO) {
-					for (tileId in work) {
-						results.send(runCatching {
-							loadStandardSatelliteTexture(tileId, satelliteDownloadsEnabled.get())
-						})
+		}.sortedWith(SATELLITE_WORK_COMPARATOR)
+		val totalTextureRequests = standardRequests.size + detailRequests.size
+		if (totalTextureRequests > 0) coroutineScope {
+			val standardWork = Channel<SatelliteTextureWork>(SATELLITE_STANDARD_PARALLEL_DOWNLOADS * 2)
+			val detailWork = Channel<SatelliteTextureWork>(DETAIL_PARALLEL_DOWNLOADS * 2)
+			val results = Channel<SatelliteTextureResult>(
+				(SATELLITE_STANDARD_PARALLEL_DOWNLOADS + DETAIL_PARALLEL_DOWNLOADS) * 2
+			)
+			val standardProducer = launch {
+				standardRequests.forEach { request -> standardWork.send(request) }
+				standardWork.close()
+			}
+			val detailProducer = launch {
+				detailRequests.forEach { request -> detailWork.send(request) }
+				detailWork.close()
+			}
+			val standardWorkers = List(SATELLITE_STANDARD_PARALLEL_DOWNLOADS) {
+				launch {
+					for (request in standardWork) {
+						results.send(
+							SatelliteTextureResult(
+								request,
+								interruptibleResult {
+									loadStandardSatelliteTexture(
+										request.tileId,
+										satelliteDownloadsEnabled.get()
+									)
+								}
+							)
+						)
 					}
 				}
 			}
-			repeat(standardRequests.size) { index ->
-				results.receive().onSuccess { loaded ->
-					standardTexturePaths[loaded.tileId] = loaded.file.absolutePath
+			val detailWorkers = List(DETAIL_PARALLEL_DOWNLOADS) {
+				launch {
+					for (request in detailWork) {
+						results.send(
+							SatelliteTextureResult(
+								request,
+								interruptibleResult {
+									loadDetailedSatelliteTexture(
+										request.tileId,
+										request.quality,
+										satelliteDownloadsEnabled.get()
+									)
+								}
+							)
+						)
+					}
+				}
+			}
+			var standardCompleted = 0
+			var detailCompleted = 0
+			repeat(totalTextureRequests) { index ->
+				val completed = results.receive()
+				val isStandard = completed.work.quality == FlightSatelliteQuality.STANDARD
+				if (isStandard) standardCompleted++ else detailCompleted++
+				completed.result.onSuccess { loaded ->
+					if (isStandard) {
+						standardTexturePaths[loaded.tileId] = loaded.file.absolutePath
+					} else {
+						detailedTexturePaths[loaded.tileId] = loaded.file.absolutePath
+					}
 					updateActiveTexture(loaded.tileId)
 					diskCacheHits += loaded.diskCacheHits
 					networkRequests += loaded.networkRequests
@@ -525,83 +625,28 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					bytesDownloaded += loaded.downloadedBytes
 					downloadRate.record(loaded.downloadedBytes)
 					visualUpdates++
-				}.onFailure { satelliteFailed++ }
+				}.onFailure {
+					if (isStandard) satelliteFailed++ else detailedFailed++
+				}
 				if (standardTexturePaths.isEmpty() && satelliteFailed >= SATELLITE_FAILURE_CIRCUIT_BREAKER) {
 					satelliteDownloadsEnabled.set(false)
 				}
-					onStatus(
-						status(
-							FlightTerrainPhase.DOWNLOADING,
-							message = "Satellite Standard ${standardTexturePaths.size}/${orderedTiles.size}",
-						textureQueue = standardRequests.size - index - 1
+				onStatus(
+					status(
+						phase = FlightTerrainPhase.DOWNLOADING,
+						message = "Textures · Standard $standardCompleted/${standardRequests.size}" +
+							" · détail $detailCompleted/${detailRequests.size}" +
+							if (detailedFailed > 0) " · $detailedFailed en repli" else "",
+						textureQueue = totalTextureRequests - index - 1
 					)
 				)
-				publishProgressiveScene(force = index == standardRequests.lastIndex)
+				publishProgressiveScene(force = index == totalTextureRequests - 1)
 			}
-			producer.join()
-			workers.forEach { it.join() }
+			standardProducer.join()
+			detailProducer.join()
+			standardWorkers.forEach { it.join() }
+			detailWorkers.forEach { it.join() }
 			results.close()
-		}
-
-		// Higher tiers only replace texture handles. Mesh arrays and their renderer buffers
-		// stay identical, and Standard remains resident as the immediate fallback.
-		val detailRequests = orderedTiles.mapNotNull { tileId ->
-			val tier = targetTierByTile[tileId] ?: return@mapNotNull null
-			val quality = FlightTerrainLodPolicy.satelliteQuality(tier) ?: return@mapNotNull null
-			if (quality == FlightSatelliteQuality.STANDARD || tileId !in tiles || tileId in detailedTexturePaths) {
-				null
-			} else tileId to quality
-		}.let { requests ->
-			if (detailFocus == null) requests else requests.sortedBy { (tileId, _) ->
-				tileNearestDistanceKm(tileId, detailFocus.latitude, detailFocus.longitude)
-			}
-		}
-		if (detailRequests.isNotEmpty()) {
-			coroutineScope {
-				val work = Channel<Pair<TerrainTileId, FlightSatelliteQuality>>(DETAIL_PARALLEL_DOWNLOADS * 2)
-				val results = Channel<Result<LoadedSatelliteTexture>>(DETAIL_PARALLEL_DOWNLOADS * 2)
-				val producer = launch {
-					detailRequests.forEach { work.send(it) }
-					work.close()
-				}
-				val workers = List(DETAIL_PARALLEL_DOWNLOADS) {
-					launch(Dispatchers.IO) {
-						for ((tileId, quality) in work) {
-							results.send(
-								runCatching {
-									loadDetailedSatelliteTexture(tileId, quality, satelliteDownloadsEnabled.get())
-								}
-							)
-						}
-					}
-				}
-				repeat(detailRequests.size) { index ->
-					results.receive().onSuccess { detailed ->
-						detailedTexturePaths[detailed.tileId] = detailed.file.absolutePath
-						updateActiveTexture(detailed.tileId)
-						diskCacheHits += detailed.diskCacheHits
-						networkRequests += detailed.networkRequests
-						if (detailed.networkRequests > 0) downloadedTileIds += detailed.tileId
-						bytesDownloaded += detailed.downloadedBytes
-						downloadRate.record(detailed.downloadedBytes)
-						visualUpdates++
-					}.onFailure {
-						detailedFailed++
-					}
-					onStatus(
-						status(
-							phase = FlightTerrainPhase.DOWNLOADING,
-							message = "Détail ${index + 1}/${detailRequests.size}" +
-								if (detailedFailed > 0) " · $detailedFailed gardée(s) en Standard" else "",
-							textureQueue = detailRequests.size - index - 1
-						)
-					)
-					publishProgressiveScene(force = index == detailRequests.lastIndex)
-				}
-				producer.join()
-				workers.forEach { it.join() }
-				results.close()
-			}
 		}
 
 		val buildingStatus = status(
@@ -779,6 +824,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	}
 
 	private fun loadTerrainTile(tileId: TerrainTileId): LoadedTerrainTile {
+		ensureWorkActive()
 		cachedDecodedTerrain(tileId)?.let { tile ->
 			return LoadedTerrainTile(
 				tile = tile,
@@ -789,10 +835,13 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			)
 		}
 		var cached = ensureTerrainFile(tileId)
+		ensureWorkActive()
 		var tile = decodeTile(tileId, cached.file)
 		if (tile == null && !cached.downloaded) {
+			ensureWorkActive()
 			cached.file.delete()
 			cached = downloadTerrainTile(tileId, cached.file)
+			ensureWorkActive()
 			tile = decodeTile(tileId, cached.file)
 		}
 		return LoadedTerrainTile(
@@ -853,7 +902,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 
 	private fun ensureTerrainFile(tileId: TerrainTileId): CachedAsset {
 		val file = tileFile(tileId)
-		return synchronized(assetLock(file)) {
+		return withAssetLock(file) {
 			if (file.isFile && file.length() > 0L) {
 				CachedAsset(file, downloaded = false, downloadedBytes = 0L, diskCacheHits = 1, networkRequests = 0)
 			} else {
@@ -867,13 +916,15 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		quality: FlightSatelliteQuality,
 		allowDownload: Boolean
 	): CachedAsset {
+		ensureWorkActive()
 		if (quality == FlightSatelliteQuality.STANDARD) {
 			return ensureSatelliteSourceFile(tileId, allowDownload)
 		}
 		val destination = satelliteRenderFile(tileId, quality)
-		return synchronized(assetLock(destination)) {
+		return withAssetLock(destination) {
+			ensureWorkActive()
 			if (destination.isFile && destination.length() > 0L && isDecodableImage(destination)) {
-				return@synchronized CachedAsset(
+				return@withAssetLock CachedAsset(
 					destination,
 					downloaded = false,
 					downloadedBytes = 0L,
@@ -899,7 +950,11 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					}
 				}
 			}
-			val cachedChildren = childTiles.map { ensureSatelliteSourceFile(it, allowDownload) }
+			val cachedChildren = childTiles.map { childTile ->
+				ensureWorkActive()
+				ensureSatelliteSourceFile(childTile, allowDownload)
+			}
+			ensureWorkActive()
 			val downloadedBytes = cachedChildren.sumOf { it.downloadedBytes }
 			val firstBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 			BitmapFactory.decodeFile(cachedChildren.first().file.absolutePath, firstBounds)
@@ -911,6 +966,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				val canvas = Canvas(composed)
 				val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 				cachedChildren.forEachIndexed { index, cached ->
+					ensureWorkActive()
 					val bitmap = BitmapFactory.decodeFile(
 						cached.file.absolutePath,
 						BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
@@ -942,10 +998,12 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				if (partial.exists() && !partial.delete()) throw IOException("Texture satellite temporaire verrouillée")
 				try {
 					FileOutputStream(partial).buffered().use { output ->
+						ensureWorkActive()
 						if (!composed.compress(Bitmap.CompressFormat.JPEG, COMPOSITE_JPEG_QUALITY, output)) {
 							throw IOException("Impossible de composer la texture satellite")
 						}
 					}
+					ensureWorkActive()
 					if (!partial.renameTo(destination)) throw IOException("Impossible de finaliser la texture satellite")
 				} finally {
 					if (partial.exists()) partial.delete()
@@ -964,10 +1022,12 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	}
 
 	private fun ensureSatelliteSourceFile(tileId: TerrainTileId, allowDownload: Boolean): CachedAsset {
+		ensureWorkActive()
 		val file = satelliteFile(tileId)
-		return synchronized(assetLock(file)) {
+		return withAssetLock(file) {
+			ensureWorkActive()
 			if (file.isFile && file.length() > 0L && isDecodableImage(file)) {
-				return@synchronized CachedAsset(
+				return@withAssetLock CachedAsset(
 					file,
 					downloaded = false,
 					downloadedBytes = 0L,
@@ -993,10 +1053,21 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		}
 	}
 
-	private fun assetLock(file: File): Any {
+	private fun assetLock(file: File): ReentrantLock {
 		val key = file.absolutePath
-		val candidate = Any()
+		val candidate = ReentrantLock()
 		return assetLocks.putIfAbsent(key, candidate) ?: candidate
+	}
+
+	private inline fun <T> withAssetLock(file: File, block: () -> T): T {
+		val lock = assetLock(file)
+		lock.lockInterruptibly()
+		return try {
+			ensureWorkActive()
+			block()
+		} finally {
+			lock.unlock()
+		}
 	}
 
 	private fun downloadTerrainTile(tileId: TerrainTileId, destination: File): CachedAsset =
@@ -1015,6 +1086,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		connectTimeoutMillis: Int = CONNECT_TIMEOUT_MILLIS,
 		readTimeoutMillis: Int = READ_TIMEOUT_MILLIS
 	): CachedAsset {
+		ensureWorkActive()
 		val parent = destination.parentFile ?: throw IOException("Dossier de cache invalide")
 		if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de créer le cache du relief")
 		val partial = File(parent, destination.name + PARTIAL_SUFFIX)
@@ -1027,6 +1099,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			connection.setRequestProperty("User-Agent", Version.getFullVersion(app))
 			connection.setRequestProperty("Accept", accept)
 			connection.connect()
+			ensureWorkActive()
 			if (connection.responseCode != HttpURLConnection.HTTP_OK) {
 				throw IOException("$sourceName HTTP ${connection.responseCode}")
 			}
@@ -1035,6 +1108,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				BufferedOutputStream(FileOutputStream(partial)).use { output ->
 					val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
 					while (true) {
+						ensureWorkActive()
 						val count = input.read(buffer)
 						if (count < 0) break
 						total += count
@@ -1061,12 +1135,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	}
 
 	private fun isDecodableImage(file: File): Boolean {
+		ensureWorkActive()
 		val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 		BitmapFactory.decodeFile(file.absolutePath, options)
 		return options.outWidth > 0 && options.outHeight > 0
 	}
 
 	private fun decodeTile(tileId: TerrainTileId, file: File): TerrariumTile? {
+		ensureWorkActive()
 		synchronized(decodedTerrainCache) { decodedTerrainCache[tileId] }?.let { return it }
 		val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
 		val bitmap = BitmapFactory.decodeFile(file.absolutePath, options) ?: return null
@@ -1074,7 +1150,10 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			val pixels = IntArray(bitmap.width * bitmap.height)
 			bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
 			val elevations = FloatArray(pixels.size)
-			for (index in pixels.indices) elevations[index] = TerrariumCodec.decodeArgb(pixels[index])
+			for (index in pixels.indices) {
+				if (index % CANCELLATION_CHECK_PIXEL_INTERVAL == 0) ensureWorkActive()
+				elevations[index] = TerrariumCodec.decodeArgb(pixels[index])
+			}
 			return TerrariumTile(tileId, bitmap.width, bitmap.height, elevations).also { tile ->
 				synchronized(decodedTerrainCache) { decodedTerrainCache[tileId] = tile }
 			}
@@ -1085,6 +1164,23 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 
 	private fun cachedDecodedTerrain(tileId: TerrainTileId): TerrariumTile? =
 		synchronized(decodedTerrainCache) { decodedTerrainCache[tileId] }
+
+	private fun ensureWorkActive() {
+		if (Thread.currentThread().isInterrupted) {
+			throw InterruptedIOException("Calcul de tuile obsolète annulé")
+		}
+	}
+
+	private fun estimatedGeometryComplexity(gridQuads: Int): Long {
+		val safeQuads = gridQuads.coerceIn(
+			FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS,
+			FlightTerrainMeshBuilder.MAXIMUM_GRID_QUADS
+		).toLong()
+		return (safeQuads + 1L) * (safeQuads + 1L) + safeQuads * safeQuads * 2L
+	}
+
+	private fun estimatedTextureComplexity(quality: FlightSatelliteQuality): Long =
+		1L shl (quality.zoomDelta * 2)
 
 	private fun decodedTerrainCacheSize(): Int =
 		synchronized(decodedTerrainCache) { decodedTerrainCache.size }
@@ -1155,10 +1251,29 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			val previous = previousTierByTile[tile]
 			val stable = when {
 				previous == null || previous == raw -> raw
+				FlightTerrainLodPolicy.shouldRetainNearbyDetail(previous, raw, aircraftDistance) -> previous
 				raw.ordinal < previous.ordinal -> tierAt(1.0 / LOD_HYSTERESIS_FACTOR)
 				else -> tierAt(LOD_HYSTERESIS_FACTOR)
 			}
 			previousTierByTile[tile] = stable
+			stable
+		}
+	}
+
+	private fun selectGeometryQuads(
+		tiles: List<TerrainTileId>,
+		latitude: Double,
+		longitude: Double,
+		radiusKm: Int
+	): Map<TerrainTileId, Int> = synchronized(lodLock) {
+		tiles.associateWith { tile ->
+			val nearestDistanceKm = tileNearestDistanceKm(tile, latitude, longitude)
+			val stable = FlightTerrainGeometryLodPolicy.stableQuadsForDistance(
+				radiusKm,
+				nearestDistanceKm,
+				previousGeometryQuadsByTile[tile]
+			)
+			previousGeometryQuadsByTile[tile] = stable
 			stable
 		}
 	}
@@ -1216,9 +1331,22 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			}
 		}
 		synchronized(geometryCache) {
-			geometryCache.keys.removeAll { it.tileId in affectedTiles }
+			geometryCache.keys.removeAll { key ->
+				key.tileId in affectedTiles || isRefinementDependingOn(key, tileId.zoom, affectedTiles)
+			}
 		}
 		geometryGeneration.incrementAndGet()
+	}
+
+	private fun isRefinementDependingOn(
+		key: FlightTerrainGeometryCacheKey,
+		boundaryZoom: Int,
+		affectedBoundaryTiles: Set<TerrainTileId>
+	): Boolean {
+		if (key.boundarySourceZoom != boundaryZoom || key.tileId.zoom <= boundaryZoom) return false
+		val factor = 1 shl (key.tileId.zoom - boundaryZoom)
+		val parent = TerrainTileId(boundaryZoom, key.tileId.x / factor, key.tileId.y / factor)
+		return parent in affectedBoundaryTiles
 	}
 
 	private fun tileFile(tileId: TerrainTileId): File =
@@ -1272,6 +1400,30 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val networkRequests: Int
 	)
 
+	private data class TerrainElevationWork(
+		val tileId: TerrainTileId,
+		val refinement: Boolean,
+		val distanceKm: Double,
+		val complexity: Long
+	)
+
+	private data class TerrainElevationResult(
+		val work: TerrainElevationWork,
+		val result: Result<LoadedTerrainTile>
+	)
+
+	private data class SatelliteTextureWork(
+		val tileId: TerrainTileId,
+		val quality: FlightSatelliteQuality,
+		val distanceKm: Double,
+		val complexity: Long
+	)
+
+	private data class SatelliteTextureResult(
+		val work: SatelliteTextureWork,
+		val result: Result<LoadedSatelliteTexture>
+	)
+
 	private data class TerrainRefinementLayer(
 		val plan: TerrainTilePlan,
 		val quadsByTile: Map<TerrainTileId, Int>
@@ -1307,6 +1459,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		private const val TERRARIUM_BASE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium"
 		private const val PARTIAL_SUFFIX = ".download"
 		private const val PARALLEL_DOWNLOADS = 6
+		private const val SATELLITE_STANDARD_PARALLEL_DOWNLOADS = 4
 		private const val DETAIL_PARALLEL_DOWNLOADS = 2
 		private const val SCENE_PUBLISH_INTERVAL_NANOS = 250_000_000L
 		private const val SCENE_PUBLISH_TILE_BATCH = 4
@@ -1316,6 +1469,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		private const val SATELLITE_CONNECT_TIMEOUT_MILLIS = 8_000
 		private const val SATELLITE_READ_TIMEOUT_MILLIS = 15_000
 		private const val DOWNLOAD_BUFFER_SIZE = 16 * 1_024
+		private const val CANCELLATION_CHECK_PIXEL_INTERVAL = 4_096
 		private const val MAX_TILE_BYTES = 4L * 1_024L * 1_024L
 		private const val COMPOSITE_JPEG_QUALITY = 92
 		private const val MAXIMUM_DECODED_TERRAIN_TILES = 384
@@ -1323,6 +1477,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		private const val MAXIMUM_GEOMETRY_CACHE_BYTES = 128L * 1_024L * 1_024L
 		private const val MAXIMUM_LOD_HISTORY_TILES = 2_048
 		private const val LOD_HYSTERESIS_FACTOR = 1.18
+		private const val PRIORITY_DISTANCE_BUCKET_KM = 5.0
+		private val SATELLITE_WORK_COMPARATOR = compareBy<SatelliteTextureWork>(
+			{ (it.distanceKm / PRIORITY_DISTANCE_BUCKET_KM).toInt() },
+			{ it.complexity },
+			{ it.distanceKm },
+			{ it.tileId.y },
+			{ it.tileId.x }
+		)
 		// Keeps a continental trip resident while bounding float-coordinate error in
 		// the GLES 2.0 view and shadow matrices on very long flights.
 		private const val COORDINATE_ORIGIN_RESET_DISTANCE_KM = 2_000.0

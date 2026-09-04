@@ -78,7 +78,7 @@
 	<string name="flight_mode_satellite_rings_ultra_plus">Sur le rayon de %1$d km : Ultra+ de 0 à %2$d km · Ultra jusqu’à %3$d km · Haute jusqu’à %4$d km · Standard jusqu’à %5$d km · Aperçu ensuite.</string>
 	<string name="flight_mode_satellite_rings_ultra_plus_plus">Sur le rayon de %1$d km : Ultra++ de 0 à %2$d km · Ultra+ jusqu’à %3$d km · Ultra jusqu’à %4$d km · Haute jusqu’à %5$d km · Standard jusqu’à %6$d km · Aperçu ensuite.</string>
 	<string name="flight_mode_satellite_rings_ultra_plus_plus_plus">Sur le rayon de %1$d km : Ultra+++ de 0 à %2$d km · Ultra++ jusqu’à %3$d km · Ultra+ jusqu’à %4$d km · Ultra jusqu’à %5$d km · Haute jusqu’à %6$d km · Standard jusqu’à %7$d km · Aperçu ensuite.</string>
-	<string name="flight_mode_satellite_gaze_help">Les mêmes anneaux suivent aussi le point regardé après 1,5 s d’arrêt du geste ; cette zone est au minimum en qualité Haute.</string>
+	<string name="flight_mode_satellite_gaze_help">Les mêmes anneaux suivent aussi le point regardé après 0,7 s d’arrêt du geste ; cette zone est au minimum en qualité Haute.</string>
 	<string name="flight_mode_terrain_detail_title">Relief 3D : source et maillage</string>
 	<string name="flight_mode_terrain_zoom_help">Les boutons z9–z14 règlent uniquement la source d’altitude Terrarium : +1 divise la taille des tuiles et le pas des mesures par 2, mais multiplie leur nombre par 4. Le maillage est la grille 3D posée sur chaque tuile : 255×255 signifie 65 025 cases, chacune coupée en 2 triangles. Une grille plus dense ne peut pas inventer les détails absents de la source.</string>
 	<string name="flight_mode_terrain_fine_zone">Noyau : avion + point regardé · rayon 10 km</string>

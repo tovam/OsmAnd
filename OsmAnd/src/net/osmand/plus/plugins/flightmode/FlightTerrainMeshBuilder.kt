@@ -20,6 +20,13 @@ object FlightTerrainGeometryLodPolicy {
 		}
 	}
 
+	fun stableQuadsForDistance(radiusKm: Int, nearestDistanceKm: Double, previousQuads: Int?): Int {
+		val raw = quadsForDistance(radiusKm, nearestDistanceKm)
+		return if (previousQuads != null && raw < previousQuads &&
+			nearestDistanceKm <= FlightTerrainLodPolicy.NEARBY_DETAIL_RETENTION_KM
+		) previousQuads else raw
+	}
+
 	fun estimatedBytes(gridQuads: Int): Long {
 		val quads = gridQuads.coerceIn(
 			FlightTerrainMeshBuilder.DEFAULT_GRID_QUADS,
@@ -79,9 +86,11 @@ object FlightTerrainMeshBuilder {
 		geometryGeneration: Long = System.nanoTime(),
 		includePlaceholders: Boolean = false
 	): FlightTerrainScene {
+		ensureGeometryWorkActive()
 		val projection = FlightTerrainCoordinates(coordinateOriginLatitude, coordinateOriginLongitude)
 		val sampler = TileElevationSampler(plan.zoom, tiles)
 		val meshes = plan.tiles.mapNotNull { tileId ->
+			ensureGeometryWorkActive()
 			val sourceTile = tiles[tileId]
 			val terrainAvailable = sourceTile != null
 			val gridQuads = geometryQuadsByTile[tileId]
@@ -150,6 +159,79 @@ object FlightTerrainMeshBuilder {
 	}
 
 	/**
+	 * Parallel counterpart of [build]. Each terrain tile is independent once the
+	 * decoded elevation snapshot is fixed, so the expensive vertex and normal loops
+	 * can safely occupy several CPU cores. The scheduler preserves plan order.
+	 */
+	suspend fun buildParallel(
+		centerLatitude: Double,
+		centerLongitude: Double,
+		radiusKm: Int,
+		plan: TerrainTilePlan,
+		tiles: Map<TerrainTileId, TerrariumTile>,
+		satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
+		terrainFineZoom: Int = FlightPlan.DEFAULT_TERRAIN_FINE_ZOOM,
+		terrainMiddleZoom: Int = FlightPlan.DEFAULT_TERRAIN_MIDDLE_ZOOM,
+		detailFocus: FlightTerrainDetailFocus? = null,
+		satelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+		standardSatelliteTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+		satelliteTextureTiers: Map<TerrainTileId, FlightTerrainTextureTier> = emptyMap(),
+		nativeMapTexturePaths: Map<TerrainTileId, String> = emptyMap(),
+		nativeMapFailedTiles: Int = 0,
+		nativeMapRequested: Boolean = nativeMapTexturePaths.isNotEmpty(),
+		coordinateOriginLatitude: Double = centerLatitude,
+		coordinateOriginLongitude: Double = centerLongitude,
+		geometryQuadsByTile: Map<TerrainTileId, Int> = emptyMap(),
+		geometryCache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>? = null,
+		geometryGeneration: Long = System.nanoTime(),
+		includePlaceholders: Boolean = false,
+		workerCount: Int = FlightTerrainCpuScheduler.geometryWorkerCount()
+	): FlightTerrainScene {
+		val useParallelTiles = plan.tiles.size > 1 && workerCount > 1
+		val partialPlans = if (useParallelTiles) {
+			plan.tiles.map { tileId -> TerrainTilePlan(plan.zoom, listOf(tileId)) }
+		} else {
+			listOf(plan)
+		}
+		val partialScenes = FlightTerrainCpuScheduler.map(
+			items = partialPlans,
+			workerCount = if (useParallelTiles) workerCount else 1
+		) { partialPlan ->
+			build(
+				centerLatitude = centerLatitude,
+				centerLongitude = centerLongitude,
+				detailFocus = detailFocus,
+				radiusKm = radiusKm,
+				plan = partialPlan,
+				tiles = tiles,
+				satelliteQuality = satelliteQuality,
+				terrainFineZoom = terrainFineZoom,
+				terrainMiddleZoom = terrainMiddleZoom,
+				satelliteTexturePaths = satelliteTexturePaths,
+				standardSatelliteTexturePaths = standardSatelliteTexturePaths,
+				satelliteTextureTiers = satelliteTextureTiers,
+				nativeMapTexturePaths = nativeMapTexturePaths,
+				nativeMapFailedTiles = nativeMapFailedTiles,
+				nativeMapRequested = nativeMapRequested,
+				coordinateOriginLatitude = coordinateOriginLatitude,
+				coordinateOriginLongitude = coordinateOriginLongitude,
+				geometryQuadsByTile = geometryQuadsByTile,
+				geometryCache = geometryCache,
+				geometryGeneration = geometryGeneration,
+				includePlaceholders = includePlaceholders
+			)
+		}
+		if (!useParallelTiles) return partialScenes.single()
+		val template = partialScenes.first()
+		return template.copy(
+			meshes = partialScenes.flatMap { it.meshes },
+			loadedTiles = tiles.size,
+			missingTiles = (plan.tiles.size - tiles.size).coerceAtLeast(0),
+			generation = System.nanoTime()
+		)
+	}
+
+	/**
 	 * Builds a nested elevation layer while reusing the already loaded base satellite
 	 * texture. Exposed patch edges morph back to the coarser elevation over a few
 	 * quads, so a new level appears as added detail instead of a vertical tile wall.
@@ -168,12 +250,14 @@ object FlightTerrainMeshBuilder {
 		geometryQuadsByTile: Map<TerrainTileId, Int>,
 		geometryCache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>?
 	): List<FlightTerrainMesh> {
+		ensureGeometryWorkActive()
 		if (plan.zoom <= baseZoom || tiles.isEmpty()) return emptyList()
 		val projection = FlightTerrainCoordinates(coordinateOriginLatitude, coordinateOriginLongitude)
 		val sampler = TileElevationSampler(plan.zoom, tiles)
 		val boundarySampler = TileElevationSampler(boundaryZoom, boundaryTiles)
 		val availableIds = tiles.keys
 		return plan.tiles.mapNotNull { tileId ->
+			ensureGeometryWorkActive()
 			val tile = tiles[tileId] ?: return@mapNotNull null
 			val gridQuads = geometryQuadsByTile[tileId]
 				?.coerceIn(DEFAULT_GRID_QUADS, MAXIMUM_GRID_QUADS)
@@ -223,11 +307,55 @@ object FlightTerrainMeshBuilder {
 		}
 	}
 
+	suspend fun buildRefinementMeshesParallel(
+		baseZoom: Int,
+		plan: TerrainTilePlan,
+		tiles: Map<TerrainTileId, TerrariumTile>,
+		boundaryZoom: Int,
+		boundaryTiles: Map<TerrainTileId, TerrariumTile>,
+		baseSatelliteTexturePaths: Map<TerrainTileId, String>,
+		baseStandardSatelliteTexturePaths: Map<TerrainTileId, String>,
+		baseSatelliteTextureTiers: Map<TerrainTileId, FlightTerrainTextureTier>,
+		coordinateOriginLatitude: Double,
+		coordinateOriginLongitude: Double,
+		geometryQuadsByTile: Map<TerrainTileId, Int>,
+		geometryCache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>?,
+		workerCount: Int = FlightTerrainCpuScheduler.geometryWorkerCount()
+	): List<FlightTerrainMesh> {
+		if (plan.tiles.isEmpty()) return emptyList()
+		val useParallelTiles = plan.tiles.size > 1 && workerCount > 1
+		val partialPlans = if (useParallelTiles) {
+			plan.tiles.map { tileId -> TerrainTilePlan(plan.zoom, listOf(tileId)) }
+		} else {
+			listOf(plan)
+		}
+		return FlightTerrainCpuScheduler.map(
+			items = partialPlans,
+			workerCount = if (useParallelTiles) workerCount else 1
+		) { partialPlan ->
+			buildRefinementMeshes(
+				baseZoom = baseZoom,
+				plan = partialPlan,
+				tiles = tiles,
+				boundaryZoom = boundaryZoom,
+				boundaryTiles = boundaryTiles,
+				baseSatelliteTexturePaths = baseSatelliteTexturePaths,
+				baseStandardSatelliteTexturePaths = baseStandardSatelliteTexturePaths,
+				baseSatelliteTextureTiers = baseSatelliteTextureTiers,
+				coordinateOriginLatitude = coordinateOriginLatitude,
+				coordinateOriginLongitude = coordinateOriginLongitude,
+				geometryQuadsByTile = geometryQuadsByTile,
+				geometryCache = geometryCache
+			)
+		}.flatten()
+	}
+
 	private fun cachedOrBuildGeometry(
 		cache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>?,
 		key: FlightTerrainGeometryCacheKey,
 		builder: () -> FlightTerrainGeometry?
 	): FlightTerrainGeometry? {
+		ensureGeometryWorkActive()
 		if (cache == null) return builder()
 		synchronized(cache) { cache[key] }?.let { return it }
 		val built = builder() ?: return null
@@ -245,6 +373,7 @@ object FlightTerrainMeshBuilder {
 		tileId: TerrainTileId,
 		projection: FlightTerrainCoordinates
 	): FlightTerrainGeometry {
+		ensureGeometryWorkActive()
 		val vertices = FloatArray(4 * VERTEX_COMPONENTS)
 		val corners = arrayOf(
 			0.0 to 0.0,
@@ -291,6 +420,7 @@ object FlightTerrainMeshBuilder {
 		var minimumElevation = Float.POSITIVE_INFINITY
 		var maximumElevation = Float.NEGATIVE_INFINITY
 		for (row in 0 until gridSize) {
+			ensureGeometryWorkActive()
 			val tileY = tile.id.y + row.toDouble() / gridQuads
 			val latitude = FlightTerrainTilePlanner.tileYToLatitude(tileY, tile.id.zoom)
 			for (column in 0 until gridSize) {
@@ -321,6 +451,7 @@ object FlightTerrainMeshBuilder {
 		val indices = ShortArray(gridQuads * gridQuads * 6)
 		var indexOffset = 0
 		for (row in 0 until gridQuads) {
+			ensureGeometryWorkActive()
 			for (column in 0 until gridQuads) {
 				val topLeft = row * gridSize + column
 				val topRight = topLeft + 1
@@ -380,6 +511,7 @@ object FlightTerrainMeshBuilder {
 
 	private fun calculateNormals(vertices: FloatArray, gridSize: Int) {
 		for (row in 0 until gridSize) {
+			ensureGeometryWorkActive()
 			for (column in 0 until gridSize) {
 				val leftOffset = (row * gridSize + (column - 1).coerceAtLeast(0)) * VERTEX_COMPONENTS
 				val rightOffset = (row * gridSize + (column + 1).coerceAtMost(gridSize - 1)) * VERTEX_COMPONENTS
@@ -473,6 +605,12 @@ object FlightTerrainMeshBuilder {
 		val offsetV: Float,
 		val scale: Float
 	)
+
+	private fun ensureGeometryWorkActive() {
+		if (Thread.currentThread().isInterrupted) {
+			throw InterruptedException("Construction de relief obsolète annulée")
+		}
+	}
 
 	private const val TERRARIUM_TILE_SIZE = 256
 	private const val EDGE_MORPH_QUADS = 4

@@ -7,6 +7,18 @@ package net.osmand.plus.plugins.flightmode
 object FlightTerrainLodPolicy {
 
 	/**
+	 * Keeps an already rendered texture from visibly stepping down while any part of
+	 * its base tile is still within 50 km of the aircraft. The caller supplies the
+	 * distance to the nearest point of the tile, not its centre.
+	 */
+	fun shouldRetainNearbyDetail(
+		previous: FlightTerrainTextureTier?,
+		raw: FlightTerrainTextureTier,
+		aircraftNearestDistanceKm: Double
+	): Boolean = previous != null && raw.ordinal < previous.ordinal &&
+		aircraftNearestDistanceKm <= NEARBY_DETAIL_RETENTION_KM
+
+	/**
 	 * Combines the normal aircraft-centred rings with an optional gaze-centred ring.
 	 * The gaze centre is at least High even when the global display is Standard.
 	 */
@@ -101,4 +113,5 @@ object FlightTerrainLodPolicy {
 
 	private const val STANDARD_TEXTURE_EDGE = 256
 	private const val MAXIMUM_MIPMAPPED_EDGE = 4_096
+	const val NEARBY_DETAIL_RETENTION_KM = 50.0
 }

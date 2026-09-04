@@ -19,7 +19,8 @@ object FlightTerrainTilePlanner {
 
 	private const val EARTH_RADIUS_KM = 6_371.0088
 	private const val MIN_ZOOM = 4
-	private const val MAX_ZOOM = 12
+	private const val MAX_SCENE_ZOOM = 12
+	private const val MAX_REFINEMENT_ZOOM = 14
 	private const val DEFAULT_MAX_SCENE_TILES = 144
 	private const val DEFAULT_MAX_CORRIDOR_TILES = 1_500
 
@@ -30,7 +31,8 @@ object FlightTerrainTilePlanner {
 		maxTiles: Int = DEFAULT_MAX_SCENE_TILES
 	): TerrainTilePlan {
 		val safeRadius = radiusKm.coerceIn(5, 1_000)
-		for (zoom in MAX_ZOOM downTo MIN_ZOOM) {
+		for (zoom in MAX_SCENE_ZOOM downTo MIN_ZOOM) {
+			ensurePlanningActive()
 			val tiles = tilesAround(latitude, longitude, safeRadius.toDouble(), zoom)
 			if (tiles.size <= maxTiles || zoom == MIN_ZOOM) {
 				return TerrainTilePlan(zoom, tiles.sortedWith(tileComparator))
@@ -78,8 +80,10 @@ object FlightTerrainTilePlanner {
 		val representativeLongitude = coordinates.map { it.second }.average()
 		val sceneZoom = scenePlan(representativeLatitude, representativeLongitude, safeRadius).zoom
 		for (zoom in sceneZoom downTo MIN_ZOOM) {
+			ensurePlanningActive()
 			val tiles = linkedSetOf<TerrainTileId>()
 			coordinates.zipWithNext().forEach { (from, to) ->
+				ensurePlanningActive()
 				val distanceKm = distanceKm(from.first, from.second, to.first, to.second)
 				val sampleSpacingKm = max(20.0, safeRadius * 0.55)
 				val samples = ceil(distanceKm / sampleSpacingKm).toInt().coerceAtLeast(1)
@@ -106,6 +110,7 @@ object FlightTerrainTilePlanner {
 		val tileDiagonalKm = tileGroundKm * sqrt(2.0)
 		val result = linkedSetOf<TerrainTileId>()
 		for (dy in -tileRange..tileRange) {
+			ensurePlanningActive()
 			val y = centerY + dy
 			if (y !in 0 until tileCount) continue
 			for (dx in -tileRange..tileRange) {
@@ -128,7 +133,7 @@ object FlightTerrainTilePlanner {
 		zoom: Int,
 		maxTiles: Int
 	): TerrainTilePlan {
-		val safeZoom = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+		val safeZoom = zoom.coerceIn(MIN_ZOOM, MAX_REFINEMENT_ZOOM)
 		val validFoci = foci.filter {
 			it.latitude.isFinite() && it.latitude in -WEB_MERCATOR_MAX_LATITUDE..WEB_MERCATOR_MAX_LATITUDE &&
 				it.longitude.isFinite()
@@ -149,6 +154,7 @@ object FlightTerrainTilePlanner {
 		val ordered = linkedSetOf<TerrainTileId>()
 		val positions = IntArray(candidatesByFocus.size)
 		while (ordered.size < limit) {
+			ensurePlanningActive()
 			var addedThisRound = false
 			candidatesByFocus.forEachIndexed { focusIndex, candidates ->
 				while (positions[focusIndex] < candidates.size &&
@@ -239,6 +245,12 @@ object FlightTerrainTilePlanner {
 	private fun floorMod(value: Int, modulus: Int): Int {
 		val result = value % modulus
 		return if (result < 0) result + modulus else result
+	}
+
+	private fun ensurePlanningActive() {
+		if (Thread.currentThread().isInterrupted) {
+			throw InterruptedException("Planification de tuiles obsolète annulée")
+		}
 	}
 
 	private val tileComparator = compareBy<TerrainTileId>({ it.zoom }, { it.y }, { it.x })

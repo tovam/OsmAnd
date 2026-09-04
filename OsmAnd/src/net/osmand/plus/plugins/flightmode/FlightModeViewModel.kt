@@ -36,7 +36,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var citySearchJob: Job? = null
 	private var photoPersistenceJob: Job? = null
 	private var lookDetailJob: Job? = null
+	private var terrainRetargetJob: Job? = null
 	private var requestedTerrainCenter: Pair<Double, Double>? = null
+	private var requestedTerrainConfiguration: TerrainLoadConfiguration? = null
+	private var terrainRequestGeneration = 0L
 	private val liveSamples = mutableListOf<FlightSample>()
 	private var liveDistanceMeters = 0.0
 	private var liveSequence = 0
@@ -351,7 +354,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		message: String?
 	) {
 		lookDetailJob?.cancel()
+		terrainRetargetJob?.cancel()
+		terrainJob?.cancel()
+		terrainRequestGeneration++
 		requestedTerrainCenter = null
+		requestedTerrainConfiguration = null
 		// A GPX heading is optional. Resolve it once here for every replay source
 		// (plain GPX, OsmAnd track or saved Flight Journal) so every screen uses
 		// the direction from the current point to the next point in the same leg.
@@ -625,55 +632,98 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		// The dedicated cache page is now a stable offline tile viewer. The live 3D
 		// renderer belongs to Hublot, so it never needs a second native-map render pass.
 		val includeNativeMap = false
+		val desiredConfiguration = TerrainLoadConfiguration(
+			radiusKm = uiState.plan.terrainCorridorKm,
+			satelliteQuality = uiState.plan.satelliteQuality,
+			terrainFineZoom = uiState.plan.terrainFineZoom,
+			terrainMiddleZoom = uiState.plan.terrainMiddleZoom,
+			includeNativeMap = includeNativeMap
+		)
 		val scene = uiState.terrainScene
-		if (!force && scene != null && scene.radiusKm == uiState.plan.terrainCorridorKm &&
+		val sceneConfigurationMatches = scene != null &&
+			scene.radiusKm == uiState.plan.terrainCorridorKm &&
 			scene.satelliteQuality == uiState.plan.satelliteQuality &&
 			scene.terrainFineZoom == uiState.plan.terrainFineZoom &&
 			scene.terrainMiddleZoom == uiState.plan.terrainMiddleZoom &&
 			(!includeNativeMap || scene.nativeMapRequested)
-		) {
-			val distance = FlightTerrainTilePlanner.distanceKm(
-				scene.centerLatitude,
-				scene.centerLongitude,
-				sample.latitude,
-				sample.longitude
-			)
-			if (distance <= (scene.radiusKm * TERRAIN_RELOAD_RADIUS_FRACTION).coerceAtLeast(MINIMUM_RELOAD_DISTANCE_KM)) {
-				return
+		val compatibleLoadInProgress = terrainJob?.isActive == true &&
+			requestedTerrainConfiguration == desiredConfiguration
+		if (force || (!sceneConfigurationMatches && !compatibleLoadInProgress)) {
+			terrainRetargetJob?.cancel()
+			startTerrainLoad(sample, includeNativeMap)
+			return
+		}
+		val priorityDistanceKm = terrainPriorityDistanceKm(sample)
+		if (priorityDistanceKm < TERRAIN_PRIORITY_RETARGET_DISTANCE_KM) return
+
+		if (uiState.sessionMode == FlightSessionMode.LIVE || uiState.replayPlaying) {
+			terrainRetargetJob?.cancel()
+			startTerrainLoad(sample, includeNativeMap)
+		} else {
+			// A replay slider can emit dozens of positions while a finger is moving. Keep
+			// the currently rendered scene, then rebuild the complete priority queue around
+			// the final aircraft position once the gesture has been stable for 0.7 s.
+			terrainRetargetJob?.cancel()
+			terrainRetargetJob = viewModelScope.launch {
+				delay(TERRAIN_RETARGET_DEBOUNCE_MILLIS)
+				terrainRetargetJob = null
+				val latest = uiState.snapshot?.sample ?: sample
+				startTerrainLoad(latest, includeNativeMap)
 			}
 		}
-		val requested = requestedTerrainCenter
-		if (!force && requested != null) {
-			val distance = FlightTerrainTilePlanner.distanceKm(
-				requested.first,
-				requested.second,
-				sample.latitude,
-				sample.longitude
-			)
-			if (distance < MINIMUM_RELOAD_DISTANCE_KM) return
-		}
+	}
+
+	private fun terrainPriorityDistanceKm(sample: FlightSample): Double {
+		val priorityCenter = requestedTerrainCenter ?: uiState.terrainScene?.let {
+			it.centerLatitude to it.centerLongitude
+		} ?: return Double.POSITIVE_INFINITY
+		return FlightTerrainTilePlanner.distanceKm(
+			priorityCenter.first,
+			priorityCenter.second,
+			sample.latitude,
+			sample.longitude
+		)
+	}
+
+	private fun startTerrainLoad(sample: FlightSample, includeNativeMap: Boolean) {
+		val scene = uiState.terrainScene
+		val plan = uiState.plan
+		val detailFocus = uiState.terrainDetailFocus
+		val generation = ++terrainRequestGeneration
 		requestedTerrainCenter = sample.latitude to sample.longitude
+		requestedTerrainConfiguration = TerrainLoadConfiguration(
+			radiusKm = plan.terrainCorridorKm,
+			satelliteQuality = plan.satelliteQuality,
+			terrainFineZoom = plan.terrainFineZoom,
+			terrainMiddleZoom = plan.terrainMiddleZoom,
+			includeNativeMap = includeNativeMap
+		)
 		terrainJob?.cancel()
 		terrainJob = viewModelScope.launch {
 			try {
 				val terrainScene = terrainRepository.loadScene(
 					latitude = sample.latitude,
 					longitude = sample.longitude,
-					radiusKm = uiState.plan.terrainCorridorKm,
-					satelliteQuality = uiState.plan.satelliteQuality,
-					terrainFineZoom = uiState.plan.terrainFineZoom,
-					terrainMiddleZoom = uiState.plan.terrainMiddleZoom,
-					detailFocus = uiState.terrainDetailFocus,
+					radiusKm = plan.terrainCorridorKm,
+					satelliteQuality = plan.satelliteQuality,
+					terrainFineZoom = plan.terrainFineZoom,
+					terrainMiddleZoom = plan.terrainMiddleZoom,
+					detailFocus = detailFocus,
 					includeNativeMap = includeNativeMap,
 					previousScene = scene,
 					onScene = { partialScene ->
 						// Publish only tile deltas. Geometry buffers and cached textures remain
 						// resident while missing detail is filled from the aircraft outward.
-						uiState = uiState.copy(terrainScene = partialScene)
+						if (generation == terrainRequestGeneration) {
+							uiState = uiState.copy(terrainScene = partialScene)
+						}
 					}
 				) { status ->
-					uiState = uiState.copy(terrainStatus = status)
+					if (generation == terrainRequestGeneration) {
+						uiState = uiState.copy(terrainStatus = status)
+					}
 				}
+				if (generation != terrainRequestGeneration) return@launch
 				uiState = uiState.copy(
 					terrainScene = terrainScene,
 					terrainStatus = uiState.terrainStatus.copy(
@@ -699,7 +749,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			} catch (error: CancellationException) {
 				throw error
 			} catch (error: Exception) {
+				if (generation != terrainRequestGeneration) return@launch
 				requestedTerrainCenter = null
+				requestedTerrainConfiguration = null
 				uiState = uiState.copy(
 					terrainStatus = uiState.terrainStatus.copy(
 						phase = FlightTerrainPhase.ERROR,
@@ -713,11 +765,15 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	/**
 	 * Direction changes are cheap and immediate; detailed imagery is deliberately not.
 	 * Keep the existing textures while the user moves, then retarget only after the
-	 * optical axis has remained untouched for 1.5 seconds.
+	 * optical axis has remained untouched for 0.7 seconds.
 	 */
 	private fun scheduleTerrainDetailFocus() {
 		lookDetailJob?.cancel()
 		if (uiState.page != FlightPage.WINDOW) return
+		// In Hublot this single debounce owns both a replay-slider move and a gaze move,
+		// avoiding a first rebuild at the new time immediately followed by a second one
+		// at the newly computed gaze focus.
+		terrainRetargetJob?.cancel()
 		lookDetailJob = viewModelScope.launch {
 			delay(LOOK_DETAIL_DEBOUNCE_MILLIS)
 			val sample = uiState.snapshot?.sample ?: previewFlightSample() ?: return@launch
@@ -728,8 +784,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters,
 				maximumDistanceKm = MAXIMUM_LOOK_DETAIL_DISTANCE_KM
 			)
-			if (sameTerrainDetailFocus(uiState.terrainDetailFocus, focus)) return@launch
-			uiState = uiState.copy(terrainDetailFocus = focus)
+			val focusChanged = !sameTerrainDetailFocus(uiState.terrainDetailFocus, focus)
+			val aircraftMoved = terrainPriorityDistanceKm(sample) >= TERRAIN_PRIORITY_RETARGET_DISTANCE_KM
+			if (!focusChanged && !aircraftMoved) return@launch
+			if (focusChanged) uiState = uiState.copy(terrainDetailFocus = focus)
 			requestTerrain(sample, force = true)
 		}
 	}
@@ -1479,6 +1537,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	override fun onCleared() {
 		terrainJob?.cancel()
+		terrainRetargetJob?.cancel()
 		offlinePreloadJob?.cancel()
 		storageJob?.cancel()
 		citySearchJob?.cancel()
@@ -1492,6 +1551,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		data class Journey(val journey: FlightJourney) : LoadedSource
 	}
 
+	private data class TerrainLoadConfiguration(
+		val radiusKm: Int,
+		val satelliteQuality: FlightSatelliteQuality,
+		val terrainFineZoom: Int,
+		val terrainMiddleZoom: Int,
+		val includeNativeMap: Boolean
+	)
+
 	companion object {
 		private val PHOTO_TIME_COMPARATOR = compareBy<FlightPhotoAttachment>(
 			{ it.timestampMillis == null },
@@ -1501,12 +1568,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		private const val MINIMUM_CITY_QUERY_LENGTH = 2
 		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
 		private const val PHOTO_PERSISTENCE_DEBOUNCE_MILLIS = 450L
-		private const val LOOK_DETAIL_DEBOUNCE_MILLIS = 1_500L
+		private const val LOOK_DETAIL_DEBOUNCE_MILLIS = 700L
+		private const val TERRAIN_RETARGET_DEBOUNCE_MILLIS = 700L
 		private const val MAXIMUM_LOOK_DETAIL_DISTANCE_KM = 100.0
 		private const val LOOK_DETAIL_MINIMUM_CHANGE_KM = 1.5
 		private const val LOOK_DETAIL_FOLLOW_DISTANCE_KM = 8.0
-		private const val TERRAIN_RELOAD_RADIUS_FRACTION = 0.32
-		private const val MINIMUM_RELOAD_DISTANCE_KM = 20.0
+		private const val TERRAIN_PRIORITY_RETARGET_DISTANCE_KM = 8.0
 		private const val MINIMUM_WINDOW_ALTITUDE_METERS = -500f
 		private const val MAXIMUM_WINDOW_ALTITUDE_METERS = 15_000f
 		private const val MINIMUM_FLIGHT_SPAN_PROGRESS = 0.0005f
