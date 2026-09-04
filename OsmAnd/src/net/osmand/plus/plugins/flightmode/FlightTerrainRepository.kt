@@ -248,7 +248,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						?.let { path -> existingCachedFile(File(path)) }
 						?.let { file -> retainDetailedTexture(mesh.satelliteTextureTier, file) }
 				}
-				FlightSatelliteQuality.values().asReversed().asSequence()
+				FlightSatelliteQuality.values().reversedArray().asSequence()
 					.filter { quality -> quality != FlightSatelliteQuality.STANDARD }
 					.mapNotNull { quality ->
 						existingCachedFile(satelliteRenderFile(tileId, quality))?.let { file -> quality to file }
