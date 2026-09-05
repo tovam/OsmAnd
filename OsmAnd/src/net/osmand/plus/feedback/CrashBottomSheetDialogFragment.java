@@ -1,9 +1,14 @@
 package net.osmand.plus.feedback;
 
 import static net.osmand.aidlapi.OsmAndCustomizationConstants.FRAGMENT_CRASH_ID;
+import static net.osmand.plus.feedback.FeedbackHelper.EXCEPTION_PATH;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -25,7 +30,23 @@ public class CrashBottomSheetDialogFragment extends MenuBottomSheetDialogFragmen
 	@Override
 	public void createMenuItems(Bundle savedInstanceState) {
 		View titleView = inflate(R.layout.crash_title);
+		TextView crashReport = titleView.findViewById(R.id.crash_report);
+		String report = app.getFeedbackHelper().getCopyableCrashReport();
+		crashReport.setText(report);
+		titleView.findViewById(R.id.copy_crash_report).setOnClickListener(v -> copyReport(report));
 		items.add(new SimpleBottomSheetItem.Builder().setCustomView(titleView).create());
+	}
+
+	private void copyReport(@NonNull String report) {
+		Context context = getContext();
+		if (context == null) {
+			return;
+		}
+		ClipboardManager clipboard = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+		if (clipboard != null) {
+			clipboard.setPrimaryClip(ClipData.newPlainText(EXCEPTION_PATH, report));
+			app.showToastMessage(R.string.copied_to_clipboard);
+		}
 	}
 
 	@Override

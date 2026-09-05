@@ -2112,6 +2112,7 @@
     <string name="shared_string_open_track">Ouvrir trace</string>
     <string name="shared_string_crash">Oups</string>
     <string name="last_launch_crashed">La dernière utilisation d\'OsmAnd a planté. Aidez-nous à améliorer OsmAnd en nous envoyant le message d\'erreur.</string>
+    <string name="crash_report_details">Détails du plantage</string>
     <string name="app_mode_shuttle_bus">Bus navette</string>
     <string name="base_profile_descr_ski">Ski</string>
     <string name="show_compass_ruler">Afficher la boussole</string>

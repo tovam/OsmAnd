@@ -20,6 +20,8 @@ import org.apache.commons.logging.Log;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -29,6 +31,7 @@ public class FeedbackHelper {
 	private static final Log log = PlatformUtil.getLog(FeedbackHelper.class);
 
 	public static final String EXCEPTION_PATH = "exception.log";
+	private static final int MAX_VISIBLE_CRASH_LOG_BYTES = 256 * 1024;
 
 	private final OsmandApplication app;
 	private final ExceptionHandler exceptionHandler;
@@ -47,6 +50,45 @@ public class FeedbackHelper {
 
 	public boolean hasCrashLogs() {
 		return getCrashLog() != null || nativeCrashHandler.hasCrashLogs();
+	}
+
+	@NonNull
+	public String getCopyableCrashReport() {
+		StringBuilder report = new StringBuilder(getDeviceInfo());
+		report.append("\n\n").append(EXCEPTION_PATH).append(":\n");
+
+		File crashLog = getCrashLog();
+		String crashText = crashLog != null ? readCrashLogTail(crashLog) : null;
+		if (Algorithms.isEmpty(crashText)) {
+			report.append(app.getString(R.string.data_is_not_available));
+		} else {
+			report.append(crashText);
+		}
+		return report.toString();
+	}
+
+	@Nullable
+	private String readCrashLogTail(@NonNull File file) {
+		try (RandomAccessFile input = new RandomAccessFile(file, "r")) {
+			long length = input.length();
+			long offset = Math.max(0, length - MAX_VISIBLE_CRASH_LOG_BYTES);
+			byte[] data = new byte[(int) (length - offset)];
+			input.seek(offset);
+			input.readFully(data);
+
+			String text = new String(data, StandardCharsets.UTF_8);
+			if (offset > 0) {
+				int firstCompleteLine = text.indexOf('\n');
+				if (firstCompleteLine >= 0 && firstCompleteLine + 1 < text.length()) {
+					text = text.substring(firstCompleteLine + 1);
+				}
+				text = "[… earlier crash entries omitted …]\n" + text;
+			}
+			return text;
+		} catch (IOException | RuntimeException e) {
+			log.error(e);
+			return null;
+		}
 	}
 
 	@NonNull

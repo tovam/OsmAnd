@@ -602,7 +602,10 @@ class FlightTerrainView @JvmOverloads constructor(
 			val cameraRight = normalized(cross(direction, localUp)) ?: return
 			val cameraUp = normalized(cross(cameraRight, direction)) ?: return
 
-			val roll = Math.toRadians(photo.rotationDegrees.toDouble())
+			// UI gestures and graphicsLayer use positive angles for a clockwise rotation
+			// on screen. Rotating the 3D right/up basis uses the mathematical convention,
+			// where the same positive angle is counter-clockwise, so convert the sign here.
+			val roll = Math.toRadians(-photo.rotationDegrees.toDouble())
 			val rollCos = cos(roll).toFloat()
 			val rollSin = sin(roll).toFloat()
 			val right = FloatArray(3) { index ->
