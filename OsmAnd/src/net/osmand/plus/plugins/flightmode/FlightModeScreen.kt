@@ -9,6 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.shape.CircleShape
@@ -75,6 +76,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -109,6 +111,7 @@ import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -161,6 +164,7 @@ fun FlightModeScreen(
 	onRemoveStop: (Int) -> Unit,
 	onUpdatePlan: (FlightPlan) -> Unit,
 	onSeekReplay: (Float) -> Unit,
+	onSetReplayTimelineWindowFraction: (Float) -> Unit,
 	onToggleReplay: () -> Unit,
 	onAdvanceReplay: (Long) -> Unit,
 	onMapState: (FlightTrip?, FlightSample?, Boolean, List<FlightPhotoAttachment>) -> Unit,
@@ -301,6 +305,7 @@ fun FlightModeScreen(
 					onClose = onClose,
 					onPageChange = onPageChange,
 					onSeekReplay = onSeekReplay,
+					onSetReplayTimelineWindowFraction = onSetReplayTimelineWindowFraction,
 					onToggleReplay = onToggleReplay,
 					onSetMapFollowing = onSetMapFollowing,
 					onMarkFlightStart = onMarkFlightStart,
@@ -314,6 +319,7 @@ fun FlightModeScreen(
 					onPageChange = onPageChange,
 					onSetAltitudeOverride = onSetWindowAltitudeOverride,
 					onSeekReplay = onSeekReplay,
+					onSetReplayTimelineWindowFraction = onSetReplayTimelineWindowFraction,
 					onToggleReplay = onToggleReplay,
 					onSetSide = onSetWindowSide,
 					onMoveLook = onMoveWindowLook,
@@ -642,6 +648,7 @@ private fun MapScreen(
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
 	onSeekReplay: (Float) -> Unit,
+	onSetReplayTimelineWindowFraction: (Float) -> Unit,
 	onToggleReplay: () -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
 	onMarkFlightStart: () -> Unit,
@@ -753,7 +760,7 @@ private fun MapScreen(
 					onCancelStart = onCancelFlightStart,
 					onRemoveSpan = onRemoveFlightSpan
 				)
-				ReplayBar(state, onSeekReplay, onToggleReplay)
+				ReplayBar(state, onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
 			}
 			FlightBottomNavigation(FlightPage.MAP, onPageChange, overlay = true)
 		}
@@ -923,6 +930,7 @@ private fun WindowScreen(
 	onPageChange: (FlightPage) -> Unit,
 	onSetAltitudeOverride: (Float?) -> Unit,
 	onSeekReplay: (Float) -> Unit,
+	onSetReplayTimelineWindowFraction: (Float) -> Unit,
 	onToggleReplay: () -> Unit,
 	onSetSide: (FlightCabinSide) -> Unit,
 	onMoveLook: (Float, Float) -> Unit,
@@ -1004,7 +1012,7 @@ private fun WindowScreen(
 						modifier = Modifier.fillMaxWidth().height(66.dp).background(FlightPanelStrong)
 							.padding(horizontal = 7.dp, vertical = 3.dp)
 					)
-					ReplayBar(state, onSeekReplay, onToggleReplay)
+					ReplayBar(state, onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
 				} else {
 					CompactInstrumentStrip(state.snapshot?.sample)
 				}
@@ -2426,10 +2434,37 @@ private fun VerticalDivider() {
 }
 
 @Composable
-private fun ReplayBar(state: FlightUiState, onSeek: (Float) -> Unit, onToggle: () -> Unit) {
+private fun ReplayBar(
+	state: FlightUiState,
+	onSeek: (Float) -> Unit,
+	onSetWindowFraction: (Float) -> Unit,
+	onToggle: () -> Unit
+) {
+	val trip = state.trip
 	val sample = state.snapshot?.sample
+	val minimumWindowFraction = minimumFlightTimelineWindowFraction(trip)
+	val windowFraction = state.replayTimelineWindowFraction.coerceIn(minimumWindowFraction, 1f)
+	val timelineWindow = flightTimelineWindow(state.replayProgress, windowFraction)
+	val currentProgress = rememberUpdatedState(state.replayProgress)
+	val currentWindowFraction = rememberUpdatedState(windowFraction)
+	val currentMinimumWindowFraction = rememberUpdatedState(minimumWindowFraction)
+	val currentOnSeek = rememberUpdatedState(onSeek)
+	val currentOnSetWindowFraction = rememberUpdatedState(onSetWindowFraction)
+	var activeFineScrubDivisor by remember { mutableStateOf(1f) }
+	val density = LocalDensity.current
+	val overviewTapHeightPx = with(density) { 9.dp.toPx() }
+	val fineScrubDistancePx = with(density) { 44.dp.toPx() }
+	val stepLabel = if (trip?.hasUsableTimestamps == true) "1s" else "1p"
+	val tripDurationMillis = trip?.durationMillis
+	val windowLabel = when {
+		windowFraction >= 0.9999f -> "trajet entier"
+		tripDurationMillis != null -> formatDuration((tripDurationMillis * windowFraction).toLong().coerceAtLeast(1_000L))
+		else -> "${(trip?.samples?.lastIndex?.times(windowFraction) ?: 0f).roundToInt().coerceAtLeast(1)} pts"
+	}
+
 	Row(
-		modifier = Modifier.fillMaxWidth().height(38.dp).background(FlightPanelStrong).border(1.dp, FlightLine).padding(horizontal = 7.dp),
+		modifier = Modifier.fillMaxWidth().height(48.dp).background(FlightPanelStrong)
+			.border(1.dp, FlightLine).padding(horizontal = 5.dp),
 		verticalAlignment = Alignment.CenterVertically
 	) {
 		Box(
@@ -2438,15 +2473,165 @@ private fun ReplayBar(state: FlightUiState, onSeek: (Float) -> Unit, onToggle: (
 		) {
 			Text(if (state.replayPlaying) "Ⅱ" else "▶", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
 		}
-		Slider(
-			value = state.replayProgress,
-			onValueChange = onSeek,
-			modifier = Modifier.weight(1f).height(30.dp).padding(horizontal = 7.dp)
-		)
-		Column(horizontalAlignment = Alignment.End) {
-			Text(sample?.timestampMillis?.takeIf { it > 0 }?.let(::formatClock) ?: "point ${sample?.index?.plus(1) ?: 0}", color = FlightText, fontSize = 9.sp)
+		ReplayStepButton("−$stepLabel") {
+			onSeek(stepFlightReplayProgress(trip, state.replayProgress, -1_000L))
+		}
+		Column(
+			modifier = Modifier.weight(1f).padding(horizontal = 5.dp),
+			verticalArrangement = Arrangement.Center
+		) {
+			Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+				Text(windowLabel, color = FlightMuted, fontSize = 7.sp, maxLines = 1)
+				Text(
+					if (activeFineScrubDivisor > 1f) "précision ×${activeFineScrubDivisor.toInt()}" else "pincer · glisser ↑ = fin",
+					color = if (activeFineScrubDivisor > 1f) FlightOrange else FlightMuted,
+					fontSize = 7.sp,
+					maxLines = 1
+				)
+			}
+			Canvas(
+				modifier = Modifier.fillMaxWidth().height(28.dp).pointerInput(Unit) {
+					awaitEachGesture {
+						val down = awaitFirstDown(requireUnconsumed = false)
+						var gestureProgress = currentProgress.value
+						var gestureWindowFraction = currentWindowFraction.value
+						var movement = 0f
+						var transformed = false
+						while (true) {
+							val event = awaitPointerEvent()
+							val pressed = event.changes.filter { it.pressed }
+							if (pressed.isEmpty()) {
+								if (!transformed && size.width > 0) {
+									val positionFraction = (down.position.x / size.width).coerceIn(0f, 1f)
+									gestureProgress = if (down.position.y <= overviewTapHeightPx) {
+										positionFraction
+									} else {
+										flightTimelineWindow(gestureProgress, gestureWindowFraction)
+											.progressAt(positionFraction)
+									}
+									currentOnSeek.value(gestureProgress)
+								}
+								activeFineScrubDivisor = 1f
+								break
+							}
+
+							if (pressed.size >= 2) {
+								val first = pressed[0]
+								val second = pressed[1]
+								val currentDistance = (first.position - second.position).getDistance()
+								val previousDistance = (first.previousPosition - second.previousPosition).getDistance()
+								if (currentDistance > 0f && previousDistance > 0f) {
+									val zoomFactor = currentDistance / previousDistance
+									if (zoomFactor.isFinite() && zoomFactor > 0f) {
+										gestureWindowFraction = (gestureWindowFraction / zoomFactor)
+											.coerceIn(currentMinimumWindowFraction.value, 1f)
+										currentOnSetWindowFraction.value(gestureWindowFraction)
+									}
+								}
+								val panX = ((first.position.x - first.previousPosition.x) +
+									(second.position.x - second.previousPosition.x)) / 2f
+								if (size.width > 0 && panX != 0f) {
+									gestureProgress = flightReplayProgressAfterDrag(
+										gestureProgress,
+										gestureWindowFraction,
+										panX / size.width,
+										1f
+									)
+									currentOnSeek.value(gestureProgress)
+								}
+								transformed = true
+								pressed.forEach { it.consume() }
+							} else {
+								val change = pressed.first()
+								val delta = change.position - change.previousPosition
+								movement += delta.getDistance()
+								if (movement >= viewConfiguration.touchSlop) transformed = true
+								if (transformed && size.width > 0) {
+									val divisor = when {
+										change.position.y < -fineScrubDistancePx -> 100f
+										change.position.y < 0f -> 10f
+										else -> 1f
+									}
+									activeFineScrubDivisor = divisor
+									val dragWindowFraction = if (down.position.y <= overviewTapHeightPx) 1f else gestureWindowFraction
+									gestureProgress = flightReplayProgressAfterDrag(
+										gestureProgress,
+										dragWindowFraction,
+										delta.x / size.width,
+										divisor
+									)
+									currentOnSeek.value(gestureProgress)
+									change.consume()
+								}
+							}
+						}
+					}
+				}
+			) {
+				val overviewHeight = 5.dp.toPx()
+				val overviewTop = 1.dp.toPx()
+				drawRoundRect(
+					color = FlightLine,
+					topLeft = Offset(0f, overviewTop),
+					size = Size(size.width, overviewHeight),
+					cornerRadius = CornerRadius(overviewHeight / 2f)
+				)
+				drawRect(
+					color = FlightBlue.copy(alpha = 0.58f),
+					topLeft = Offset(timelineWindow.startProgress * size.width, overviewTop),
+					size = Size(max(2f, timelineWindow.fraction * size.width), overviewHeight)
+				)
+				drawCircle(
+					color = FlightOrange,
+					radius = 2.5.dp.toPx(),
+					center = Offset(state.replayProgress * size.width, overviewTop + overviewHeight / 2f)
+				)
+
+				val mainY = 19.dp.toPx().coerceAtMost(size.height - 4.dp.toPx())
+				drawLine(FlightLine, Offset(0f, mainY), Offset(size.width, mainY), 5.dp.toPx(), StrokeCap.Round)
+				for (index in 0..8) {
+					val x = size.width * index / 8f
+					drawLine(FlightMuted.copy(alpha = 0.35f), Offset(x, mainY - 4.dp.toPx()), Offset(x, mainY + 4.dp.toPx()), 1.dp.toPx())
+				}
+				state.flightSpans.forEach { rawSpan ->
+					val span = rawSpan.normalized()
+					val visibleStart = max(span.startProgress, timelineWindow.startProgress)
+					val visibleEnd = min(span.endProgress, timelineWindow.endProgress)
+					if (visibleEnd >= visibleStart && timelineWindow.fraction > 0f) {
+						val startX = (visibleStart - timelineWindow.startProgress) / timelineWindow.fraction * size.width
+						val endX = (visibleEnd - timelineWindow.startProgress) / timelineWindow.fraction * size.width
+						drawLine(FlightBlue.copy(alpha = 0.55f), Offset(startX, mainY), Offset(endX, mainY), 5.dp.toPx(), StrokeCap.Round)
+					}
+				}
+				val localProgress = if (timelineWindow.fraction > 0f) {
+					((state.replayProgress - timelineWindow.startProgress) / timelineWindow.fraction).coerceIn(0f, 1f)
+				} else 0f
+				drawCircle(FlightOrange, 5.dp.toPx(), Offset(localProgress * size.width, mainY))
+				drawCircle(Color.Black, 1.8.dp.toPx(), Offset(localProgress * size.width, mainY))
+			}
+		}
+		ReplayStepButton("+$stepLabel") {
+			onSeek(stepFlightReplayProgress(trip, state.replayProgress, 1_000L))
+		}
+		Column(Modifier.widthIn(min = 54.dp), horizontalAlignment = Alignment.End) {
+			Text(
+				sample?.timestampMillis?.takeIf { it > 0 }?.let(::formatClock) ?: "point ${sample?.index?.plus(1) ?: 0}",
+				color = FlightText,
+				fontSize = 9.sp,
+				maxLines = 1
+			)
 			Text("${(state.replayProgress * 100).toInt()} %", color = FlightBlue, fontSize = 8.sp)
 		}
+	}
+}
+
+@Composable
+private fun ReplayStepButton(text: String, onClick: () -> Unit) {
+	Box(
+		Modifier.padding(start = 3.dp).width(30.dp).height(28.dp).border(1.dp, FlightLine).clickable(onClick = onClick),
+		contentAlignment = Alignment.Center
+	) {
+		Text(text, color = FlightBlue, fontSize = 7.sp, fontWeight = FontWeight.Bold, maxLines = 1)
 	}
 }
 
@@ -4233,7 +4418,7 @@ private fun FlightModePreview(state: FlightUiState) {
 		onClose = {}, onPageChange = {}, onImportTrip = {}, onSelectInternalTrack = {}, onStartLive = {},
 		onUpdateStop = { _, _ -> }, onSelectCity = { _, _ -> }, onDismissCitySuggestions = {},
 		onAddStop = {}, onRemoveStop = {}, onUpdatePlan = {},
-		onSeekReplay = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapState = { _, _, _, _ -> },
+		onSeekReplay = {}, onSetReplayTimelineWindowFraction = {}, onToggleReplay = {}, onAdvanceReplay = {}, onMapState = { _, _, _, _ -> },
 		onSetWindowAltitudeOverride = {}, onMoveWindow = { _, _ -> }, onSaveWindowPlacement = {}, onSetWindowSide = {},
 		onMoveWindowLook = { _, _ -> }, onRecenterWindowLook = {}, onSetWindowZoom = {}, onChangeWindowZoom = {}, onSetCabinTransparent = {}, onSetCabinHidden = {},
 		onRetryTerrain = {}, onTerrainRendererError = {}, onTerrainRenderStats = {}, onSetMapFollowing = {}, onShowTrackPoints = {},

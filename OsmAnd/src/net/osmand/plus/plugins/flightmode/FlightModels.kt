@@ -240,6 +240,66 @@ data class FlightTrip(
 	}
 }
 
+/**
+ * Visible part of the replay timeline. The playhead normally stays near the centre while this
+ * window slides over the complete journey; near the beginning and end the window is clamped.
+ */
+data class FlightTimelineWindow(
+	val startProgress: Float,
+	val endProgress: Float
+) {
+	val fraction: Float
+		get() = endProgress - startProgress
+
+	fun progressAt(positionFraction: Float): Float =
+		(startProgress + fraction * positionFraction.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+}
+
+fun flightTimelineWindow(currentProgress: Float, requestedFraction: Float): FlightTimelineWindow {
+	val progress = currentProgress.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+	val fraction = requestedFraction.takeIf { it.isFinite() }
+		?.coerceIn(MINIMUM_REPLAY_TIMELINE_FRACTION, 1f)
+		?: 1f
+	val start = (progress - fraction / 2f).coerceIn(0f, 1f - fraction)
+	return FlightTimelineWindow(start, start + fraction)
+}
+
+/** Five seconds with timestamps, or one recorded interval when a GPX has no usable clock. */
+fun minimumFlightTimelineWindowFraction(trip: FlightTrip?): Float {
+	val resolvedTrip = trip ?: return 1f
+	if (resolvedTrip.samples.size < 2) return 1f
+	val rawFraction = resolvedTrip.durationMillis?.takeIf { it > 0L }?.let { durationMillis ->
+		MINIMUM_REPLAY_TIMELINE_MILLIS.toDouble() / durationMillis.toDouble()
+	} ?: (1.0 / resolvedTrip.samples.lastIndex.toDouble())
+	return rawFraction.toFloat().coerceIn(MINIMUM_REPLAY_TIMELINE_FRACTION, 1f)
+}
+
+fun flightReplayProgressAfterDrag(
+	currentProgress: Float,
+	windowFraction: Float,
+	horizontalDeltaFraction: Float,
+	fineScrubDivisor: Float
+): Float {
+	val divisor = fineScrubDivisor.takeIf { it.isFinite() && it >= 1f } ?: 1f
+	return (currentProgress + windowFraction * horizontalDeltaFraction / divisor).coerceIn(0f, 1f)
+}
+
+/** Moves by one real second when possible, and by one recorded point otherwise. */
+fun stepFlightReplayProgress(trip: FlightTrip?, currentProgress: Float, deltaMillis: Long): Float {
+	val resolvedTrip = trip ?: return currentProgress.coerceIn(0f, 1f)
+	val durationMillis = resolvedTrip.durationMillis
+	val deltaProgress = when {
+		durationMillis != null && durationMillis > 0L -> deltaMillis.toDouble() / durationMillis.toDouble()
+		resolvedTrip.samples.size > 1 && deltaMillis != 0L ->
+			(if (deltaMillis > 0L) 1.0 else -1.0) / resolvedTrip.samples.lastIndex.toDouble()
+		else -> 0.0
+	}
+	return (currentProgress.toDouble() + deltaProgress).toFloat().coerceIn(0f, 1f)
+}
+
+private const val MINIMUM_REPLAY_TIMELINE_MILLIS = 5_000L
+private const val MINIMUM_REPLAY_TIMELINE_FRACTION = 0.000001f
+
 data class FlightSnapshot(
 	val sample: FlightSample,
 	val progress: Float,
@@ -719,6 +779,7 @@ data class FlightUiState(
 	val trip: FlightTrip? = null,
 	val snapshot: FlightSnapshot? = null,
 	val replayProgress: Float = 0f,
+	val replayTimelineWindowFraction: Float = 1f,
 	val replayPlaying: Boolean = false,
 	val replaySpeed: Float = 1f,
 	val loadingTrip: Boolean = false,

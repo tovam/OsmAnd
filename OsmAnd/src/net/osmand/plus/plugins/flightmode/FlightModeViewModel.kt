@@ -376,6 +376,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			windowPhotoOverlay = FlightWindowPhotoOverlay(),
 			terrainDetailFocus = null,
 			replayProgress = 0f,
+			replayTimelineWindowFraction = 1f,
 			replayPlaying = false,
 			flightSpans = flightSpans,
 			pendingFlightStartProgress = null,
@@ -420,6 +421,16 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 		requestTerrain(snapshot.sample)
 		scheduleTerrainDetailFocus()
+	}
+
+	fun setReplayTimelineWindowFraction(fraction: Float) {
+		val minimumFraction = minimumFlightTimelineWindowFraction(uiState.trip)
+		uiState = uiState.copy(
+			replayTimelineWindowFraction = fraction
+				.takeIf { it.isFinite() }
+				?.coerceIn(minimumFraction, 1f)
+				?: uiState.replayTimelineWindowFraction
+		)
 	}
 
 	fun toggleReplayPlaying() {

@@ -40,8 +40,12 @@ import net.osmand.plus.plugins.flightmode.FlightWindowPlacement
 import net.osmand.plus.plugins.flightmode.FlightViewGeometry
 import net.osmand.plus.plugins.flightmode.geometry
 import net.osmand.plus.plugins.flightmode.dampedFlightPinchFactor
+import net.osmand.plus.plugins.flightmode.flightReplayProgressAfterDrag
+import net.osmand.plus.plugins.flightmode.flightTimelineWindow
 import net.osmand.plus.plugins.flightmode.horizontalFieldOfViewDegrees
 import net.osmand.plus.plugins.flightmode.linkedFlightWindowTransform
+import net.osmand.plus.plugins.flightmode.minimumFlightTimelineWindowFraction
+import net.osmand.plus.plugins.flightmode.stepFlightReplayProgress
 import net.osmand.plus.plugins.flightmode.verticalFieldOfViewDegrees
 import net.osmand.plus.plugins.flightmode.viewAzimuthDegrees
 import net.osmand.plus.plugins.flightmode.TerrainTileId
@@ -238,6 +242,56 @@ class FlightModeLogicTest {
 
 		assertTrue(snapshot.dataGap)
 		assertFalse(snapshot.interpolated)
+	}
+
+	@Test
+	fun replayTimelineKeepsAFocusedWindowInsideTheWholeTrip() {
+		val middle = flightTimelineWindow(0.5f, 0.1f)
+		assertEquals(0.45f, middle.startProgress, 0.0001f)
+		assertEquals(0.55f, middle.endProgress, 0.0001f)
+		assertEquals(0.5f, middle.progressAt(0.5f), 0.0001f)
+
+		val start = flightTimelineWindow(0.01f, 0.1f)
+		assertEquals(0f, start.startProgress, 0f)
+		assertEquals(0.1f, start.endProgress, 0.0001f)
+
+		val end = flightTimelineWindow(0.99f, 0.1f)
+		assertEquals(0.9f, end.startProgress, 0.0001f)
+		assertEquals(1f, end.endProgress, 0f)
+	}
+
+	@Test
+	fun replayTimelineCanZoomToFiveSecondsAndScrubOneHundredTimesMoreFinely() {
+		val durationMillis = 4L * 60L * 60L * 1_000L
+		val trip = FlightTrip(
+			"four-hours",
+			listOf(sample(0, 1_000L, 48.0, 2.0), sample(1, 1_000L + durationMillis, 49.0, 3.0)),
+			emptyList(),
+			true,
+			1_000.0,
+			"synthetic.gpx"
+		)
+		assertEquals(5_000.0 / durationMillis, minimumFlightTimelineWindowFraction(trip).toDouble(), 0.0000001)
+
+		val coarse = flightReplayProgressAfterDrag(0.5f, 0.1f, 0.2f, 1f)
+		val fine = flightReplayProgressAfterDrag(0.5f, 0.1f, 0.2f, 100f)
+		assertEquals(0.52f, coarse, 0.0001f)
+		assertEquals((coarse - 0.5f) / 100f, fine - 0.5f, 0.000001f)
+		assertEquals(0.5f + 1_000f / durationMillis, stepFlightReplayProgress(trip, 0.5f, 1_000L), 0.000001f)
+	}
+
+	@Test
+	fun replayWithoutTimestampsStepsExactlyOneRecordedPoint() {
+		val trip = FlightTrip(
+			"points",
+			(0..10).map { index -> sample(index, 0L, 48.0 + index / 100.0, 2.0) },
+			emptyList(),
+			false,
+			1_000.0,
+			"synthetic.gpx"
+		)
+		assertEquals(0.6f, stepFlightReplayProgress(trip, 0.5f, 1_000L), 0.0001f)
+		assertEquals(0.4f, stepFlightReplayProgress(trip, 0.5f, -1_000L), 0.0001f)
 	}
 
 	@Test

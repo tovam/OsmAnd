@@ -125,6 +125,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onRemoveStop = viewModel::removeStop,
 					onUpdatePlan = viewModel::updatePlan,
 					onSeekReplay = viewModel::seekReplay,
+					onSetReplayTimelineWindowFraction = viewModel::setReplayTimelineWindowFraction,
 					onToggleReplay = viewModel::toggleReplayPlaying,
 					onAdvanceReplay = viewModel::advanceReplay,
 					onMapState = ::showReplayStateOnMap,
