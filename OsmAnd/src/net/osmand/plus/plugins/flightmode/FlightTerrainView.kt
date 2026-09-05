@@ -90,11 +90,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		@Volatile
 		private var sample: FlightSample? = null
 		@Volatile
-		private var windowPlacement: FlightWindowPlacement = FlightWindowPlacement()
-		@Volatile
-		private var windowLook: FlightWindowLook = FlightWindowLook()
-		@Volatile
-		private var altitudeOverrideMeters: Float? = null
+		private var viewState = RenderViewState()
 		@Volatile
 		private var shadingEnabled: Boolean = true
 		@Volatile
@@ -107,11 +103,6 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var terrainOpacity: Float = 0.70f
 		@Volatile
 		private var nativeMapOpacity: Float = 0.58f
-		@Volatile
-		private var spatialPhoto: FlightSpatialPhotoOverlay? = null
-		private var renderedWindowLook = FlightWindowLook()
-		private var renderedLookInitialized = false
-
 		private var program = 0
 		private var shadowProgram = 0
 		private var photoProgram = 0
@@ -201,16 +192,18 @@ class FlightTerrainView @JvmOverloads constructor(
 		) {
 			this.scene = scene
 			this.sample = sample
-			this.windowPlacement = windowPlacement.clamped()
-			this.windowLook = windowLook.clamped()
-			this.altitudeOverrideMeters = altitudeOverrideMeters
+			this.viewState = RenderViewState(
+				windowPlacement = windowPlacement.clamped(),
+				windowLook = windowLook.clamped(),
+				altitudeOverrideMeters = altitudeOverrideMeters,
+				spatialPhoto = spatialPhoto?.clamped()
+			)
 			this.shadingEnabled = shadingEnabled
 			this.shadowIntensity = shadowIntensity.coerceIn(0f, 1f)
 			this.satelliteOpacity = satelliteOpacity.coerceIn(0f, 1f)
 			this.showSatelliteQualityOverlay = showSatelliteQualityOverlay
 			this.terrainOpacity = terrainOpacity.coerceIn(0f, 1f)
 			this.nativeMapOpacity = nativeMapOpacity.coerceIn(0f, 1f)
-			this.spatialPhoto = spatialPhoto?.clamped()
 		}
 
 		override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -267,7 +260,6 @@ class FlightTerrainView @JvmOverloads constructor(
 				shadowSceneGeneration = Long.MIN_VALUE
 				photoTexture = null
 				failedPhotoTexturePath = null
-				renderedLookInitialized = false
 				val textureLimits = IntArray(1)
 				GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, textureLimits, 0)
 				maximumTextureEdge = textureLimits[0].coerceAtLeast(MINIMUM_TEXTURE_EDGE)
@@ -295,9 +287,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			}
 			val currentScene = scene
 			val currentSample = sample
-			val currentWindowPlacement = windowPlacement
-			val currentWindowLook = smoothedWindowLook(windowLook)
-			val currentSpatialPhoto = spatialPhoto
+			val currentViewState = viewState
+			val currentWindowPlacement = currentViewState.windowPlacement
+			// Camera, cabin overlays and the spatial photo must consume the exact same
+			// gesture pose. A second renderer-only interpolation made the terrain lag
+			// behind the photo and turned continuous drags into visible steps.
+			val currentWindowLook = currentViewState.windowLook
+			val currentSpatialPhoto = currentViewState.spatialPhoto
 			val latitude = currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
 			val longitude = currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
 			val sun = FlightSunPosition.direction(
@@ -332,7 +328,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			}
 
 			val ground = currentScene.centerGroundElevationMeters ?: 0f
-			val reportedAltitude = altitudeOverrideMeters
+			val reportedAltitude = currentViewState.altitudeOverrideMeters
 				?: currentSample?.altitudeMeters?.toFloat()
 				?: DEFAULT_FLIGHT_ALTITUDE_METERS
 			val altitude = max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
@@ -468,27 +464,6 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 			drawSpatialPhoto(currentScene, currentSpatialPhoto, mvp)
 			if (pendingTextureUploads.isNotEmpty()) requestFrame()
-		}
-
-		private fun smoothedWindowLook(target: FlightWindowLook): FlightWindowLook {
-			val safeTarget = target.clamped()
-			if (!renderedLookInitialized) {
-				renderedWindowLook = safeTarget
-				renderedLookInitialized = true
-				return safeTarget
-			}
-			val yawDelta = FlightWindowLook.normalizeYaw(safeTarget.yawDegrees - renderedWindowLook.yawDegrees)
-			val pitchDelta = safeTarget.pitchDegrees - renderedWindowLook.pitchDegrees
-			if (abs(yawDelta) <= LOOK_SNAP_DEGREES && abs(pitchDelta) <= LOOK_SNAP_DEGREES) {
-				renderedWindowLook = safeTarget
-				return safeTarget
-			}
-			renderedWindowLook = FlightWindowLook(
-				yawDegrees = renderedWindowLook.yawDegrees + yawDelta * LOOK_SMOOTHING_FRACTION,
-				pitchDegrees = renderedWindowLook.pitchDegrees + pitchDelta * LOOK_SMOOTHING_FRACTION
-			).clamped()
-			requestFrame()
-			return renderedWindowLook
 		}
 
 		private fun windowProjection(placement: FlightWindowPlacement, radiusKm: Int): FloatArray {
@@ -1296,6 +1271,14 @@ class FlightTerrainView @JvmOverloads constructor(
 			val height: Int
 		)
 
+		/** Camera and spatial photo are published together so a GL frame cannot mix poses. */
+		private data class RenderViewState(
+			val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
+			val windowLook: FlightWindowLook = FlightWindowLook(),
+			val altitudeOverrideMeters: Float? = null,
+			val spatialPhoto: FlightSpatialPhotoOverlay? = null
+		)
+
 		private data class RenderMesh(
 			val geometry: CachedGeometry,
 			val refinementLevel: Int,
@@ -1343,8 +1326,6 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val PHOTO_PLANE_ALTITUDE_FACTOR = 1.20f
 			private const val MINIMUM_PHOTO_PLANE_DISTANCE_METERS = 600f
 			private const val MAXIMUM_PHOTO_PLANE_DISTANCE_METERS = 30_000f
-			private const val LOOK_SMOOTHING_FRACTION = 0.38f
-			private const val LOOK_SNAP_DEGREES = 0.015f
 			private const val MINIMUM_GROUND_CLEARANCE_METERS = 60f
 			private const val DEFAULT_BEARING_DEGREES = 0f
 			private const val NEAR_PLANE_METERS = 10f

@@ -33,6 +33,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var storageJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var photoPersistenceJob: Job? = null
+	private var windowPhotoAlignmentJob: Job? = null
 	private val liveSamples = mutableListOf<FlightSample>()
 	private var liveDistanceMeters = 0.0
 	private var liveSequence = 0
@@ -723,7 +724,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				MAXIMUM_WINDOW_ALTITUDE_METERS
 			)
 		)
-		storeActiveWindowPhotoAlignmentIfLinked()
+		scheduleActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -755,14 +756,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				pitchDegrees = current.pitchDegrees + pitchDeltaDegrees
 			).clamped()
 		)
-		storeActiveWindowPhotoAlignmentIfLinked()
+		scheduleActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
 	fun recenterWindowLook() {
 		if (uiState.windowLook != FlightWindowLook()) {
 			uiState = uiState.copy(windowLook = FlightWindowLook())
-			storeActiveWindowPhotoAlignmentIfLinked()
+			scheduleActiveWindowPhotoAlignmentIfLinked()
 			scheduleTerrainDetailFocus()
 		}
 	}
@@ -789,7 +790,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val safePlacement = placement.clamped()
 		if (persist) windowPlacementStore.save(safePlacement)
 		uiState = uiState.copy(windowPlacement = safePlacement)
-		storeActiveWindowPhotoAlignmentIfLinked()
+		scheduleActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -1255,6 +1256,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun setWindowGestureTarget(target: FlightWindowGestureTarget) {
 		if (target != FlightWindowGestureTarget.VIEW && uiState.windowPhotoOverlay.photoId == null) return
+		if (uiState.windowPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED &&
+			target != FlightWindowGestureTarget.LINKED
+		) {
+			windowPhotoAlignmentJob?.cancel()
+			windowPhotoAlignmentJob = null
+			storeActiveWindowPhotoAlignment()
+		}
 		uiState = uiState.copy(
 			windowPhotoOverlay = uiState.windowPhotoOverlay.copy(gestureTarget = target)
 		)
@@ -1295,7 +1303,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			windowLook = transformed.look,
 			windowPhotoOverlay = transformed.photoOverlay
 		)
-		storeActiveWindowPhotoAlignment()
+		scheduleActiveWindowPhotoAlignment()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -1316,7 +1324,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	private fun exitWindowPhotoEditing() {
 		if (uiState.windowPhotoOverlay.photoId == null) return
-		storeActiveWindowPhotoAlignment(updateViewPose = false)
+		val linked = uiState.windowPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED
+		windowPhotoAlignmentJob?.cancel()
+		windowPhotoAlignmentJob = null
+		storeActiveWindowPhotoAlignment(updateViewPose = linked)
 		uiState = uiState.copy(windowPhotoOverlay = FlightWindowPhotoOverlay())
 	}
 
@@ -1364,8 +1375,17 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	/** VIEW/PHOTO leave the saved camera pose fixed; LINKED deliberately moves it. */
-	private fun storeActiveWindowPhotoAlignmentIfLinked() {
+	private fun scheduleActiveWindowPhotoAlignmentIfLinked() {
 		if (uiState.windowPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED) {
+			scheduleActiveWindowPhotoAlignment()
+		}
+	}
+
+	private fun scheduleActiveWindowPhotoAlignment() {
+		windowPhotoAlignmentJob?.cancel()
+		windowPhotoAlignmentJob = viewModelScope.launch {
+			delay(WINDOW_PHOTO_ALIGNMENT_DEBOUNCE_MILLIS)
+			windowPhotoAlignmentJob = null
 			storeActiveWindowPhotoAlignment()
 		}
 	}
@@ -1410,6 +1430,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		storageJob?.cancel()
 		citySearchJob?.cancel()
 		photoPersistenceJob?.cancel()
+		windowPhotoAlignmentJob?.cancel()
 		super.onCleared()
 	}
 
@@ -1427,6 +1448,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		private const val MINIMUM_CITY_QUERY_LENGTH = 2
 		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
 		private const val PHOTO_PERSISTENCE_DEBOUNCE_MILLIS = 450L
+		private const val WINDOW_PHOTO_ALIGNMENT_DEBOUNCE_MILLIS = 90L
 		private const val MINIMUM_WINDOW_ALTITUDE_METERS = -500f
 		private const val MAXIMUM_WINDOW_ALTITUDE_METERS = 15_000f
 		private const val MINIMUM_FLIGHT_SPAN_PROGRESS = 0.0005f

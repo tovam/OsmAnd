@@ -2833,18 +2833,36 @@ private fun FlightWindowScene(
 	val activePhoto = photo?.takeIf { photoOverlay.photoId == it.id }
 	val latestActivePhotoId by rememberUpdatedState(activePhoto?.id)
 	val photoOverlayVisible = activePhoto != null
-	val spatialPhoto = activePhoto?.windowAlignment?.spatialPose?.let { pose ->
-		FlightSpatialPhotoOverlay(
-			id = activePhoto.id,
-			localPath = activePhoto.localPath,
-			pose = pose,
-			opacity = photoOverlay.opacity,
-			scale = photoOverlay.scale,
-			offsetXFraction = photoOverlay.offsetXFraction,
-			offsetYFraction = photoOverlay.offsetYFraction,
-			rotationDegrees = activePhoto.rotationDegrees,
-			imageAdjustments = activePhoto.imageAdjustments
-		).clamped()
+	val spatialPhotoPose = activePhoto?.let { currentPhoto ->
+		if (photoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED) {
+			// Linked gestures update the camera every pointer frame. Render the photo
+			// from that same live pose; persistence is intentionally debounced so it
+			// cannot stall the gesture, and catches up just after the finger stops.
+			FlightViewGeometry.photoSpatialPose(
+				trip = trip,
+				samplePosition = currentPhoto.matchedSamplePosition,
+				placement = placement,
+				look = look,
+				altitudeOverrideMeters = altitudeOverrideMeters
+			) ?: currentPhoto.windowAlignment?.spatialPose
+		} else {
+			currentPhoto.windowAlignment?.spatialPose
+		}
+	}
+	val spatialPhoto = activePhoto?.let { currentPhoto ->
+		spatialPhotoPose?.let { pose ->
+			FlightSpatialPhotoOverlay(
+				id = currentPhoto.id,
+				localPath = currentPhoto.localPath,
+				pose = pose,
+				opacity = photoOverlay.opacity,
+				scale = photoOverlay.scale,
+				offsetXFraction = photoOverlay.offsetXFraction,
+				offsetYFraction = photoOverlay.offsetYFraction,
+				rotationDegrees = currentPhoto.rotationDegrees,
+				imageAdjustments = currentPhoto.imageAdjustments
+			).clamped()
+		}
 	}
 	Box(
 		modifier = modifier.background(FlightBackground)
