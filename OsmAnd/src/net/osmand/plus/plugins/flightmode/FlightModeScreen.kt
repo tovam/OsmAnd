@@ -654,6 +654,8 @@ private fun MapScreen(
 	val targetScalePixels = with(density) { 96.dp.toPx() }
 	var mapScale by remember(mapView) { mutableStateOf<FlightMapScale?>(null) }
 	var mapRotation by remember(mapView) { mutableStateOf(mapView?.rotate ?: 0f) }
+	var mapElevation by remember(mapView) { mutableStateOf(mapView?.elevationAngle ?: 90f) }
+	var openGlRendererAttached by remember(mapView) { mutableStateOf(mapView?.hasMapRenderer() == true) }
 	LaunchedEffect(mapView, targetScalePixels) {
 		while (true) {
 			mapView?.let { view ->
@@ -668,6 +670,8 @@ private fun MapScreen(
 				)
 				mapScale = calculateFlightMapScale(rawMeters)
 				mapRotation = view.rotate
+				mapElevation = view.elevationAngle
+				openGlRendererAttached = view.hasMapRenderer()
 			}
 			delay(250)
 		}
@@ -697,6 +701,7 @@ private fun MapScreen(
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(2.dp)
 		) {
+			FlightMapRendererBadge(openGlRendererAttached, mapElevation)
 			FlightMapRoundButton(
 				icon = R.drawable.ic_action_compass_north,
 				tint = if (abs(mapRotation) < 0.5f) FlightMuted else FlightBlue,
@@ -793,6 +798,29 @@ private fun FlightMapScaleBar(scale: FlightMapScale, modifier: Modifier = Modifi
 			drawLine(FlightText, Offset(barWidth, y - 5.dp.toPx()), Offset(barWidth, y), 1.5.dp.toPx())
 		}
 	}
+}
+
+@Composable
+private fun FlightMapRendererBadge(openGlRendererAttached: Boolean, elevationAngle: Float) {
+	val tint = if (openGlRendererAttached) FlightGreen else FlightWarning
+	val label = if (openGlRendererAttached) {
+		"OPENGL · ${elevationAngle.roundToInt()}°"
+	} else {
+		"V1 LEGACY"
+	}
+	Text(
+		text = label,
+		color = tint,
+		fontSize = 7.sp,
+		fontWeight = FontWeight.Bold,
+		fontFamily = FontFamily.Monospace,
+		letterSpacing = 0.3.sp,
+		maxLines = 1,
+		modifier = Modifier
+			.background(FlightHudPanel, RoundedCornerShape(4.dp))
+			.border(1.dp, tint, RoundedCornerShape(4.dp))
+			.padding(horizontal = 5.dp, vertical = 3.dp)
+	)
 }
 
 @Composable

@@ -18,6 +18,7 @@ import androidx.lifecycle.ViewModelProvider
 import net.osmand.Location
 import net.osmand.plus.OsmAndLocationProvider.OsmAndLocationListener
 import net.osmand.plus.R
+import net.osmand.plus.Version
 import net.osmand.plus.base.BaseFullScreenFragment
 import net.osmand.plus.track.SelectTrackTabsFragment
 import net.osmand.plus.track.helpers.SelectedGpxFile
@@ -41,6 +42,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var externalPhotoCaptureInProgress = false
 	private var previous3DMapsEnabled: Boolean? = null
 	private var flightMapViewInitialized = false
+	private var flightRendererSetupRequested = false
 	private val microphonePermissionLauncher = registerForActivityResult(
 		ActivityResultContracts.RequestPermission()
 	) { granted ->
@@ -198,6 +200,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		previousHudVisibility = hud.visibility
 		hud.visibility = View.GONE
 		captureMapState()
+		ensureFlightMapRenderer()
 		disableNativeFlightRelief()
 		suppressSurfaceGpxTracks()
 		installMapInteractionGuard()
@@ -385,6 +388,32 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		}
 		previous3DMapsEnabled = null
 		flightMapViewInitialized = false
+	}
+
+	/**
+	 * The flight map relies on the native renderer for camera tilt and elevated replay geometry.
+	 * Early OsmAnd Smart APKs used the legacy flavor, which persisted USE_OPENGL_RENDER=false;
+	 * Android keeps that preference when a later OpenGL-capable APK is installed as an update.
+	 * Re-enable and attach the native renderer when entering flight mode instead of silently
+	 * leaving the gesture proxy connected to a renderer that cannot display elevation angles.
+	 */
+	private fun ensureFlightMapRenderer() {
+		val mapView = app.osmandMap.mapView
+		if (app.useOpenGlRenderer() && mapView.hasMapRenderer() || flightRendererSetupRequested) return
+		if (!Version.isOpenGlAvailable(app)) return
+
+		flightRendererSetupRequested = true
+		app.settings.USE_OPENGL_RENDER.set(true)
+		val attachRenderer = {
+			app.osmandMap.setupRenderingView()
+			app.osmandMap.mapView.mapActivity?.refreshMapComplete()
+			flightRendererSetupRequested = false
+		}
+		if (NativeCoreContext.isInit()) {
+			attachRenderer()
+		} else {
+			app.appInitializer.initOpenglAsync { attachRenderer() }
+		}
 	}
 
 	private fun close() {
