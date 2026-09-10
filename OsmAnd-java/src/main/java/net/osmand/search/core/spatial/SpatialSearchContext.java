@@ -712,10 +712,14 @@ public class SpatialSearchContext {
 			}
 			if (city == null) {
 				city = bmir.readCityObject(nameIndex.addressRegion, pshift);
+				city.setReferenceFile(bmir);
 			}
 			obj = bmir.readStreetObject(nameIndex.addressRegion, city, shift);
 		} else {
 			obj = bmir.readCityObject(nameIndex.addressRegion, shift);
+		}
+		if (obj instanceof City city) {
+			city.setReferenceFile(bmir);
 		}
 		stats.readObjsBytes += (bmir.getBytesRead() - bytesRead);
 		stats.sub2ReadObjTime.finish();
@@ -734,6 +738,9 @@ public class SpatialSearchContext {
 		if (b != null) {
 			if (b.getEloRatingCount() > 0) {
 				elo = b.getEloRating(0);
+			}
+			if (indx.poiRegion.isBasemap()) {
+				elo = Math.max(settings.WORLD_ELO_RATING, elo);
 			}
 			poiTypes = parsePoiTypes(indx, b, poiTypes);
 		}
@@ -1010,7 +1017,7 @@ public class SpatialSearchContext {
 		for (SpatialSearchToken token : allTokens) {
 			// assign building to word token isNumber2Letters (number + 1 char) + possible
 			if (t != token && (otherTokens == null || !otherTokens.contains(token))) {
-				if ((token.likelyPartOfBuilding() && street) || (token.likelyRef() && poi)) {
+				if ((street && token.likelyPartOfBuilding()) || (poi && token.likelyRef())) {
 					NameIndexAtom atomB = new NameIndexAtom(atom.name, typeToAdd, atom.id,
 							atom.parentid, atom.object, atom.cityAsStreet, atom.otherWordsCnt, atom.otherFoundCnt,
 							atom.coords, atom.nearbyRadius, t.originalOrder);

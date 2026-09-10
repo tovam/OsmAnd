@@ -1,5 +1,6 @@
 package net.osmand.map;
 
+import net.osmand.CollatorStringMatcher;
 import net.osmand.OsmAndCollator;
 import net.osmand.PlatformUtil;
 import net.osmand.ResultMatcher;
@@ -10,9 +11,11 @@ import net.osmand.binary.BinaryMapIndexReader.TagValuePair;
 import net.osmand.data.LatLon;
 import net.osmand.data.QuadRect;
 import net.osmand.data.QuadTree;
+import net.osmand.search.core.SearchPhrase.NameStringMatcher;
 import net.osmand.util.Algorithms;
 import net.osmand.util.MapAlgorithms;
 import net.osmand.util.MapUtils;
+import net.osmand.util.SearchAlgorithms;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -236,7 +239,7 @@ public class OsmandRegions {
 	}
 
 	public String getLocaleName(String downloadName, String divider, boolean includingParent, WorldRegion baseParentRegion, boolean reversed) {
-		final String lc = downloadName.toLowerCase();
+		final String lc = downloadName.toLowerCase(Locale.US);
 		if (downloadNamesToFullNames.containsKey(lc)) {
 			String fullName = downloadNamesToFullNames.get(lc);
 			return getLocaleNameByFullName(fullName, divider, includingParent, baseParentRegion, reversed);
@@ -523,7 +526,7 @@ public class OsmandRegions {
 		if (downloadName == null) {
 			return null;
 		} else {
-			return getRegionData(downloadNamesToFullNames.get(downloadName.toLowerCase()));
+			return getRegionData(downloadNamesToFullNames.get(downloadName.toLowerCase(Locale.US)));
 		}
 	}
 
@@ -651,8 +654,11 @@ public class OsmandRegions {
 			if (tp.tag.startsWith("name") || tp.tag.equals("key_name")
 					|| tp.tag.startsWith("alt_name") || tp.tag.startsWith("short_name")
 					|| tp.tag.equals("name:abbreviation") || tp.tag.equals("ref")) {
-				final String vl = it.value().toLowerCase();
-				if (ind.indexOf(vl) == -1 || tp.tag.equals("ref")) {
+				String vl = it.value().toLowerCase(Locale.US);
+				if (tp.tag.equals("ref") || tp.tag.startsWith("alt_name")) {
+					vl = removeElementsWithNumbers(vl); // see testRegionSearchMatching()
+				}
+				if (Algorithms.isNotEmpty(vl) && (tp.tag.equals("ref") || ind.indexOf(vl) == -1)) {
 					ind.append(" ").append(vl);
 				}
 			}
@@ -660,6 +666,28 @@ public class OsmandRegions {
 		return ind.toString();
 	}
 
+	private String removeElementsWithNumbers(String value) {
+		List<String> values = new ArrayList<>();
+		for (String item : value.split(";")) {
+			boolean containsNumber = false;
+			for (String token : SearchAlgorithms.splitAndNormalize(item.replace('-', ' '), false)) {
+				if (Algorithms.isInt(token)) {
+					containsNumber = true;
+					break;
+				}
+			}
+			if (!containsNumber) {
+				values.add(item);
+			}
+		}
+		return String.join(";", values);
+	}
+
+	public static boolean isRegionNameMatched(String query, String regionName) {
+		return Algorithms.isNotEmpty(regionName)
+				&& new NameStringMatcher(query, CollatorStringMatcher.StringMatcherMode.CHECK_EQUALS_FROM_SPACE)
+						.matches(regionName);
+	}
 
 	public boolean isDownloadOfType(BinaryMapDataObject object, String type) {
 		int[] addtypes = object.getAdditionalTypes();
@@ -777,7 +805,7 @@ public class OsmandRegions {
 				System.out.println(or.getLocaleName(or.getDownloadName(b), false));
 			}
 			if (or.isDownloadOfType(b, MAP_TYPE)) {
-				found.add(nm.toLowerCase());
+				found.add(nm.toLowerCase(Locale.US));
 				String localName = b.getNameByType(or.mapIndexFields.nameLocaleType);
 				if (or.mapIndexFields.nameLocale2Type != null) {
 					localName = b.getNameByType(or.mapIndexFields.nameLocale2Type);

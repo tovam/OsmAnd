@@ -98,6 +98,8 @@ public class SpatialTextSearch {
 		public boolean ALLOW_HOUSE_POI_TYPE_INTERSECTION = true;
 		// no intersection recorded but streets are nearby
 		public boolean ALLOW_VIRTUAL_STREET_INTERSECTIONS = true;
+		// SHOULD BE false: '<NAME>' inside '<NAME_AREA>', then <NAME_AREA> be part of Address section not POI
+		public boolean USE_POI_BBOX = false;
 		
 		// Enlarge boundaries in case result is not found
 		// > 300 km - x0, for 50km-300km - x0.5, 10-50km - x1.5, 10km - x3sorted!
@@ -111,6 +113,7 @@ public class SpatialTextSearch {
 		public int MIN_CHARACTERS_INCOMPLETE = 2;
 		
 		public int MIN_ELO_RATING = 1400; // see SearchResult.MIN_ELO_RATING
+		public int WORLD_ELO_RATING = 1500; // from world map by default
 //		public int MAX_ELO_RATING = 4300; // not used now
 		
 		// no need to find 3 street intersection or 3 POI intersection
