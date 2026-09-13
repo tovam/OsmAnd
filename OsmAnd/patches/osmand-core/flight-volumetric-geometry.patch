@@ -1,0 +1,187 @@
+diff --git a/include/OsmAndCore/Map/VectorLine.h b/include/OsmAndCore/Map/VectorLine.h
+--- a/include/OsmAndCore/Map/VectorLine.h
++++ b/include/OsmAndCore/Map/VectorLine.h
+@@ -135,7 +135,12 @@
+         QVector<std::shared_ptr<OsmAnd::MapMarker>> getAttachedMarkers() const;
+ 
+         QList<float> getHeights() const;
+-        void setHeights(const QList<float>& heights);
++        void setHeights(const QList<float>& heights);
++
++#if !defined(SWIG)
++        // Fork-only geometry option; exposed through FlightVectorLineBridge without changing the Java AAR.
++        void setIsTubular(bool tubular);
++#endif
+ 
+         QList<FColorARGB> getColorizationMapping() const;
+         void setColorizationMapping(const QList<FColorARGB>& colorizationMapping);
+diff --git a/src/Map/VectorLine.cpp b/src/Map/VectorLine.cpp
+--- a/src/Map/VectorLine.cpp
++++ b/src/Map/VectorLine.cpp
+@@ -108,10 +108,15 @@
+     return _p->getHeights();
+ }
+ 
+-void OsmAnd::VectorLine::setHeights(const QList<float>& heights)
+-{
+-    _p->setHeights(heights);
+-}
++void OsmAnd::VectorLine::setHeights(const QList<float>& heights)
++{
++    _p->setHeights(heights);
++}
++
++void OsmAnd::VectorLine::setIsTubular(bool tubular)
++{
++    _p->setIsTubular(tubular);
++}
+ 
+ QList<OsmAnd::FColorARGB> OsmAnd::VectorLine::getColorizationMapping() const
+ {
+diff --git a/src/Map/VectorLine_P.h b/src/Map/VectorLine_P.h
+--- a/src/Map/VectorLine_P.h
++++ b/src/Map/VectorLine_P.h
+@@ -78,7 +78,8 @@
+         bool _hasUnappliedPrimitiveChanges;
+         bool _hasUnappliedStartingDistance;
+ 
+-        bool _isHidden;
++        bool _isHidden;
++        bool _isTubular = false;
+         float _startingDistance;
+         bool _isApproximationEnabled;
+         bool _showArrows;
+@@ -193,7 +194,8 @@
+         QVector<std::shared_ptr<OsmAnd::MapMarker>> getAttachedMarkers() const;
+ 
+         QList<float> getHeights() const;
+-        void setHeights(const QList<float>& heights);
++        void setHeights(const QList<float>& heights);
++        void setIsTubular(bool tubular);
+         
+         QList<FColorARGB> getColorizationMapping() const;
+         void setColorizationMapping(const QList<FColorARGB>& colorizationMapping);
+diff --git a/src/Map/VectorLine_P.cpp b/src/Map/VectorLine_P.cpp
+--- a/src/Map/VectorLine_P.cpp
++++ b/src/Map/VectorLine_P.cpp
+@@ -1,5 +1,6 @@
+ #include "VectorLine_P.h"
+-#include "VectorLine.h"
++#include "VectorLine.h"
++#include "FlightTubeMesh.h"
+ #include "Utilities.h"
+ 
+ #include "ignore_warnings_on_external_includes.h"
+@@ -220,7 +221,18 @@
+     }
+ }
+ 
+-QList<OsmAnd::FColorARGB> OsmAnd::VectorLine_P::getColorizationMapping() const
++void OsmAnd::VectorLine_P::setIsTubular(bool tubular)
++{
++    QWriteLocker scopedLocker(&_lock);
++    if (_isTubular != tubular)
++    {
++        _isTubular = tubular;
++        _hasUnappliedPrimitiveChanges = true;
++        _hasUnappliedChanges = true;
++    }
++}
++
++QList<OsmAnd::FColorARGB> OsmAnd::VectorLine_P::getColorizationMapping() const
+ {
+     QReadLocker scopedLocker(&_lock);
+ 
+@@ -1423,8 +1435,38 @@
+         }
+ 
+         int patternLength = (int) _dashPattern.size();
+-        // generate triangles
+-        if (patternLength > 0)
++        // Flight tubes share the existing centreline clipping, height interpolation and map frame.
++        // Only the cross-section changes; ordinary vector lines keep upstream's ribbon renderer.
++        if (_isTubular && withHeights && _isElevatedLineVisible)
++        {
++            std::vector<FlightTubeMesh::Sample> tubePoints;
++            tubePoints.reserve(original.size());
++            for (std::size_t i = 0; i < original.size(); ++i)
++            {
++                const auto& p = original[i];
++                const double y31 = static_cast<double>(location31.y) + p.y;
++                const double metres = Utilities::getMetersPerTileUnit(31.0f, y31, 1.0);
++                const double latitudeFactor = std::cosh(2.0 * FlightTubeMesh::Pi * y31 / 2147483648.0
++                    - FlightTubeMesh::Pi);
++                const double radius = thickness * 0.5 * (_flatEarth ? 1.0
++                    : latitudeFactor + flatten - latitudeFactor * flatten);
++                tubePoints.push_back({p.x, p.y, filteredHeights[i], metres, radius, filteredDistances[i]});
++            }
++            FlightTubeMesh::append(tubePoints, [&](const FlightTubeMesh::Vertex& p)
++            {
++                VectorMapSymbol::Vertex v;
++                v.positionXYZD[0] = static_cast<float>(p.x);
++                v.positionXYZD[1] = static_cast<float>(p.height);
++                v.positionXYZD[2] = static_cast<float>(p.z);
++                v.positionXYZD[3] = p.distance;
++                v.color = _fillColor;
++                v.color.r *= p.shade;
++                v.color.g *= p.shade;
++                v.color.b *= p.shade;
++                vertices->push_back(v);
++            });
++        }
++        else if (patternLength > 0)
+         {
+             // Dashed line does not support distances yet, thus clear distances
+             filteredDistances.clear();
+@@ -1630,7 +1672,7 @@
+     verticesAndIndices->partSizes = tesselated ? partSizes : nullptr;
+     verticesAndIndices->zoomLevel = tesselated ? zoomLevel : InvalidZoomLevel;
+     verticesAndIndices->isDenseObject =
+-        tesselated && withHeights && _nearOutlineColor.a == 1.0f && _farOutlineColor.a == 1.0f;
++        tesselated && withHeights && (_isTubular || (_nearOutlineColor.a == 1.0f && _farOutlineColor.a == 1.0f));
+     verticesAndIndices->isSeenThrough = false;
+ 
+     verticesAndIndices->verticesCount = (unsigned int) vertices->size();
+diff --git a/src/Map/MapMarker_P.cpp b/src/Map/MapMarker_P.cpp
+--- a/src/Map/MapMarker_P.cpp
++++ b/src/Map/MapMarker_P.cpp
+@@ -473,7 +473,9 @@
+            symbolsGroup.get(),
+            owner->pinIcon.get());
+         pinIconSymbol->languageId = LanguageId::Invariant;
+-        pinIconSymbol->position31 = _position;
++        pinIconSymbol->position31 = _position;
++        pinIconSymbol->elevation = _height;
++        pinIconSymbol->elevationScaleFactor = _elevationScaleFactor;
+         PointI offset;
+         switch (owner->pinIconHorisontalAlignment)
+         {
+diff --git a/wrappers/java/CMakeLists.txt b/wrappers/java/CMakeLists.txt
+--- a/wrappers/java/CMakeLists.txt
++++ b/wrappers/java/CMakeLists.txt
+@@ -35,9 +35,9 @@
+ set(target_specific_public_libraries "")
+ 
+ # OsmAndCore JNI-only library
+-add_library(OsmAndCoreJNI SHARED
+-	${swig_generated_cpp}
+-)
++add_library(OsmAndCoreJNI SHARED
++	${swig_generated_cpp}
++	FlightVectorLineBridge.cpp
+ target_compile_definitions(OsmAndCoreJNI
+ 	PRIVATE
+ 		-DOSMAND_JNI_EXPORTS
+@@ -104,9 +104,9 @@
+ endif()
+ 
+ # OsmAndCore+JNI library
+-add_library(OsmAndCoreWithJNI SHARED
+-	${swig_generated_cpp}
+-)
++add_library(OsmAndCoreWithJNI SHARED
++	${swig_generated_cpp}
++	FlightVectorLineBridge.cpp
+ target_compile_definitions(OsmAndCoreWithJNI
+ 	PRIVATE
+ 		-DOSMAND_JNI_EXPORTS

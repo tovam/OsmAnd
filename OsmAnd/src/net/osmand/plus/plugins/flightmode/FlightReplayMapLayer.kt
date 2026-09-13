@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import net.osmand.core.jni.FlightVectorLineBridge
 import net.osmand.core.jni.MapMarker
 import net.osmand.core.jni.MapMarkerBuilder
 import net.osmand.core.jni.MapMarkersCollection
@@ -28,8 +29,6 @@ import net.osmand.util.MapUtils
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.cos
-import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -221,7 +220,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			}
 		}
 
-		val photoRadius = PHOTO_BITMAP_DP * density * 0.36f
+		val photoRadius = POINT_BITMAP_DP * density * 0.42f
 		current.photos.forEach { photo ->
 			val sample = FlightSampleInterpolator.sampleAt(trip, photo.matchedSamplePosition) ?: return@forEach
 			canvas.drawCircle(
@@ -266,42 +265,34 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				heights.add(nativeHeights[index])
 			}
 
-			// Two concentric native strokes read as one continuous tube: the dark sleeve keeps
-			// its volume legible against imagery, while the orange core carries the route.
-			buildTubeStroke(
+			// Keep the exact sampled centreline and heights. The native renderer builds a closed
+			// circular mesh around it, using the same zoom-dependent width as the former line.
+			buildNativeStroke(
 				collection = collection,
 				lineId = lineId++,
 				baseOrder = baseOrder,
-				width = TUBE_SLEEVE_WIDTH_DP * lineScale,
-				color = TUBE_SLEEVE_COLOR,
-				points = points,
-				heights = heights
-			)
-			buildTubeStroke(
-				collection = collection,
-				lineId = lineId++,
-				baseOrder = baseOrder - 1,
 				width = TUBE_CORE_WIDTH_DP * lineScale,
 				color = TUBE_CORE_COLOR,
 				points = points,
-				heights = heights
+				heights = heights,
+				volumetric = true
 			)
-			lineId = buildCorridorFramework(collection, lineId, lineScale, samples, range)
 		}
 		if (collection.getLinesCount() > 0) routeLinesCollection = collection
 		routeGeometryDirty = false
 	}
 
-	private fun buildTubeStroke(
+	private fun buildNativeStroke(
 		collection: VectorLinesCollection,
 		lineId: Int,
 		baseOrder: Int,
 		width: Double,
 		color: Int,
 		points: QVectorPointI,
-		heights: QListFloat
+		heights: QListFloat,
+		volumetric: Boolean = false
 	) {
-		VectorLineBuilder()
+		val line = VectorLineBuilder()
 			.setBaseOrder(baseOrder)
 			.setIsHidden(false)
 			.setLineId(lineId)
@@ -319,66 +310,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			.setJointStyle(VectorLine.JointStyle.ROUND.swigValue())
 			.setApproximationEnabled(false)
 			.buildAndAddToCollection(collection)
-	}
-
-	private fun buildCorridorFramework(
-		collection: VectorLinesCollection,
-		firstLineId: Int,
-		lineScale: Double,
-		samples: List<FlightSample>,
-		range: IntRange
-	): Int {
-		var lineId = firstLineId
-		val railIndices = sampledIndices(range, MAXIMUM_CORRIDOR_RAIL_POINTS)
-		for (rail in 0 until CORRIDOR_RAIL_COUNT) {
-			val angle = rail * 2.0 * PI / CORRIDOR_RAIL_COUNT
-			val points = QVectorPointI()
-			val heights = QListFloat()
-			railIndices.forEach { index ->
-				val radius = corridorRadius(nativeHeights[index])
-				val lateralMeters = cos(angle) * radius
-				val verticalMeters = sin(angle) * radius
-				val bearing = bearingAt(samples, index).toDouble()
-				val direction = bearing + if (lateralMeters >= 0.0) 90.0 else -90.0
-				val location = destination(
-					LatLon(samples[index].latitude, samples[index].longitude),
-					abs(lateralMeters),
-					direction
-				)
-				points.add(point31(location))
-				heights.add(max(VISUAL_CLEARANCE_METERS, nativeHeights[index] + verticalMeters.toFloat()))
-			}
-			buildTubeStroke(
-				collection, lineId++, baseOrder - 2,
-				CORRIDOR_RAIL_WIDTH_DP * lineScale, CORRIDOR_RAIL_COLOR, points, heights
-			)
-		}
-
-		val ringIndices = sampledIndices(range, MAXIMUM_CORRIDOR_RINGS)
-		ringIndices.forEach { index ->
-			val points = QVectorPointI()
-			val heights = QListFloat()
-			val radius = corridorRadius(nativeHeights[index])
-			val bearing = bearingAt(samples, index).toDouble()
-			for (segment in 0..CORRIDOR_RING_SEGMENTS) {
-				val angle = segment * 2.0 * PI / CORRIDOR_RING_SEGMENTS
-				val lateralMeters = cos(angle) * radius
-				val verticalMeters = sin(angle) * radius
-				val direction = bearing + if (lateralMeters >= 0.0) 90.0 else -90.0
-				val location = destination(
-					LatLon(samples[index].latitude, samples[index].longitude),
-					abs(lateralMeters),
-					direction
-				)
-				points.add(point31(location))
-				heights.add(max(VISUAL_CLEARANCE_METERS, nativeHeights[index] + verticalMeters.toFloat()))
-			}
-			buildTubeStroke(
-				collection, lineId++, baseOrder - 3,
-				CORRIDOR_RING_WIDTH_DP * lineScale, CORRIDOR_RING_COLOR, points, heights
-			)
-		}
-		return lineId
+		if (volumetric) FlightVectorLineBridge.enableTube(line)
 	}
 
 	private fun sampledIndices(range: IntRange, maximumCount: Int): List<Int> {
@@ -393,24 +325,6 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			}
 			if (lastOrNull() != range.last) add(range.last)
 		}
-	}
-
-	private fun corridorRadius(heightMeters: Float): Double =
-		((heightMeters - VISUAL_CLEARANCE_METERS).coerceAtLeast(0f) * CORRIDOR_ALTITUDE_RADIUS_RATIO +
-			CORRIDOR_MINIMUM_RADIUS_METERS).coerceAtMost(CORRIDOR_MAXIMUM_RADIUS_METERS.toFloat()).toDouble()
-
-	private fun bearingAt(samples: List<FlightSample>, index: Int): Float {
-		samples[index].bearingDegrees?.let { return it }
-		val next = (index + 1..samples.lastIndex).firstOrNull { candidate ->
-			samples[candidate].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[candidate])
-		}
-		if (next != null) {
-			FlightTrackMath.bearingBetween(samples[index], samples[next])?.let { return it }
-		}
-		val previous = (index - 1 downTo 0).firstOrNull { candidate ->
-			samples[candidate].legIndex == samples[index].legIndex && !samePosition(samples[index], samples[candidate])
-		}
-		return previous?.let { FlightTrackMath.bearingBetween(samples[it], samples[index]) } ?: 0f
 	}
 
 	private fun rebuildRecordedPoints(trip: FlightTrip?, showPoints: Boolean) {
@@ -458,7 +372,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			nativeTrip = trip
 			nativeHeights = resolveVisualHeights(samples)
 		}
-		val icon = NativeUtilities.createSkImageFromBitmap(createPhotoBitmap())
+		val icon = NativeUtilities.createSkImageFromBitmap(createPointBitmap(PHOTO_COLOR))
 		val collection = MapMarkersCollection()
 		var markerId = PHOTO_MARKER_ID_START
 		photos.forEach { photo ->
@@ -467,7 +381,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				.setMarkerId(markerId++)
 				.setBaseOrder(pointsOrder - 2)
 				.setPosition(point31(sample))
-				.setHeight(visualHeightForSample(trip, sample) + PHOTO_MARKER_CLEARANCE_METERS)
+				.setHeight(visualHeightForSample(trip, sample))
 				.setElevationScaleFactor(1f)
 				.setIsHidden(false)
 				.setIsAccuracyCircleSupported(false)
@@ -509,12 +423,12 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				add(groundAltitudeMeters + TETHER_GROUND_CLEARANCE_METERS)
 				add(altitude)
 			}
-			buildTubeStroke(
+			buildNativeStroke(
 				collection, AIRCRAFT_LINE_ID_START, pointsOrder - 3,
 				(TETHER_WIDTH_DP + TETHER_SLEEVE_EXTRA_WIDTH_DP) * lineScale,
 				TETHER_SLEEVE_COLOR, points, heights
 			)
-			buildTubeStroke(
+			buildNativeStroke(
 				collection, AIRCRAFT_LINE_ID_START + 1, pointsOrder - 4,
 				TETHER_WIDTH_DP * lineScale, TETHER_COLOR, points, heights
 			)
@@ -660,35 +574,16 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		MapUtils.get31TileNumberY(location.latitude)
 	)
 
-	private fun createPointBitmap(): Bitmap {
+	private fun createPointBitmap(pointColor: Int = POINT_COLOR): Bitmap {
 		val scale = context.resources.displayMetrics.density.coerceAtLeast(1f)
 		val size = (POINT_BITMAP_DP * scale).toInt().coerceAtLeast(10)
 		return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
 			val canvas = Canvas(bitmap)
 			val center = size / 2f
 			val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(190, 4, 10, 14) }
-			val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = POINT_COLOR }
+			val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pointColor }
 			canvas.drawCircle(center, center, size * 0.46f, halo)
 			canvas.drawCircle(center, center, size * 0.28f, fill)
-		}
-	}
-
-	private fun createPhotoBitmap(): Bitmap {
-		val scale = context.resources.displayMetrics.density.coerceAtLeast(1f)
-		val size = (PHOTO_BITMAP_DP * scale).roundToInt().coerceAtLeast(24)
-		return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
-			val canvas = Canvas(bitmap)
-			val center = size / 2f
-			val background = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(238, 8, 16, 21) }
-			val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = PHOTO_COLOR }
-			val lens = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-			canvas.drawCircle(center, center, size * 0.48f, background)
-			canvas.drawCircle(center, center, size * 0.41f, accent)
-			val body = RectF(size * 0.21f, size * 0.32f, size * 0.79f, size * 0.72f)
-			canvas.drawRoundRect(body, size * 0.07f, size * 0.07f, background)
-			canvas.drawRect(size * 0.32f, size * 0.25f, size * 0.52f, size * 0.36f, background)
-			canvas.drawCircle(center, size * 0.52f, size * 0.13f, lens)
-			canvas.drawCircle(center, size * 0.52f, size * 0.075f, background)
 		}
 	}
 
@@ -793,20 +688,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	companion object {
 		private const val MAXIMUM_NATIVE_POINTS = 1_200
 		private const val MAXIMUM_ROUTE_POINTS = 4_000
-		private const val MAXIMUM_CORRIDOR_RAIL_POINTS = 800
-		private const val MAXIMUM_CORRIDOR_RINGS = 28
-		private const val CORRIDOR_RAIL_COUNT = 6
-		private const val CORRIDOR_RING_SEGMENTS = 12
 		private const val TUBE_SLEEVE_WIDTH_DP = 10.5
 		private const val TUBE_CORE_WIDTH_DP = 5.5
-		private const val CORRIDOR_RAIL_WIDTH_DP = 1.4
-		private const val CORRIDOR_RING_WIDTH_DP = 1.25
-		private const val CORRIDOR_ALTITUDE_RADIUS_RATIO = 0.04f
-		private const val CORRIDOR_MINIMUM_RADIUS_METERS = 24f
-		private const val CORRIDOR_MAXIMUM_RADIUS_METERS = 520.0
 		private const val POINT_BITMAP_DP = 10f
-		private const val PHOTO_BITMAP_DP = 26f
-		private const val PHOTO_MARKER_CLEARANCE_METERS = 36f
 		private const val AIRCRAFT_FALLBACK_BITMAP_ASSET = "flightmode/aircraft/flight_airliner_black.png"
 		private const val AIRCRAFT_MINIMUM_ZOOM = 3.0
 		private const val AIRCRAFT_MAXIMUM_ZOOM = 20.0
@@ -834,10 +718,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val PHOTO_MARKER_ID_START = 1_900_000_000
 		private val TUBE_SLEEVE_COLOR = Color.argb(230, 6, 15, 20)
 		private val TUBE_CORE_COLOR = Color.rgb(255, 145, 58)
-		private val CORRIDOR_RAIL_COLOR = Color.argb(150, 255, 184, 100)
-		private val CORRIDOR_RING_COLOR = Color.argb(112, 255, 202, 142)
-		private val POINT_COLOR = Color.rgb(93, 216, 255)
-		private val PHOTO_COLOR = Color.rgb(255, 204, 102)
+		private val POINT_COLOR = TUBE_CORE_COLOR
+		private val PHOTO_COLOR = Color.rgb(123, 224, 163)
 		private val TETHER_COLOR = Color.rgb(255, 58, 58)
 		private val TETHER_SLEEVE_COLOR = Color.argb(220, 72, 0, 0)
 	}

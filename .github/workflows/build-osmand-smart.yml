@@ -69,10 +69,20 @@ jobs:
             android/**/*.gradle*
             android/gradle/wrapper/gradle-wrapper.properties
 
-      - name: Apply flight altitude support to OsmAnd core
+      - name: Apply flight altitude and volumetric geometry to OsmAnd core
         run: |
           git -C core apply --check ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
           git -C core apply ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
+          git -C core apply --check ../android/OsmAnd/patches/osmand-core/flight-volumetric-geometry.patch
+          git -C core apply ../android/OsmAnd/patches/osmand-core/flight-volumetric-geometry.patch
+          cp android/OsmAnd/patches/osmand-core/FlightTubeMesh.h core/src/Map/
+          cp android/OsmAnd/patches/osmand-core/FlightVectorLineBridge.cpp core/wrappers/java/
+
+      - name: Test flight tube geometry
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            android/OsmAnd/test/native/FlightTubeMeshTest.cpp -o "${RUNNER_TEMP}/flight-tube-test"
+          "${RUNNER_TEMP}/flight-tube-test"
 
       - name: Resolve patched core cache identity
         id: patched-core-identity
@@ -87,7 +97,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
-          key: patched-osmand-core-arm64-debug-stripped-v1-${{ runner.os }}-api35-${{ steps.patched-core-identity.outputs.ndk_revision }}-${{ steps.patched-core-identity.outputs.core_sha }}-${{ steps.patched-core-identity.outputs.build_sha }}-${{ hashFiles('android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch') }}
+          key: patched-osmand-core-arm64-debug-stripped-v2-${{ runner.os }}-api35-${{ steps.patched-core-identity.outputs.ndk_revision }}-${{ steps.patched-core-identity.outputs.core_sha }}-${{ steps.patched-core-identity.outputs.build_sha }}-${{ hashFiles('android/OsmAnd/patches/osmand-core/*.patch', 'android/OsmAnd/patches/osmand-core/*.h', 'android/OsmAnd/patches/osmand-core/*.cpp') }}
 
       - name: Build and strip patched OsmAnd core for ARM64
         if: steps.patched-core-cache.outputs.cache-hit != 'true'
@@ -113,7 +123,12 @@ jobs:
           echo "OsmAndCore ARM64: ${size_before} bytes before strip, ${size_after} bytes after strip" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Validate patched OsmAnd core input
-        run: test -s binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
+        run: |
+          test -s binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
+          ndk_path="${ANDROID_NDK_ROOT:-${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}}"
+          "${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" --dynamic --defined-only \
+            binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so \
+            | grep 'Java_net_osmand_core_jni_FlightVectorLineBridge_enableTubeNative'
 
       - name: Publish OsmAnd core failure details
         if: failure()

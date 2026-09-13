@@ -35,6 +35,7 @@
 
 # Java classes called from Qt/OsmAndCore native code must keep their JNI-visible names and members.
 -keep class org.qtproject.qt5.android.** { *; }
+-keep class net.osmand.core.jni.FlightVectorLineBridge { *; }
 
 # Optional dependency surfaces referenced by bundled libraries but not available on Android.
 -dontwarn java.beans.**
