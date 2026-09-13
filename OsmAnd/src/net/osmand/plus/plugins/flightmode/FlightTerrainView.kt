@@ -7,6 +7,7 @@ import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.AttributeSet
 import net.osmand.util.PhotoPlaneGeometry
+import net.osmand.util.DirectionalViewMatrix
 import net.osmand.util.ResourceTransaction
 import net.osmand.util.PreparedResourceQueue
 import java.nio.ByteBuffer
@@ -412,16 +413,9 @@ class FlightTerrainView @JvmOverloads constructor(
 			)
 			val cameraUp = coordinates.vectorToLocal(latitude, longitude, 0f, 1f, 0f)
 
-			val view = FloatArray(16)
-			Matrix.setLookAtM(
-				view,
-				0,
-				camera[0], camera[1], camera[2],
-				camera[0] + viewDirection[0],
-				camera[1] + viewDirection[1],
-				camera[2] + viewDirection[2],
-				cameraUp[0], cameraUp[1], cameraUp[2]
-			)
+			// Never form eye + a one-metre direction: at distant scene origins float
+			// cancellation quantizes yaw/pitch even when touch input is continuous.
+			val view = DirectionalViewMatrix.create(camera, viewDirection, cameraUp)
 			val projection = windowProjection(currentWindowPlacement, currentScene.radiusKm)
 			val mvp = FloatArray(16)
 			Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
