@@ -11,6 +11,9 @@ import android.view.ViewGroup
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentManager
@@ -40,6 +43,10 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var environmentRecorder: FlightEnvironmentRecorder? = null
 	private var locationUpdatesRegistered = false
 	private var externalPhotoCaptureInProgress = false
+	private var showFlightCamera by mutableStateOf(false)
+	private val cameraPermissionLauncher=registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+		showFlightCamera=granted
+	}
 	private var previous3DMapsEnabled: Boolean? = null
 	private var flightMapViewInitialized = false
 	private var flightRendererSetupRequested = false
@@ -187,15 +194,17 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onStopLive = { FlightRecordingService.stop(requireContext()) },
 					onToggleLiveMicrophone = ::toggleLiveMicrophone
 				)
+				if(showFlightCamera) FlightCameraScreen(viewLifecycleOwner,viewModel.uiState.liveState.latest,
+					onClose={showFlightCamera=false},onPrepareFile=viewModel::preparePhotoCapture,onCaptured=viewModel::finishPhotoCapture)
 			}
 		}
 	}
 
 	private fun handlePhotoAction() {
 		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
-			val file = viewModel.preparePhotoCapture()
-			externalPhotoCaptureInProgress = true
-			takePhotoLauncher.launch(AndroidUtils.getUriForFile(requireContext(), file))
+			if(ContextCompat.checkSelfPermission(requireContext(),Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)
+				showFlightCamera=true
+			else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
 		} else {
 			openPhotosLauncher.launch(arrayOf("image/*"))
 		}

@@ -263,6 +263,10 @@ tasks.register('copyOsmAndCoreWithJNI') {
 }
 
 dependencies {
+	// Flight cockpit: lifecycle-bound preview and still capture, independent of the GPS recorder.
+	implementation 'androidx.camera:camera-camera2:1.4.2'
+	implementation 'androidx.camera:camera-lifecycle:1.4.2'
+	implementation 'androidx.camera:camera-view:1.4.2'
 	openglImplementation fileTree(include:  ['QtAndroid.jar', 'QtAndroidBearer.jar', 'QtAndroidNetwork.jar'], dir: 'libs')
 	opengldebugImplementation fileTree(include:  ['QtAndroid.jar', 'QtAndroidBearer.jar', 'QtAndroidNetwork.jar'], dir: 'libs')
 
