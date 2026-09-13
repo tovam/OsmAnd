@@ -267,6 +267,9 @@ dependencies {
 	implementation 'androidx.camera:camera-camera2:1.4.2'
 	implementation 'androidx.camera:camera-lifecycle:1.4.2'
 	implementation 'androidx.camera:camera-view:1.4.2'
+	// CameraX exposes ListenableFuture. Keep Guava itself on the compile classpath when
+	// runtime dependency resolution selects the empty listenablefuture placeholder.
+	implementation 'com.google.guava:guava:33.3.1-android'
 	openglImplementation fileTree(include:  ['QtAndroid.jar', 'QtAndroidBearer.jar', 'QtAndroidNetwork.jar'], dir: 'libs')
 	opengldebugImplementation fileTree(include:  ['QtAndroid.jar', 'QtAndroidBearer.jar', 'QtAndroidNetwork.jar'], dir: 'libs')
 

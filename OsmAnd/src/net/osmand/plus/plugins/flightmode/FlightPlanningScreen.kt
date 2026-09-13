@@ -280,7 +280,7 @@ internal fun FlightPlanningScreen(
                 coverage,
                 false,
                 Modifier.fillMaxWidth().height(260.dp),
-                {},
+                { _, _ -> },
                 {},
             )
             Text(
