@@ -25,6 +25,9 @@ import kotlin.math.*
 import kotlinx.coroutines.*
 import net.osmand.plus.OsmandApplication
 import net.osmand.plus.R
+import net.osmand.util.PhotoCalibrationInput
+
+private enum class PhotoAssociationAction { AUTOMATIC, HERE, REMOVE }
 
 /** All calibration exploration is local to this modal; the journal replay cursor is untouched. */
 @Composable
@@ -48,6 +51,8 @@ internal fun FlightPhotoEditor(
     DisposableEffect(repository) { onDispose { repository.close() } }
     var data by remember(photo.id) { mutableStateOf(photo.calibration) }
     var selected by remember(photo.id) { mutableStateOf(0) }
+    var placementArmed by remember(photo.id) { mutableStateOf(false) }
+    var associationAction by remember(photo.id) { mutableStateOf<PhotoAssociationAction?>(null) }
     var tab by remember(photo.id) { mutableStateOf(0) }
     var status by remember(photo.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -58,6 +63,13 @@ internal fun FlightPhotoEditor(
     var yaw by remember { mutableStateOf(data.editorView.yaw) }
     var pitch by remember { mutableStateOf(data.editorView.pitch) }
     var zoom by remember { mutableStateOf(data.editorView.zoom) }
+    // A confirmation must not silently apply to a different replay position.
+    LaunchedEffect(state.replayProgress, photo.matchedSamplePosition) {
+        if (associationAction != null) {
+            associationAction = null
+            status = context.getString(R.string.flight_cal_association_target_changed)
+        }
+    }
     var mapView by remember { mutableStateOf<FlightPhotoLandmarkView?>(null) }
     var imageLoading by remember(photo.localPath) { mutableStateOf(true) }
     val bitmap by
@@ -73,6 +85,30 @@ internal fun FlightPhotoEditor(
         busy = false
         data = next
         onSave(next)
+    }
+    fun selectNextPoint(points: List<FlightPhotoControlPoint>, mode: Int, after: Int = -1) {
+        val next = PhotoCalibrationInput.nextUnplaced(
+            BooleanArray(points.size) { i ->
+                if (mode == 0) points[i].x != null && points[i].y != null
+                else points[i].latitude != null && points[i].longitude != null
+            },
+            after,
+        )
+        placementArmed = next >= 0
+        if (next >= 0) selected = next
+    }
+    fun placePoint(mode: Int, update: (FlightPhotoControlPoint) -> FlightPhotoControlPoint) {
+        if (!placementArmed || tab != mode) return
+        val edited = selected
+        val next = data.copy(
+            points = data.points.mapIndexed { i, point -> if (i == edited) update(point) else point },
+            fit = null,
+        )
+        save(next)
+        selectNextPoint(next.points, mode, edited)
+    }
+    LaunchedEffect(photo.id, tab) {
+        if (tab <= 1) selectNextPoint(data.points, tab)
     }
     LaunchedEffect(bitmap) {
         bitmap?.let { b ->
@@ -92,6 +128,8 @@ internal fun FlightPhotoEditor(
         }
     }
     val sample = FlightSampleInterpolator.sampleAt(state.trip, photo.matchedSamplePosition)
+    val associationHerePosition = FlightSampleInterpolator.positionAtProgress(state.trip, state.replayProgress)
+        ?.let(FlightSampleInterpolator::quantizePosition)
     val reference =
         sample?.let { s ->
             val existing = photo.windowAlignment?.spatialPose
@@ -137,6 +175,10 @@ internal fun FlightPhotoEditor(
         data.points.count {
             it.x != null && it.y != null && it.latitude != null && it.longitude != null
         }
+    val readiness = PhotoCalibrationInput.readiness(
+        bitmap != null && data.imageWidth > 0 && data.imageHeight > 0,
+        reference != null, reference?.eyeAltitudeMeters?.isFinite() == true, ready)
+    val canCalculate = readiness == PhotoCalibrationInput.Readiness.READY
     Dialog(
         onDismissRequest = onClose,
         properties =
@@ -189,9 +231,9 @@ internal fun FlightPhotoEditor(
                 ) {
                     data.points.forEachIndexed { i, p ->
                         EditorAction(
-                            "${i+1}${if(p.x!=null&&p.latitude!=null)" ✓" else ""}",
-                            { selected = i },
-                            selected == i,
+                            "${i+1} ${if (p.x != null) "P" else "·"}${if (p.latitude != null) "C" else "·"}",
+                            { selected = i; placementArmed = true },
+                            selected == i && placementArmed,
                         )
                     }
                     if (data.points.size < 20)
@@ -205,6 +247,7 @@ internal fun FlightPhotoEditor(
                                     )
                                 )
                                 selected = data.points.lastIndex
+                                placementArmed = true
                             },
                         )
                     EditorAction(
@@ -219,11 +262,14 @@ internal fun FlightPhotoEditor(
                                     fit = null,
                                 )
                             )
+                            placementArmed = true
                         },
+                        enabled = placementArmed,
                     )
                 }
                 Text(
-                    stringResource(
+                    if (!placementArmed) stringResource(R.string.flight_cal_points_done)
+                    else stringResource(
                         if (tab == 0) R.string.flight_cal_pick_photo
                         else R.string.flight_cal_pick_map,
                         selected + 1,
@@ -232,6 +278,8 @@ internal fun FlightPhotoEditor(
                     color = Color.LightGray,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
+                Text(stringResource(R.string.flight_cal_point_legend), fontSize = 9.sp,
+                    color = Color.LightGray, modifier = Modifier.padding(horizontal = 8.dp))
                 val point = data.points[selected]
                 Text(
                     stringResource(
@@ -298,38 +346,16 @@ internal fun FlightPhotoEditor(
                         modifier = Modifier.fillMaxSize(),
                         update = { v ->
                             v.onImagePoint = { x, y ->
-                                save(
-                                    currentData.copy(
-                                        points =
-                                            currentData.points.mapIndexed { i, p ->
-                                                if (i == selected) p.copy(x = x, y = y) else p
-                                            },
-                                        fit = null,
-                                    )
-                                )
+                                placePoint(0) { it.copy(x = x, y = y) }
                             }
                             v.onMapPoint = { lat, lon ->
-                                save(
-                                    currentData.copy(
-                                        points =
-                                            currentData.points.mapIndexed { i, p ->
-                                                if (i == selected)
-                                                    p.copy(
-                                                        latitude = lat,
-                                                        longitude = lon,
-                                                        altitude = null,
-                                                    )
-                                                else p
-                                            },
-                                        fit = null,
-                                    )
-                                )
+                                placePoint(1) { it.copy(latitude = lat, longitude = lon, altitude = null) }
                             }
                             v.onStatus = { status = it }
                             v.update(
                                 bitmap,
                                 data,
-                                selected,
+                                if (placementArmed) selected else -1,
                                 tab,
                                 reference,
                                 estimate,
@@ -521,7 +547,7 @@ internal fun FlightPhotoEditor(
                         if (busy) {
                             solveJob?.cancel()
                             busy = false
-                        } else if (reference != null && ready >= 5 && data.imageWidth > 0) {
+                        } else if (canCalculate && reference != null) {
                             val submitted = data
                             busy = true
                             status = ""
@@ -558,8 +584,17 @@ internal fun FlightPhotoEditor(
                                 }
                         }
                     },
+                    enabled = busy || canCalculate,
                 )
             }
+            if (!busy && !canCalculate) Text(
+                stringResource(when (readiness) {
+                    PhotoCalibrationInput.Readiness.IMAGE_MISSING -> R.string.flight_cal_need_image
+                    PhotoCalibrationInput.Readiness.ASSOCIATION_MISSING -> R.string.flight_cal_need_association
+                    PhotoCalibrationInput.Readiness.ALTITUDE_MISSING -> R.string.flight_cal_need_altitude
+                    else -> R.string.flight_cal_need_pairs
+                }), color = Color.LightGray, fontSize = 10.sp,
+                modifier = Modifier.padding(horizontal = 8.dp))
             if (!data.fitFocal) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -587,34 +622,59 @@ internal fun FlightPhotoEditor(
                                 .format(java.util.Date(it)),
                         )
                     } ?: stringResource(R.string.flight_mode_photo_match_automatically),
-                    onAutoAssociate,
+                    { associationAction = PhotoAssociationAction.AUTOMATIC },
+                    enabled = state.trip?.samples?.isNotEmpty() == true,
                 )
-                EditorAction(stringResource(R.string.flight_mode_photo_match_here), onAssociateHere)
+                EditorAction(stringResource(R.string.flight_mode_photo_match_here),
+                    { associationAction = PhotoAssociationAction.HERE }, enabled = associationHerePosition != null)
                 EditorAction(
                     stringResource(R.string.flight_mode_photo_open_fullscreen),
                     onOpenPhoto,
                 )
                 EditorAction(stringResource(R.string.flight_mode_photo_open_window), onOpenWindow)
                 EditorAction(stringResource(R.string.flight_mode_photo_open_map), onOpenMap)
-                EditorAction(stringResource(R.string.flight_mode_photo_unmatch), onClearAssociation)
+                EditorAction(stringResource(R.string.flight_mode_photo_unmatch),
+                    { associationAction = PhotoAssociationAction.REMOVE }, enabled = photo.matchedSamplePosition != null)
             }
+        }
+        associationAction?.let { action ->
+            AlertDialog(
+                onDismissRequest = { associationAction = null },
+                title = { Text(stringResource(R.string.flight_cal_confirm_association)) },
+                text = { Text(stringResource(when (action) {
+                    PhotoAssociationAction.AUTOMATIC -> R.string.flight_cal_confirm_auto
+                    PhotoAssociationAction.HERE -> R.string.flight_cal_confirm_here
+                    PhotoAssociationAction.REMOVE -> R.string.flight_cal_confirm_remove
+                }, photo.fileName, associationHerePosition?.let { "%.2f".format(it + 1) } ?: "—")) },
+                confirmButton = { TextButton(onClick = {
+                    associationAction = null
+                    when (action) {
+                        PhotoAssociationAction.AUTOMATIC -> onAutoAssociate()
+                        PhotoAssociationAction.HERE -> onAssociateHere()
+                        PhotoAssociationAction.REMOVE -> onClearAssociation()
+                    }
+                }) { Text(stringResource(R.string.flight_cal_confirm_change)) } },
+                dismissButton = { TextButton(onClick = { associationAction = null }) {
+                    Text(stringResource(R.string.flight_mode_cancel))
+                } },
+            )
         }
     }
 }
 
 @Composable
-private fun EditorAction(label: String, onClick: () -> Unit, selected: Boolean = false) {
+private fun EditorAction(label: String, onClick: () -> Unit, selected: Boolean = false, enabled: Boolean = true) {
     Box(
-        Modifier.heightIn(min = 36.dp)
+        Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp)
             .background(if (selected) Color(0xFF234656) else Color.Transparent)
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 9.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
             fontSize = 10.sp,
-            color = if (selected) Color.White else Color(0xFF74D8FF),
+            color = if (!enabled) Color(0xFF6D7379) else if (selected) Color.White else Color(0xFF74D8FF),
             maxLines = 1,
         )
     }

@@ -12,6 +12,10 @@ Photo Plus uses a compact chronological library. Open a photo to access five edi
 
 Associate the photo with the track first. Five complete, well-spread point pairs are required; up to twenty are supported. Calculation can be cancelled. Every edit is passed to the existing journal autosave mechanism. Pending photos still require the normal import confirmation.
 
+Photo and map clicks independently advance to the next unplaced landmark. Once all slots on that surface are filled, placement is disarmed: choose a numbered button explicitly to edit an existing point, or add a slot. P/C indicators show which half of each pair has been placed. Photo Plus uses undamped pinch scaling; the Hublot camera's existing half-strength pinch remains unchanged. Calculate is disabled until the image, recorded position, recorded altitude and at least five full pairs are available; the missing prerequisite is displayed. Terrain/network or solver failures discovered during calculation are still reported as errors.
+
+Automatic association, association to the current track point and removal require confirmation. The current-point confirmation displays its fractional index and warns about resetting manual Hublot alignment. If playback moves the target while the dialog is open, the confirmation is cancelled. Landmark pairs are preserved by these association changes.
+
 ## Numerical model and limits
 
 `PhotoPoseSolver` minimizes the squared pixel reprojection errors across all supplied pairs. It uses nine initializations and damped least squares (Levenberg–Marquardt). Unknowns are position, yaw, pitch, roll and optionally focal length. With a fixed focal length, the user controls the vertical field of view. Principal point is assumed centered, pixels square, and lens distortion is not fitted.
@@ -31,6 +35,7 @@ The previous view matrix formed `eye + direction` in Float, where direction was 
 Standalone tests under `OsmAnd/test/standalone` cover:
 
 - `DirectionalViewMatrixTest`: 1000 successive small yaw steps and 1000 pitch steps at a distant origin.
+- `PhotoCalibrationInputTest`: sequential photo/map placement, no overwrite after five clicks, explicit correction selection, readiness prerequisites and undamped photo zoom.
 - `PhotoPoseSolverTest`: exact and noisy synthetic correspondences, fixed/free focal length, five-point unknown-focal recovery and rejection of collinear image points.
 - `PhotoCalibrationPersistenceTest`: WGS84 position/direction round trips, including a dateline case; complete and partial JSON persistence; corrupt-fit recovery; agreement between solver projections and the real GL photo rectangle for five positive/negative roll angles.
 

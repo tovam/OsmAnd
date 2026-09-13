@@ -45,7 +45,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                 override fun onScale(detector: ScaleGestureDetector): Boolean {
                     if (mode == 0) {
                         val old = imageScale
-                        imageScale = (imageScale * sqrt(detector.scaleFactor)).coerceIn(1f, 20f)
+                        imageScale = net.osmand.util.PhotoCalibrationInput.scalePhoto(imageScale, detector.scaleFactor)
                         val ratio = imageScale / old
                         imagePanX =
                             (imagePanX - (detector.focusX - width / 2f)) * ratio +
@@ -98,7 +98,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                     return true
                 }
 
-                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                override fun onSingleTapUp(e: MotionEvent): Boolean {
                     if (mode == 0) {
                         if (image == null) return false
                         val rect = imageRect()
@@ -120,7 +120,10 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                     return true
                 }
             },
-        )
+        ).apply {
+            // Each tap places one landmark immediately; two quick taps are not a double-tap command.
+            setOnDoubleTapListener(null)
+        }
 
     fun update(
         bitmap: Bitmap?,

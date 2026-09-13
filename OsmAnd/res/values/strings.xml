@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_cal_association_target_changed">Le point courant a changé : confirmation annulée. Mets la lecture en pause puis recommence.</string>
+	<string name="flight_cal_points_done">Tous les repères de cette vue sont placés. Choisis un numéro pour le corriger, ou passe à l’autre vue.</string>
+	<string name="flight_cal_point_legend">P : pixel photo placé · C : lieu carte placé. Chaque clic passe au prochain repère libre.</string>
+	<string name="flight_cal_need_image">Calcul indisponible : la photo doit être chargée.</string>
+	<string name="flight_cal_need_altitude">Calcul indisponible : le point du trajet associé doit avoir une altitude.</string>
+	<string name="flight_cal_need_pairs">Place au moins 5 repères sur la photo ET leurs 5 correspondances sur la carte.</string>
+	<string name="flight_cal_confirm_association">Modifier l’association de la photo ?</string>
+	<string name="flight_cal_confirm_auto">Réassocier %1$s au trajet à partir de sa date ? Le calage manuel Hublot peut être réinitialisé si la position change. Les repères de calcul restent conservés.</string>
+	<string name="flight_cal_confirm_here">Associer %1$s au point %2$s actuellement sélectionné sur le trajet ? Le calage manuel Hublot peut être réinitialisé si la position change. Les repères de calcul restent conservés.</string>
+	<string name="flight_cal_confirm_remove">Supprimer l’association au trajet de %1$s et son calage manuel Hublot ? La photo et ses repères de calcul restent conservés.</string>
+	<string name="flight_cal_confirm_change">Confirmer</string>
 	<string name="flight_cal_photo">Repères photo</string>
 	<string name="flight_cal_map">Repères carte</string>
 	<string name="flight_cal_compare">Comparer</string>
