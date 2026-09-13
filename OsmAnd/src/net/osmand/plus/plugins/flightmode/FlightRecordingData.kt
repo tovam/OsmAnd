@@ -9,6 +9,7 @@ data class FlightLiveState(
     val lastFixElapsed: Long = 0,
     val running: Boolean = false,
     val microphone: Boolean = false,
+    val policy: FlightRecordingPolicy = FlightRecordingPolicy(),
     val error: String? = null,
 )
 

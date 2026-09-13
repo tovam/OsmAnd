@@ -416,6 +416,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             }
         }
         val path = Path()
+        val coverageLayer=if(coverage.isNotEmpty())canvas.saveLayer(0f,0f,width.toFloat(),height.toFloat(),Paint().apply{alpha=128})else null
         coverage.forEach { (id, color) ->
             val top=FlightTerrainTilePlanner.tileYToLatitude(id.y.toDouble(),id.zoom)
             val bottom=FlightTerrainTilePlanner.tileYToLatitude(id.y+1.0,id.zoom)
@@ -424,10 +425,11 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             val size=(256*2.0.pow(zoom-id.zoom)).toFloat()
             val b=project(bottom,left)
             if(a.x+size>=0 && a.x<=width && b.y>=0 && a.y<=height) {
-                paint.color=color
+                paint.color=color or 0xFF000000.toInt()
                 canvas.drawRect(a.x,a.y,a.x+size,b.y,paint)
             }
         }
+        coverageLayer?.let { canvas.restoreToCount(it) }
         val samples = trip?.samples.orEmpty()
         val stride = max(1, samples.size / 2000)
         samples

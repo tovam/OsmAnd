@@ -8,6 +8,12 @@ internal class FlightLivePredictor {
     private var receivedAt = 0L
     private var correctionFrom: FlightSample? = null
 
+    fun reset() {
+        fix = null
+        receivedAt = 0
+        correctionFrom = null
+    }
+
     fun accept(sample: FlightSample, elapsed: Long) {
         if (sample.timestampMillis == fix?.timestampMillis) return
         correctionFrom = position(elapsed)

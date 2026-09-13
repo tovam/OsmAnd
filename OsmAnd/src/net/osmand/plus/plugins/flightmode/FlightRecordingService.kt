@@ -28,7 +28,8 @@ class FlightRecordingService : Service(), LocationListener {
     private var recorder: FlightEnvironmentRecorder? = null
     private var used: Int? = null
     private var found: Int? = null
-    private var stopping = false
+    @Volatile private var stopping = false
+    private val ownerToken = Any()
     private var recordingPolicy = FlightRecordingPolicy()
     private var lastStateSave = 0L
     private val satellites =
@@ -43,6 +44,7 @@ class FlightRecordingService : Service(), LocationListener {
 
     override fun onCreate() {
         super.onCreate()
+        currentOwner = ownerToken
         thread.start()
         worker = Handler(thread.looper)
         manager = getSystemService(LOCATION_SERVICE) as LocationManager
@@ -102,6 +104,14 @@ class FlightRecordingService : Service(), LocationListener {
                         intent.getFloatExtra("turn", 2f).coerceIn(1f, 10f),
                         intent.getFloatExtra("deviation", 2f).coerceIn(1f, 10f),
                     )
+                getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putFloat("distance", recordingPolicy.cruisePointDistanceMeters)
+                    .putFloat("interval", recordingPolicy.maximumStraightIntervalSeconds)
+                    .putFloat("turn", recordingPolicy.turnAcceleration)
+                    .putFloat("deviation", recordingPolicy.routeDeviationAcceleration)
+                    .apply()
+                updates.value = updates.value.copy(policy = recordingPolicy)
             }
             return START_STICKY
         }
@@ -153,14 +163,22 @@ class FlightRecordingService : Service(), LocationListener {
                             baselineAltitude = samples.firstNotNullOfOrNull { it.altitudeMeters }
                         )
                 prefs.edit().putString("active", id).apply()
+                recordingPolicy =
+                    FlightRecordingPolicy(
+                        prefs.getFloat("distance", 1000f).coerceIn(100f, 8000f),
+                        prefs.getFloat("interval", 20f).coerceIn(1f, 120f),
+                        prefs.getFloat("turn", 2f).coerceIn(1f, 10f),
+                        prefs.getFloat("deviation", 2f).coerceIn(1f, 10f),
+                    )
                 updates.value =
                     FlightLiveState(
                         id,
-                        recordedFlightTrip(journey!!.name, samples),
+                        recordedFlightTrip(journey!!.name, samples.toList()),
                         samples.lastOrNull(),
                         tracking,
                         battery.toList(),
                         running = true,
+                        policy = recordingPolicy,
                     )
                 requestGps()
                 recorder =
@@ -184,9 +202,8 @@ class FlightRecordingService : Service(), LocationListener {
         ) {
             getString(R.string.flight_live_need_location)
         }
-        check(manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            getString(R.string.flight_live_gps_disabled)
-        }
+        if (!manager.isProviderEnabled(LocationManager.GPS_PROVIDER))
+            updates.value = updates.value.copy(error = getString(R.string.flight_live_gps_disabled))
         manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, thread.looper)
         manager.registerGnssStatusCallback(satellites, worker)
     }
@@ -198,6 +215,13 @@ class FlightRecordingService : Service(), LocationListener {
             if (age !in 0..15_000) return
             val prior = updates.value.latest
             if (prior != null && location.time <= prior.timestampMillis) return
+            // Use the same MSL/geoid correction as the rest of OsmAnd, rather than mixing an
+            // ellipsoidal Android altitude with sea-level terrain and imported GPX altitudes.
+            val corrected =
+                net.osmand.plus.OsmAndLocationProvider.convertLocation(
+                    location,
+                    applicationContext as net.osmand.plus.OsmandApplication,
+                )
             val sample =
                 FlightSample(
                     samples.size,
@@ -205,7 +229,7 @@ class FlightRecordingService : Service(), LocationListener {
                     location.time,
                     location.latitude,
                     location.longitude,
-                    location.altitude.takeIf { location.hasAltitude() },
+                    corrected.altitude.takeIf { corrected.hasAltitude() },
                     location.speed.takeIf { location.hasSpeed() },
                     location.bearing.takeIf { location.hasBearing() }
                         ?: prior?.let {
@@ -219,8 +243,8 @@ class FlightRecordingService : Service(), LocationListener {
                     location.accuracy.takeIf { location.hasAccuracy() },
                     satellitesUsed = used,
                     satellitesFound = found,
-                    soundDb = environment.soundDb,
-                    soundSpectrum = environment.soundSpectrum,
+                    soundDb = environment.soundDb.takeIf { updates.value.microphone },
+                    soundSpectrum = environment.soundSpectrum.takeIf { updates.value.microphone },
                     vibrationHz = environment.vibrationHz,
                 )
             val previousState = tracking
@@ -345,13 +369,14 @@ class FlightRecordingService : Service(), LocationListener {
     }
 
     override fun onDestroy() {
+        stopping = true
         worker.post {
             manager.removeUpdates(this)
             manager.unregisterGnssStatusCallback(satellites)
             recorder?.stop()
             worker.removeCallbacks(batteryTick)
             thread.quitSafely()
-            updates.value = updates.value.copy(running = false)
+            if (currentOwner === ownerToken) updates.value = updates.value.copy(running = false)
         }
         super.onDestroy()
     }
@@ -389,6 +414,7 @@ class FlightRecordingService : Service(), LocationListener {
     }
 
     companion object {
+        @Volatile private var currentOwner: Any? = null
         const val PREFS = "flight-recording-service"
         const val STOP = "flight.stop"
         const val POLICY = "flight.policy"
