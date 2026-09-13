@@ -447,6 +447,7 @@ class FlightJourneyStore(private val context: Context) {
 					put("includeMap", photo.includeMap)
 					put("includeScene3d", photo.includeScene3d)
 					putOptional("windowAlignment", photo.windowAlignment?.let(::photoWindowAlignmentToJson))
+					put("calibration", photo.calibration.toJson())
 				})
 			}
 		})
@@ -489,7 +490,8 @@ class FlightJourneyStore(private val context: Context) {
 					includeSelfie = json.optBoolean("includeSelfie", false),
 					includeMap = json.optBoolean("includeMap", true),
 					includeScene3d = json.optBoolean("includeScene3d", true),
-					windowAlignment = photoWindowAlignmentFromJson(json.optJSONObject("windowAlignment"))
+					windowAlignment = photoWindowAlignmentFromJson(json.optJSONObject("windowAlignment")),
+					calibration = FlightPhotoCalibration.fromJson(json.optJSONObject("calibration"))
 				)
 			}
 		}

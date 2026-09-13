@@ -372,7 +372,8 @@ data class FlightPhotoAttachment(
 	val includeSelfie: Boolean = false,
 	val includeMap: Boolean = true,
 	val includeScene3d: Boolean = true,
-	val windowAlignment: FlightPhotoWindowAlignment? = null
+	val windowAlignment: FlightPhotoWindowAlignment? = null,
+	val calibration: FlightPhotoCalibration = FlightPhotoCalibration()
 )
 
 /** Non-destructive colour adjustments stored beside the original photo. */

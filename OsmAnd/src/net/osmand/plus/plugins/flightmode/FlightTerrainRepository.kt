@@ -45,6 +45,24 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	fun close() = assetScheduler.close()
 	fun cancelPendingAssets() = assetScheduler.reconcile(emptyList())
 
+	/** Calibration never substitutes zero for unavailable relief. */
+	suspend fun calibrationElevation(latitude: Double, longitude: Double): Double = runInterruptible(Dispatchers.IO) {
+		val zoom = 14
+		val x = FlightTerrainTilePlanner.longitudeToTileX(longitude, zoom)
+		val y = FlightTerrainTilePlanner.latitudeToTileY(latitude, zoom)
+		val id = TerrainTileId(zoom, kotlin.math.floor(x).toInt(), kotlin.math.floor(y).toInt())
+		val tile = loadTerrainTile(id).tile
+		val px = (x - id.x) * (tile.width - 1)
+		val py = (y - id.y) * (tile.height - 1)
+		val ix = px.toInt(); val iy = py.toInt(); val fx = px - ix; val fy = py - iy
+		(tile.elevation(ix, iy) * (1-fx) + tile.elevation(ix+1, iy) * fx) * (1-fy) +
+			(tile.elevation(ix, iy+1) * (1-fx) + tile.elevation(ix+1, iy+1) * fx) * fy
+	}
+
+	suspend fun calibrationSatellite(tile: TerrainTileId): String = runInterruptible(Dispatchers.IO) {
+		loadStandardSatelliteTexture(tile, true).file.absolutePath
+	}
+
 	private val assetLocks = ConcurrentHashMap<String, ReentrantLock>()
 	private val decodedTerrainCache = object : LinkedHashMap<TerrainTileId, TerrariumTile>(
 		MAXIMUM_DECODED_TERRAIN_TILES + 1,

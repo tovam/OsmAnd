@@ -1170,6 +1170,20 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		replacePhoto(photo.copy(imageAdjustments = safe), message = null)
 	}
 
+	fun setPhotoCalibration(id: String, calibration: FlightPhotoCalibration) {
+		val photo = findPhoto(id) ?: return
+		replacePhoto(photo.copy(calibration = calibration), message = null)
+	}
+
+	fun preparePhotoCalibration(id: String) {
+		val photo = findPhoto(id) ?: return
+		val sample = FlightSampleInterpolator.sampleAt(uiState.trip, photo.matchedSamplePosition) ?: return
+		terrainStreamingEngine.submit(sceneDemand(sample).copy(
+			consumers = setOf(FlightSceneConsumer.WINDOW, FlightSceneConsumer.BACKGROUND),
+			motion = FlightSceneMotion.MANUAL
+		), FlightSceneDemandReason.PAGE)
+	}
+
 	fun openPhotoOnMap(id: String) {
 		selectPhoto(id)
 		if (findPhoto(id)?.matchedSamplePosition != null) {

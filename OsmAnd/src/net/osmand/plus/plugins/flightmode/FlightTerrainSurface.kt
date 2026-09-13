@@ -20,7 +20,8 @@ fun FlightTerrainSurface(
 	spatialPhoto: FlightSpatialPhotoOverlay?,
 	onRendererError: (String) -> Unit,
 	onRenderStats: (FlightTerrainRenderStats) -> Unit,
-	modifier: Modifier = Modifier
+	modifier: Modifier = Modifier,
+	inspection: FlightPhotoInspection? = null
 ) {
 	AndroidView(
 		modifier = modifier,
@@ -40,7 +41,8 @@ fun FlightTerrainSurface(
 				nativeMapOpacity = nativeMapOpacity,
 				spatialPhoto = spatialPhoto,
 				onRendererError = onRendererError,
-				onRenderStats = onRenderStats
+				onRenderStats = onRenderStats,
+				inspection = inspection
 			)
 		}
 	)

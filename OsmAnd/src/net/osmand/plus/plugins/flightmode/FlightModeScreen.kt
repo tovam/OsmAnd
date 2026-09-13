@@ -9,6 +9,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -202,6 +205,8 @@ fun FlightModeScreen(
 	onClearPhotoAssociation: (String) -> Unit,
 	onRotatePhoto: (String, Float) -> Unit,
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
+	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
+	onPreparePhotoCalibration: (String) -> Unit,
 	onOpenPhotoOnMap: (String) -> Unit,
 	onOpenPhotoInWindow: (String) -> Unit,
 	onSetWindowPhotoOpacity: (Float) -> Unit,
@@ -383,7 +388,9 @@ fun FlightModeScreen(
 					onClearPhotoAssociation = onClearPhotoAssociation,
 					onRotatePhoto = onRotatePhoto,
 					onOpenPhotoOnMap = onOpenPhotoOnMap,
-					onOpenPhotoInWindow = onOpenPhotoInWindow
+					onOpenPhotoInWindow = onOpenPhotoInWindow,
+					onSetPhotoCalibration = onSetPhotoCalibration,
+					onPreparePhotoCalibration = onPreparePhotoCalibration
 				)
 				FlightPage.JOURNEYS -> JourneysScreen(
 					state = state,
@@ -1663,290 +1670,97 @@ private fun PhotoScreen(
 	onClearPhotoAssociation: (String) -> Unit,
 	onRotatePhoto: (String, Float) -> Unit,
 	onOpenPhotoOnMap: (String) -> Unit,
-	onOpenPhotoInWindow: (String) -> Unit
+	onOpenPhotoInWindow: (String) -> Unit,
+	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
+	onPreparePhotoCalibration: (String) -> Unit
 ) {
+	var editorId by remember { mutableStateOf<String?>(null) }
 	var fullScreenPhotoId by remember { mutableStateOf<String?>(null) }
-	val fullScreenPhoto = fullScreenPhotoId?.let { id ->
-		(state.photos + state.pendingPhotos).firstOrNull { it.id == id }
-	}
-	Box(Modifier.fillMaxSize().background(FlightBackground)) {
-		Column(Modifier.fillMaxSize()) {
-			FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
-			LazyColumn(Modifier.weight(1f)) {
+	val all = state.photos + state.pendingPhotos
+	val editorPhoto = all.firstOrNull { it.id == editorId }
+	LaunchedEffect(editorId, editorPhoto?.matchedSamplePosition) { editorId?.let(onPreparePhotoCalibration) }
+	val fullScreenPhoto = all.firstOrNull { it.id == fullScreenPhotoId }
+	Column(Modifier.fillMaxSize().background(FlightBackground)) {
+		FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
+		Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+			Text(stringResource(R.string.flight_mode_attached_photos, state.photos.size), color = FlightMuted,
+				fontSize = 11.sp, modifier = Modifier.weight(1f))
+			CompactAction(stringResource(if (state.sessionMode == FlightSessionMode.LIVE)
+				R.string.flight_mode_take_photo else R.string.flight_mode_add_gallery_photos),
+				FlightBlue, onPhotoAction)
+		}
+		LazyColumn(Modifier.weight(1f)) {
+			state.journeyMessage?.let { message ->
+				item { Text(message, color = FlightGreen, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp)) }
+			}
 			if (state.sessionMode == FlightSessionMode.LIVE) {
-				item { SectionTitle(stringResource(R.string.flight_mode_photo_composition).uppercase()) }
-				item { SourceToggle(stringResource(R.string.flight_mode_main_camera), state.photoMainCamera) { onSetSources(it, null, null, null) } }
-				item { SourceToggle(stringResource(R.string.flight_mode_selfie), state.photoSelfie) { onSetSources(null, it, null, null) } }
-				item { SourceToggle(stringResource(R.string.flight_mode_current_map), state.photoMap) { onSetSources(null, null, it, null) } }
-				item { SourceToggle(stringResource(R.string.flight_mode_current_3d), state.photoScene3d) { onSetSources(null, null, null, it) } }
 				item {
-					Text(
-						stringResource(R.string.flight_mode_live_photo_help),
-						color = FlightMuted,
-						fontSize = 11.sp,
-						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-					)
-				}
-			} else {
-				item { SectionTitle(stringResource(R.string.flight_mode_replay_photos).uppercase()) }
-				item {
-					Text(
-						stringResource(R.string.flight_mode_replay_photo_help),
-						color = FlightMuted,
-						fontSize = 11.sp,
-						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-					)
-				}
-			}
-			item {
-				FlatButton(
-					text = if (state.sessionMode == FlightSessionMode.LIVE) {
-						stringResource(R.string.flight_mode_take_photo)
-					} else {
-						stringResource(R.string.flight_mode_add_gallery_photos)
-					},
-					modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-					accent = true,
-					onClick = onPhotoAction
-				)
-			}
-			if (state.pendingPhotos.isNotEmpty()) {
-				item { SectionTitle(stringResource(R.string.flight_mode_photos_to_confirm, state.pendingPhotos.size)) }
-				itemsIndexed(state.pendingPhotos.sortedWith(PHOTO_TIME_COMPARATOR)) { _, photo ->
-					FlightPhotoEntry(
-						photo = photo,
-						selected = photo.id == state.selectedPhotoId,
-						trip = state.trip,
-						sessionMode = state.sessionMode,
-						onSelect = onSelectPhoto,
-						onAssociateAutomatically = onAssociatePhotoAutomatically,
-						onAssociateHere = onAssociatePhotoAtCurrentReplay,
-						onClearAssociation = onClearPhotoAssociation,
-						onOpenMap = onOpenPhotoOnMap,
-						onOpenWindow = onOpenPhotoInWindow,
-						onOpenPhoto = { fullScreenPhotoId = it },
-						onRotatePhoto = onRotatePhoto
-					)
-				}
-				item {
-					Row(
-						Modifier.fillMaxWidth().padding(10.dp),
-						horizontalArrangement = Arrangement.spacedBy(8.dp)
-					) {
-						FlatButton(stringResource(R.string.flight_mode_cancel), Modifier.weight(1f), false, onDiscardPhotos)
-						FlatButton(stringResource(R.string.flight_mode_confirm_photos), Modifier.weight(1f), true, onValidatePhotos)
+					Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+						CompactAction(stringResource(R.string.flight_mode_main_camera), if (state.photoMainCamera) FlightGreen else FlightMuted, { onSetSources(!state.photoMainCamera, null, null, null) })
+						CompactAction(stringResource(R.string.flight_mode_selfie), if (state.photoSelfie) FlightGreen else FlightMuted, { onSetSources(null, !state.photoSelfie, null, null) })
+						CompactAction(stringResource(R.string.flight_mode_current_map), if (state.photoMap) FlightGreen else FlightMuted, { onSetSources(null, null, !state.photoMap, null) })
+						CompactAction(stringResource(R.string.flight_mode_current_3d), if (state.photoScene3d) FlightGreen else FlightMuted, { onSetSources(null, null, null, !state.photoScene3d) })
 					}
 				}
 			}
-			if (state.photos.isNotEmpty()) {
-				item { SectionTitle(stringResource(R.string.flight_mode_attached_photos, state.photos.size)) }
-				itemsIndexed(state.photos.sortedWith(PHOTO_TIME_COMPARATOR)) { _, photo ->
-					FlightPhotoEntry(
-						photo = photo,
-						selected = photo.id == state.selectedPhotoId,
-						trip = state.trip,
-						sessionMode = state.sessionMode,
-						onSelect = onSelectPhoto,
-						onAssociateAutomatically = onAssociatePhotoAutomatically,
-						onAssociateHere = onAssociatePhotoAtCurrentReplay,
-						onClearAssociation = onClearPhotoAssociation,
-						onOpenMap = onOpenPhotoOnMap,
-						onOpenWindow = onOpenPhotoInWindow,
-						onOpenPhoto = { fullScreenPhotoId = it },
-						onRotatePhoto = onRotatePhoto
-					)
+			if (state.pendingPhotos.isNotEmpty()) {
+				item { SectionTitle(stringResource(R.string.flight_mode_photos_to_confirm, state.pendingPhotos.size)) }
+				itemsIndexed(state.pendingPhotos.sortedWith(PHOTO_TIME_COMPARATOR), key = { _, p -> p.id }) { _, photo ->
+					PhotoLibraryEntry(photo, state.trip) { editorId = photo.id; onSelectPhoto(photo.id) }
 				}
+				item { Row(Modifier.fillMaxWidth()) {
+					CompactAction(stringResource(R.string.flight_mode_cancel), FlightMuted, onDiscardPhotos, Modifier.weight(1f))
+					CompactAction(stringResource(R.string.flight_mode_confirm_photos), FlightGreen, onValidatePhotos, Modifier.weight(1f))
+				} }
 			}
-			state.journeyMessage?.let { message ->
-				item { Text(message, color = FlightGreen, fontSize = 11.sp, modifier = Modifier.padding(12.dp)) }
+			itemsIndexed(state.photos.sortedWith(PHOTO_TIME_COMPARATOR), key = { _, p -> p.id }) { _, photo ->
+				PhotoLibraryEntry(photo, state.trip) { editorId = photo.id; onSelectPhoto(photo.id) }
 			}
-			}
-			FlightBottomNavigation(FlightPage.PHOTO, onPageChange)
 		}
-		fullScreenPhoto?.let { photo ->
-			FlightPhotoFullscreen(
-				photo = photo,
-				onClose = { fullScreenPhotoId = null },
-				onRotate = { deltaDegrees -> onRotatePhoto(photo.id, deltaDegrees) }
-			)
+		FlightBottomNavigation(FlightPage.PHOTO, onPageChange)
+	}
+	all.firstOrNull { it.id == editorId }?.let { photo ->
+		if (fullScreenPhoto == null) FlightPhotoEditor(photo, state, { editorId = null },
+			{ onSetPhotoCalibration(photo.id, it) },
+			{ onAssociatePhotoAutomatically(photo.id) }, { onAssociatePhotoAtCurrentReplay(photo.id) },
+			{ fullScreenPhotoId = photo.id }, { editorId = null; onOpenPhotoInWindow(photo.id) },
+			{ editorId = null; onOpenPhotoOnMap(photo.id) }, { onClearPhotoAssociation(photo.id) })
+	}
+	fullScreenPhoto?.let { photo ->
+		androidx.compose.ui.window.Dialog(onDismissRequest = { fullScreenPhotoId = null },
+			properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+			FlightPhotoFullscreen(photo, { fullScreenPhotoId = null }, { onRotatePhoto(photo.id, it) })
 		}
 	}
 }
 
 @Composable
-private fun FlightPhotoEntry(
-	photo: FlightPhotoAttachment,
-	selected: Boolean,
-	trip: FlightTrip?,
-	sessionMode: FlightSessionMode,
-	onSelect: (String) -> Unit,
-	onAssociateAutomatically: (String) -> Unit,
-	onAssociateHere: (String) -> Unit,
-	onClearAssociation: (String) -> Unit,
-	onOpenMap: (String) -> Unit,
-	onOpenWindow: (String) -> Unit,
-	onOpenPhoto: (String) -> Unit,
-	onRotatePhoto: (String, Float) -> Unit
-) {
+private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, onOpen: () -> Unit) {
+	val bitmap by produceState<Bitmap?>(null, photo.localPath) {
+		value = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath), 192) }
+	}
 	val sample = FlightSampleInterpolator.sampleAt(trip, photo.matchedSamplePosition)
-	Column {
-		FlightPhotoRow(photo, selected, sample, onSelect)
-		if (selected) {
-			FlightPhotoPreview(photo, onOpenPhoto)
-			FlightPhotoMetadata(photo, sample, trip)
-			Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
-				CompactAction(
-					stringResource(R.string.flight_mode_photo_open_fullscreen).uppercase(),
-					FlightBlue,
-					{ onOpenPhoto(photo.id) },
-					Modifier.weight(1f)
-				)
-			}
-			if (sessionMode == FlightSessionMode.REPLAY) {
-				PhotoAssociationControls(
-					photo = photo,
-					hasMatch = sample != null,
-					onAssociateAutomatically = onAssociateAutomatically,
-					onAssociateHere = onAssociateHere,
-					onClearAssociation = onClearAssociation,
-					onOpenMap = onOpenMap,
-					onOpenWindow = onOpenWindow
-				)
-			}
+	Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onOpen).padding(6.dp),
+		verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+		Box(Modifier.size(58.dp, 44.dp).clipToBounds().background(Color.Black)) {
+			bitmap?.let { Image(it.asImageBitmap(), photo.fileName, contentScale = ContentScale.Crop,
+				modifier = Modifier.fillMaxSize().graphicsLayer(rotationZ = photo.rotationDegrees)) }
 		}
-	}
-}
-
-@Composable
-private fun PhotoAssociationControls(
-	photo: FlightPhotoAttachment,
-	hasMatch: Boolean,
-	onAssociateAutomatically: (String) -> Unit,
-	onAssociateHere: (String) -> Unit,
-	onClearAssociation: (String) -> Unit,
-	onOpenMap: (String) -> Unit,
-	onOpenWindow: (String) -> Unit
-) {
-	Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
-		Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-			CompactAction(
-				when {
-					photo.timestampMillis != null -> stringResource(
-						R.string.flight_mode_photo_match_at,
-						formatClock(photo.timestampMillis)
-					).uppercase()
-					hasMatch -> stringResource(R.string.flight_mode_photo_redetect_and_rematch).uppercase()
-					else -> stringResource(R.string.flight_mode_photo_match_automatically).uppercase()
-				},
-				FlightBlue,
-				{ onAssociateAutomatically(photo.id) },
-				Modifier.weight(1f)
-			)
-			CompactAction(
-				stringResource(R.string.flight_mode_photo_match_here).uppercase(),
-				FlightOrange,
-				{ onAssociateHere(photo.id) },
-				Modifier.weight(1f)
-			)
+		Column(Modifier.weight(1f)) {
+			Text(photo.fileName, color = FlightText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+			val date = photo.timestampMillis?.let(::formatDateTime)
+				?: sample?.timestampMillis?.takeIf { it > 0 }?.let {
+					stringResource(R.string.flight_mode_photo_date_inferred_short, formatDateTime(it))
+				} ?: stringResource(R.string.flight_mode_photo_without_date)
+			Text(date, color = FlightMuted, fontSize = 9.sp)
+			Text(photo.matchedSamplePosition?.let { stringResource(R.string.flight_mode_photo_matched_point, formatVirtualPoint(it)) }
+				?: stringResource(R.string.flight_mode_photo_not_matched),
+				color = if (sample != null) FlightGreen else FlightWarning, fontSize = 9.sp)
 		}
-		if (hasMatch) {
-			Spacer(Modifier.height(5.dp))
-			Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-				CompactAction(
-					stringResource(R.string.flight_mode_photo_open_map).uppercase(),
-					FlightGreen,
-					{ onOpenMap(photo.id) },
-					Modifier.weight(1f)
-				)
-				CompactAction(
-					stringResource(R.string.flight_mode_photo_open_window).uppercase(),
-					FlightBlue,
-					{ onOpenWindow(photo.id) },
-					Modifier.weight(1f)
-				)
-				CompactAction(
-					stringResource(R.string.flight_mode_photo_unmatch).uppercase(),
-					FlightMuted,
-					{ onClearAssociation(photo.id) },
-					Modifier.weight(1f)
-				)
-			}
-		}
+		Text(stringResource(R.string.flight_cal_pairs, photo.calibration.points.count { it.x != null && it.latitude != null }),
+			color = FlightBlue, fontSize = 9.sp)
 	}
-}
-
-@Composable
-private fun FlightPhotoRow(
-	photo: FlightPhotoAttachment,
-	selected: Boolean,
-	matchedSample: FlightSample?,
-	onSelect: (String) -> Unit
-) {
-	val matchedTimestamp = matchedSample?.timestampMillis?.takeIf { it > 0L }
-	val dateLabel = when {
-		photo.timestampMillis != null -> formatDateTime(photo.timestampMillis)
-		matchedTimestamp != null -> stringResource(
-			R.string.flight_mode_photo_date_inferred_short,
-			formatDateTime(matchedTimestamp)
-		)
-		matchedSample != null -> stringResource(R.string.flight_mode_photo_matched_without_time)
-		else -> stringResource(R.string.flight_mode_photo_without_date)
-	}
-	Row(
-		Modifier.fillMaxWidth().height(46.dp)
-			.background(if (selected) Color(0x2217BDE3) else Color.Transparent)
-			.clickable { onSelect(photo.id) }
-			.padding(horizontal = 12.dp),
-		verticalAlignment = Alignment.CenterVertically
-	) {
-		Text(photo.fileName, color = FlightText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-		Column(horizontalAlignment = Alignment.End) {
-			Text(dateLabel, color = FlightMuted, fontSize = 9.sp)
-			Text(
-				photo.matchedSamplePosition?.let {
-					stringResource(R.string.flight_mode_photo_matched_point, formatVirtualPoint(it))
-				}
-					?: stringResource(R.string.flight_mode_photo_not_matched),
-				color = if (photo.matchedSamplePosition != null) FlightGreen else FlightWarning,
-				fontSize = 8.sp
-			)
-		}
-	}
-	Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 12.dp).background(FlightLine))
-}
-
-@Composable
-private fun FlightPhotoPreview(photo: FlightPhotoAttachment, onOpen: (String) -> Unit) {
-	val preview by produceState(initialValue = PhotoPreviewState(), key1 = photo.localPath) {
-		val loaded = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath)) }
-		value = PhotoPreviewState(loading = false, bitmap = loaded)
-	}
-	val bitmap = preview.bitmap
-	Box(
-		modifier = Modifier.fillMaxWidth().height(176.dp).padding(horizontal = 10.dp, vertical = 7.dp)
-			.clip(RoundedCornerShape(4.dp)).background(Color.Black).border(1.dp, FlightLine)
-			.clickable { onOpen(photo.id) },
-		contentAlignment = Alignment.Center
-	) {
-		if (bitmap != null) {
-			Image(
-				bitmap = bitmap.asImageBitmap(),
-				contentDescription = photo.fileName,
-				contentScale = ContentScale.Crop,
-				colorFilter = photoColorFilter(photo.imageAdjustments),
-				modifier = Modifier.fillMaxSize().graphicsLayer(rotationZ = photo.rotationDegrees.toFloat())
-			)
-		} else {
-			Text(
-				stringResource(
-					if (preview.loading) R.string.flight_mode_photo_preview_loading
-					else R.string.flight_mode_photo_preview_unavailable
-				),
-				color = if (preview.loading) FlightMuted else FlightWarning,
-				fontSize = 10.sp
-			)
-		}
-	}
+	Box(Modifier.fillMaxWidth().height(1.dp).background(FlightLine))
 }
 
 @Composable
@@ -2009,7 +1823,7 @@ private fun FlightPhotoFullscreen(
 }
 
 @Composable
-private fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSample?, trip: FlightTrip?) {
+internal fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSample?, trip: FlightTrip?) {
 	val fileSize = remember(photo.localPath) { runCatching { File(photo.localPath).length() }.getOrDefault(0L) }
 	val matchedTimestamp = sample?.timestampMillis?.takeIf { it > 0L }
 	Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp)) {
@@ -2134,12 +1948,12 @@ private fun PhotoMetadataLine(label: String, value: String, warning: Boolean = f
 	Box(Modifier.fillMaxWidth().height(1.dp).background(FlightLine.copy(alpha = 0.55f)))
 }
 
-private fun decodePhotoPreview(file: File): Bitmap? {
+internal fun decodePhotoPreview(file: File, maximumPixels: Int = MAXIMUM_PHOTO_PREVIEW_PIXELS): Bitmap? {
 	val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 	BitmapFactory.decodeFile(file.absolutePath, bounds)
 	if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 	var sampleSize = 1
-	while (max(bounds.outWidth, bounds.outHeight) / sampleSize > MAXIMUM_PHOTO_PREVIEW_PIXELS) sampleSize *= 2
+	while (max(bounds.outWidth, bounds.outHeight) / sampleSize > maximumPixels) sampleSize *= 2
 	val decoded = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sampleSize })
 		?: return null
 	val rotation = when (MediaMetadataUtils.getExifOrientation(file)) {
@@ -3064,7 +2878,7 @@ private fun FlightWindowScene(
 				sceneAspectRatio = size.width.toFloat() / size.height.coerceAtLeast(1)
 			}
 			.pointerInput(Unit) {
-				detectTransformGestures { _, pan, zoom, rotationDegrees ->
+				detectFineFlightTransforms { _, pan, zoom, rotationDegrees ->
 					val photoPresent = latestPhotoOverlay.photoId != null
 					when {
 						photoPresent && latestPhotoOverlay.gestureTarget == FlightWindowGestureTarget.PHOTO -> {
@@ -4412,7 +4226,7 @@ private fun FlightModePreview(state: FlightUiState) {
 		onPhotoAction = {}, onValidatePhotos = {}, onDiscardPhotos = {}, onSelectPhoto = {},
 		onAssociatePhotoAutomatically = {}, onAssociatePhotoAtCurrentReplay = {},
 		onClearPhotoAssociation = {}, onRotatePhoto = { _, _ -> },
-		onSetPhotoImageAdjustments = { _, _ -> }, onOpenPhotoOnMap = {}, onOpenPhotoInWindow = {},
+	onSetPhotoImageAdjustments = { _, _ -> }, onSetPhotoCalibration = { _, _ -> }, onPreparePhotoCalibration = {}, onOpenPhotoOnMap = {}, onOpenPhotoInWindow = {},
 		onSetWindowPhotoOpacity = {}, onSetWindowGestureTarget = {},
 		onTransformWindowPhoto = { _, _, _ -> }, onTransformLinkedWindowView = { _, _, _, _ -> },
 		onInitializeWindowPhotoViewport = { _, _ -> },

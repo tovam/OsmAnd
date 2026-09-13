@@ -1,5 +1,35 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_cal_photo">Repères photo</string>
+	<string name="flight_cal_map">Repères carte</string>
+	<string name="flight_cal_compare">Comparer</string>
+	<string name="flight_cal_window">Hublot 3D</string>
+	<string name="flight_cal_clear">Effacer ce repère</string>
+	<string name="flight_cal_pick_photo">Repère %1$d : touche la photo. Pince pour viser précisément. Image orientée EXIF, sans rotation manuelle.</string>
+	<string name="flight_cal_pick_map">Repère %1$d : touche le même lieu au sol. Carte vue du dessus, nord en haut.</string>
+	<string name="flight_cal_satellite">Satellite</string>
+	<string name="flight_cal_osmand">Carte OsmAnd</string>
+	<string name="flight_cal_fit">Recadrer</string>
+	<string name="flight_cal_original">Enregistrée</string>
+	<string name="flight_cal_estimated">Estimée</string>
+	<string name="flight_cal_overview">Vue ensemble</string>
+	<string name="flight_cal_need_scene">Préparation du relief à la position de la photo…</string>
+	<string name="flight_cal_point_details">Photo %1$s · carte %2$s · altitude %3$s</string>
+	<string name="flight_cal_alt_auto">Terrarium au calcul</string>
+	<string name="flight_cal_opacity">Photo</string>
+	<string name="flight_cal_legend">Orange : position enregistrée et trajet · violet : position estimée · cyan : repères</string>
+	<string name="flight_cal_result">Écart horizontal : %1$.0f m · altitude : %2$+.0f m · erreur RMS : %3$.2f px (aperçu)</string>
+	<string name="flight_cal_weak">Estimation fragile ou mauvais accord. Écarte les repères, varie leurs distances et vérifie leurs associations.</string>
+	<string name="flight_cal_uncertainty">Estimation locale, pas une position exacte. Altitude Terrarium, focale, distorsion et pointage limitent la précision. La position enregistrée reste intacte.</string>
+	<string name="flight_cal_need_association">Associe d’abord cette photo au trajet pour fournir une position initiale au calcul.</string>
+	<string name="flight_cal_fit_focal">Estimer aussi la focale</string>
+	<string name="flight_cal_cancel">Annuler le calcul</string>
+	<string name="flight_cal_solve">Calculer (%1$d/5)</string>
+	<string name="flight_cal_fov">Champ vertical fixe : %1$.1f°</string>
+	<string name="flight_cal_failed">Calcul impossible : %1$s</string>
+	<string name="flight_cal_pairs">%1$d repères</string>
+	<string name="flight_cal_map_missing">%1$d tuiles indisponibles. Essaie la carte OsmAnd ou un autre zoom.</string>
+	<string name="flight_cal_map_ready">Fond de carte z%1$d · satellite : Sentinel-2 cloudless / EOX / Copernicus · relief : Terrarium / Mapzen</string>
 <!--
 	README:
 	- The preferred way to help with translations is via https://hosted.weblate.org/engage/osmand/

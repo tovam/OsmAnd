@@ -63,7 +63,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		nativeMapOpacity: Float,
 		spatialPhoto: FlightSpatialPhotoOverlay?,
 		onRendererError: (String) -> Unit,
-		onRenderStats: (FlightTerrainRenderStats) -> Unit
+		onRenderStats: (FlightTerrainRenderStats) -> Unit,
+		inspection: FlightPhotoInspection? = null
 	) {
 		rendererErrorListener = onRendererError
 		renderStatsListener = onRenderStats
@@ -79,7 +80,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			showSatelliteQualityOverlay,
 			terrainOpacity,
 			nativeMapOpacity,
-			spatialPhoto
+			spatialPhoto,
+			inspection
 		)
 		requestRender()
 	}
@@ -97,6 +99,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var program = 0
 		private var shadowProgram = 0
 		private var photoProgram = 0
+		private var inspectionRenderer: FlightInspectionRenderer? = null
 		private var surfaceWidth = 1
 		private var surfaceHeight = 1
 		private var uploadedGeneration = Long.MIN_VALUE
@@ -184,11 +187,12 @@ class FlightTerrainView @JvmOverloads constructor(
 			showSatelliteQualityOverlay: Boolean,
 			terrainOpacity: Float,
 			nativeMapOpacity: Float,
-			spatialPhoto: FlightSpatialPhotoOverlay?
+			spatialPhoto: FlightSpatialPhotoOverlay?,
+			inspection: FlightPhotoInspection?
 		) {
 			// One immutable publication: no frame can mix origins, aircraft and camera revisions.
 			this.viewState = RenderViewState(
-				scene = scene, sample = sample,
+				scene = scene, sample = sample, inspection = inspection,
 				windowPlacement = windowPlacement.clamped(), windowLook = windowLook.clamped(),
 				altitudeOverrideMeters = altitudeOverrideMeters, spatialPhoto = spatialPhoto?.clamped(),
 				shadingEnabled = shadingEnabled, shadowIntensity = shadowIntensity.coerceIn(0f, 1f),
@@ -203,6 +207,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
 				shadowProgram = createProgram(SHADOW_VERTEX_SHADER, SHADOW_FRAGMENT_SHADER)
 				photoProgram = createProgram(PHOTO_VERTEX_SHADER, PHOTO_FRAGMENT_SHADER)
+				inspectionRenderer = FlightInspectionRenderer()
 				positionLocation = GLES20.glGetAttribLocation(program, "aPosition")
 				normalLocation = GLES20.glGetAttribLocation(program, "aNormal")
 				elevationLocation = GLES20.glGetAttribLocation(program, "aElevation")
@@ -297,8 +302,9 @@ class FlightTerrainView @JvmOverloads constructor(
 			// behind the photo and turned continuous drags into visible steps.
 			val currentWindowLook = currentViewState.windowLook
 			val currentSpatialPhoto = currentViewState.spatialPhoto
-			val latitude = currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
-			val longitude = currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
+			val inspection = currentViewState.inspection
+			val latitude = inspection?.camera?.eyeLatitude ?: currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
+			val longitude = inspection?.camera?.eyeLongitude ?: currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
 			val sun = FlightSunPosition.direction(
 				currentSample?.timestampMillis ?: System.currentTimeMillis(),
 				latitude,
@@ -344,7 +350,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			val reportedAltitude = currentViewState.altitudeOverrideMeters
 				?: currentSample?.altitudeMeters?.toFloat()
 				?: DEFAULT_FLIGHT_ALTITUDE_METERS
-			val altitude = max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
+			val altitude = inspection?.camera?.eyeAltitudeMeters ?: max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
 			val coordinates = FlightTerrainCoordinates(
 				currentScene.coordinateOriginLatitude,
 				currentScene.coordinateOriginLongitude
@@ -396,10 +402,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			val bearing = currentSample?.bearingDegrees ?: DEFAULT_BEARING_DEGREES
 			val geometry = currentWindowPlacement.geometry()
 			val viewAzimuth = Math.toRadians(
-				currentWindowPlacement.viewAzimuthDegrees(bearing, currentWindowLook).toDouble()
+				(inspection?.camera?.viewAzimuthDegrees ?: currentWindowPlacement.viewAzimuthDegrees(bearing, currentWindowLook)).toDouble()
 			)
-			val viewElevation = (geometry.elevationRadians + Math.toRadians(currentWindowLook.pitchDegrees.toDouble()))
-				.coerceIn(Math.toRadians(-89.0), Math.toRadians(45.0))
+			val viewElevation = inspection?.camera?.viewElevationDegrees?.let { Math.toRadians(it.toDouble()) }
+				?: (geometry.elevationRadians + Math.toRadians(currentWindowLook.pitchDegrees.toDouble()))
+					.coerceIn(Math.toRadians(-89.0), Math.toRadians(45.0))
 			val horizontalDirection = cos(viewElevation)
 			val directionX = (sin(viewAzimuth) * horizontalDirection).toFloat()
 			val directionY = sin(viewElevation).toFloat()
@@ -417,6 +424,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			// cancellation quantizes yaw/pitch even when touch input is continuous.
 			val view = DirectionalViewMatrix.create(camera, viewDirection, cameraUp)
 			val projection = windowProjection(currentWindowPlacement, currentScene.radiusKm)
+			inspection?.camera?.let { pose ->
+				Matrix.perspectiveM(projection, 0, pose.verticalFieldOfViewDegrees.coerceIn(8f,170f),
+					surfaceWidth.toFloat()/surfaceHeight, NEAR_PLANE_METERS,
+					max(MINIMUM_FAR_PLANE_METERS,currentScene.radiusKm*2200f))
+			}
 			val mvp = FloatArray(16)
 			Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
 
@@ -469,6 +481,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 			drawSpatialPhoto(currentScene, currentSpatialPhoto, mvp)
+			inspection?.let { inspectionRenderer?.draw(it, coordinates, camera, mvp) }
 			if (pendingTextureUploads.isNotEmpty()) requestFrame()
 		}
 
@@ -1257,7 +1270,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			val satelliteOpacity: Float = 0.92f,
 			val showSatelliteQualityOverlay: Boolean = false,
 			val terrainOpacity: Float = 0.70f,
-			val nativeMapOpacity: Float = 0.58f
+			val nativeMapOpacity: Float = 0.58f,
+			val inspection: FlightPhotoInspection? = null
 		)
 
 		private data class RenderMesh(

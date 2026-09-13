@@ -4,7 +4,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-class FlightTerrainCoordinates(centerLatitude: Double, centerLongitude: Double) {
+class FlightTerrainCoordinates(val centerLatitude: Double, val centerLongitude: Double) {
 
 	private val latitudeRadians = Math.toRadians(centerLatitude)
 	private val longitudeRadians = Math.toRadians(centerLongitude)
@@ -73,6 +73,32 @@ class FlightTerrainCoordinates(centerLatitude: Double, centerLongitude: Double) 
 			(primeVerticalRadius + elevationMeters) * cosLatitude * sin(longitude),
 			(primeVerticalRadius * (1.0 - WGS84_ECCENTRICITY_SQUARED) + elevationMeters) * sinLatitude
 		)
+	}
+
+	/** Inverse of toLocal, including ellipsoid curvature (not a flat lat/lon offset). */
+	fun toGeographic(local: DoubleArray): DoubleArray {
+		val east = local[0]
+		val up = local[1]
+		val north = -local[2]
+		val x = origin[0] - sinLongitude * east - sinLatitude * cosLongitude * north + cosLatitude * cosLongitude * up
+		val y = origin[1] + cosLongitude * east - sinLatitude * sinLongitude * north + cosLatitude * sinLongitude * up
+		val z = origin[2] + cosLatitude * north + sinLatitude * up
+		val p = kotlin.math.hypot(x, y)
+		var latitude = kotlin.math.atan2(z, p * (1 - WGS84_ECCENTRICITY_SQUARED))
+		repeat(10) {
+			val n = WGS84_SEMI_MAJOR_AXIS / sqrt(1 - WGS84_ECCENTRICITY_SQUARED * sin(latitude) * sin(latitude))
+			latitude = kotlin.math.atan2(z + WGS84_ECCENTRICITY_SQUARED * n * sin(latitude), p)
+		}
+		val n = WGS84_SEMI_MAJOR_AXIS / sqrt(1 - WGS84_ECCENTRICITY_SQUARED * sin(latitude) * sin(latitude))
+		val altitude = if (kotlin.math.abs(cos(latitude)) > 1e-8) p / cos(latitude) - n
+			else kotlin.math.abs(z) - n * (1 - WGS84_ECCENTRICITY_SQUARED)
+		return doubleArrayOf(Math.toDegrees(latitude), Math.toDegrees(kotlin.math.atan2(y, x)), altitude)
+	}
+
+	fun vectorFromLocal(latitude: Double, longitude: Double, vector: FloatArray): FloatArray {
+		fun dot(basis: FloatArray) = basis.indices.sumOf { (basis[it] * vector[it]).toDouble() }.toFloat()
+		return floatArrayOf(dot(vectorToLocal(latitude, longitude, 1f, 0f, 0f)),
+			dot(vectorToLocal(latitude, longitude, 0f, 1f, 0f)), dot(vectorToLocal(latitude, longitude, 0f, 0f, 1f)))
 	}
 
 	companion object {

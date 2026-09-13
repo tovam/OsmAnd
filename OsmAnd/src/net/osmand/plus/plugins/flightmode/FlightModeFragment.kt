@@ -163,6 +163,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onClearPhotoAssociation = viewModel::clearPhotoAssociation,
 					onRotatePhoto = viewModel::rotatePhoto,
 					onSetPhotoImageAdjustments = viewModel::setPhotoImageAdjustments,
+					onSetPhotoCalibration = viewModel::setPhotoCalibration,
+					onPreparePhotoCalibration = viewModel::preparePhotoCalibration,
 					onOpenPhotoOnMap = viewModel::openPhotoOnMap,
 					onOpenPhotoInWindow = viewModel::openPhotoInWindow,
 					onSetWindowPhotoOpacity = viewModel::setWindowPhotoOpacity,
