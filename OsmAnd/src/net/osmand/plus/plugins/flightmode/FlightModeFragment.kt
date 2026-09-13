@@ -88,8 +88,10 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					viewModel.showPage(FlightPage.WINDOW)
 				}
 				FlightPage.WINDOW, FlightPage.SATELLITE, FlightPage.SENSORS, FlightPage.PHOTO,
-				FlightPage.JOURNEYS, FlightPage.LIVE -> viewModel.showPage(FlightPage.MAP)
-				FlightPage.MAP, FlightPage.PREPARE -> close()
+				FlightPage.LIVE -> viewModel.showPage(FlightPage.MAP)
+				FlightPage.PREPARE -> viewModel.showPage(FlightPage.JOURNEYS)
+				FlightPage.JOURNEYS -> if (viewModel.uiState.trip == null) close() else viewModel.showPage(FlightPage.MAP)
+				FlightPage.MAP -> close()
 			}
 		}
 	}
@@ -102,6 +104,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
 		return ComposeView(requireContext()).apply {
+			layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 			setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 			setContent {
 				FlightModeScreen(
@@ -301,6 +304,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		showPoints: Boolean,
 		photos: List<FlightPhotoAttachment>
 	) {
+		// Photo editing must not rebuild the hidden native flight layer on every finger movement.
+		if (viewModel.uiState.page != FlightPage.MAP) return
 		if (viewModel.uiState.sessionMode != FlightSessionMode.LIVE) environmentRecorder?.stop()
 		replayMapLayer?.update(trip, sample, showPoints, photos)
 		replayMapLayer?.updateHypothesis(if(viewModel.uiState.sessionMode==FlightSessionMode.LIVE) viewModel.uiState.plan else null,

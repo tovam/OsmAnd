@@ -33,6 +33,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private val journeyStore = FlightJourneyStore(application)
 	private var replayEngine: FlightReplayEngine? = null
 	private var storageJob: Job? = null
+	private var journeyListJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var photoPersistenceJob: Job? = null
 	private val liveSamples = mutableListOf<FlightSample>()
@@ -93,7 +94,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				FlightStop(application.getString(net.osmand.plus.R.string.flight_plan_arrival)))),
 			profile = FlightProfilePlanner.build(FlightPlan(emptyList())),
 			windowPlacement = windowPlacementStore.load(),
-			savedJourneys = journeyStore.list(),
+			savedJourneys = emptyList(),
 			journeyMessage = application.getSharedPreferences(FlightRecordingService.PREFS,0).getString("error",null)
 		)
 	)
@@ -110,6 +111,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	init {
+		refreshSavedJourneys()
 		refreshStorageUsage()
 		viewModelScope.launch {
 			FlightRecordingService.state.collect { live ->
@@ -197,7 +199,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				else FlightPlan(listOf(FlightStop(app.getString(net.osmand.plus.R.string.flight_plan_departure)),
 					FlightStop(app.getString(net.osmand.plus.R.string.flight_plan_arrival))),preparation=FlightPreparation())
 				simulationOriginal=null;replayEngine=null;terrainStreamingEngine.reset()
-				uiState=FlightUiState(plan=plan,profile=FlightProfilePlanner.build(plan),
+				uiState=FlightUiState(page=FlightPage.PREPARE,plan=plan,profile=FlightProfilePlanner.build(plan),
 					windowPlacement=uiState.windowPlacement,savedJourneys=withContext(Dispatchers.IO){journeyStore.list()},
 					offlineAssets=if(repeatRoute)uiState.offlineAssets else FlightOfflineAssets())
 			} catch(e:Exception) { uiState=uiState.copy(journeyMessage=e.message) }
@@ -220,7 +222,19 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			uiState = uiState.copy(page = page)
 			if (page == FlightPage.WINDOW) scheduleTerrainDetailFocus()
 		}
-		if (page == FlightPage.JOURNEYS) refreshStorageUsage()
+		if (page == FlightPage.JOURNEYS) { refreshSavedJourneys(); refreshStorageUsage() }
+	}
+
+	private fun refreshSavedJourneys() {
+		journeyListJob?.cancel()
+		uiState = uiState.copy(savedJourneysLoading = true)
+		journeyListJob = viewModelScope.launch {
+			try {
+				val summaries = withContext(Dispatchers.IO) { journeyStore.list() }
+				uiState = uiState.copy(savedJourneys = summaries, savedJourneysLoading = false)
+			} catch (e: CancellationException) { throw e }
+			catch (e: Exception) { uiState = uiState.copy(journeyMessage = e.message, savedJourneysLoading = false) }
+		}
 	}
 
 	fun refreshStorageUsage() {
@@ -548,8 +562,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			loadingTrip = false,
 			tripLoadError = null,
 			duplicateJourneyWarning = null,
-			savedJourneys = journeyStore.list()
+			savedJourneys = uiState.savedJourneys
 		)
+		refreshSavedJourneys()
 		firstSnapshot?.sample?.let(::requestTerrain)
 		if (hasOfflineCorridorSource()) scheduleAutomaticOfflinePreload()
 	}
@@ -1095,10 +1110,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					journeyCreatedAtMillis = saved.createdAtMillis,
 					offlineAssets = saved.offlineAssets,
 					journeyDirty = false,
-					savedJourneys = journeyStore.list(),
+					savedJourneys = (uiState.savedJourneys.filter { it.id != saved.id } +
+						FlightJourneySummary(saved.id, saved.name, saved.updatedAtMillis, saved.trip.samples.size, saved.photos.size))
+						.sortedByDescending { it.updatedAtMillis },
 					journeyMessage = if (showConfirmation) "Journal de vol enregistré" else uiState.journeyMessage
 				)
-				refreshStorageUsage()
+				if (showConfirmation || uiState.page == FlightPage.JOURNEYS) refreshStorageUsage()
 			}.onFailure { error ->
 				uiState = uiState.copy(
 					journeyMessage = error.message ?: "Enregistrement automatique impossible"

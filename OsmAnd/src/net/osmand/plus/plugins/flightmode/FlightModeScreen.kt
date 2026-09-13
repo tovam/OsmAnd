@@ -303,7 +303,8 @@ fun FlightModeScreen(
 				FlightPage.LIVE -> FlightLiveScreen(state,onPageChange,onStartLive,onStopLive,onToggleLiveMicrophone,onPhotoAction)
 				FlightPage.PREPARE -> key(state.journeyId) { FlightPlanningScreen(state,onClose,onUpdatePlan,
 					onSavePreparation,onPreloadPreparation,onCancelPreparationDownload,onRehearsePreparation,
-					onStartLive,onPreparationPermissions,onImportTrip,onSelectInternalTrack,onOpenJourney,onNewPreparation) }
+					onStartLive,onPreparationPermissions,onImportTrip,onSelectInternalTrack,onOpenJourney,onNewPreparation,
+					{ onPageChange(FlightPage.JOURNEYS) }) }
 				FlightPage.MAP -> MapScreen(
 					state = state,
 					mapView = mapView,
@@ -1989,7 +1990,24 @@ private fun JourneysScreen(
 ) {
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_journeys), state.sessionMode, onClose)
+		Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+			PlanAction(stringResource(R.string.flight_plan_title), { onPageChange(FlightPage.PREPARE) })
+			PlanAction(stringResource(R.string.flight_live_title), { onPageChange(FlightPage.LIVE) })
+			PlanAction(stringResource(R.string.flight_mode_load_osmand_track), onSelectInternalTrack)
+			PlanAction(stringResource(R.string.flight_mode_load_gpx_file), onImport)
+		}
 		LazyColumn(Modifier.weight(1f)) {
+			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, state.savedJourneys.size)) }
+			if (state.savedJourneysLoading) {
+				item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+			}
+			if (state.savedJourneys.isEmpty() && !state.savedJourneysLoading) {
+				item { Text(stringResource(R.string.flight_mode_no_saved_journey), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
+			} else {
+				itemsIndexed(state.savedJourneys) { _, journey ->
+					SavedJourneyRow(journey = journey, onOpen = onOpen)
+				}
+			}
 			item { SectionTitle(stringResource(R.string.flight_mode_current_journey)) }
 			item {
 				BasicTextField(
@@ -2077,14 +2095,7 @@ private fun JourneysScreen(
 						if (usage != null) FlightStorageUsageTable(usage)
 					}
 			}
-			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, state.savedJourneys.size)) }
-			if (state.savedJourneys.isEmpty()) {
-				item { Text(stringResource(R.string.flight_mode_no_saved_journey), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
-			} else {
-				itemsIndexed(state.savedJourneys) { _, journey ->
-					SavedJourneyRow(journey = journey, onOpen = onOpen)
-				}
-			}
+
 		}
 		FlightBottomNavigation(FlightPage.JOURNEYS, onPageChange)
 	}
