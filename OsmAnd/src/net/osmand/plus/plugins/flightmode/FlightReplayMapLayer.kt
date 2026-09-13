@@ -688,8 +688,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	companion object {
 		private const val MAXIMUM_NATIVE_POINTS = 1_200
 		private const val MAXIMUM_ROUTE_POINTS = 4_000
-		private const val TUBE_SLEEVE_WIDTH_DP = 10.5
-		private const val TUBE_CORE_WIDTH_DP = 5.5
+		private const val TUBE_SLEEVE_WIDTH_DP = 2.1
+		private const val TUBE_CORE_WIDTH_DP = 2.1 // One quarter of the visible 8.4 dp point diameter.
 		private const val POINT_BITMAP_DP = 10f
 		private const val AIRCRAFT_FALLBACK_BITMAP_ASSET = "flightmode/aircraft/flight_airliner_black.png"
 		private const val AIRCRAFT_MINIMUM_ZOOM = 3.0
@@ -717,8 +717,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val AIRCRAFT_MARKER_ID = 1_999_999_999
 		private const val PHOTO_MARKER_ID_START = 1_900_000_000
 		private val TUBE_SLEEVE_COLOR = Color.argb(230, 6, 15, 20)
-		private val TUBE_CORE_COLOR = Color.rgb(255, 145, 58)
-		private val POINT_COLOR = TUBE_CORE_COLOR
+		private val TUBE_CORE_COLOR = Color.BLACK
+		private val POINT_COLOR = Color.rgb(255, 145, 58)
 		private val PHOTO_COLOR = Color.rgb(123, 224, 163)
 		private val TETHER_COLOR = Color.rgb(255, 58, 58)
 		private val TETHER_SLEEVE_COLOR = Color.argb(220, 72, 0, 0)
