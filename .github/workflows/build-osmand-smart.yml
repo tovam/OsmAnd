@@ -78,6 +78,11 @@ jobs:
           cp android/OsmAnd/patches/osmand-core/FlightTubeMesh.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/FlightVectorLineBridge.cpp core/wrappers/java/
 
+      - name: Validate patched JNI CMake syntax
+        run: |
+          cmake -DWRAPPER_FILE="${GITHUB_WORKSPACE}/core/wrappers/java/CMakeLists.txt" \
+            -P android/OsmAnd/test/native/CheckFlightJniCmake.cmake
+
       - name: Test flight tube geometry
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \

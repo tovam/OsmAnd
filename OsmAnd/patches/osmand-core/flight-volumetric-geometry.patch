@@ -159,7 +159,7 @@ diff --git a/src/Map/MapMarker_P.cpp b/src/Map/MapMarker_P.cpp
 diff --git a/wrappers/java/CMakeLists.txt b/wrappers/java/CMakeLists.txt
 --- a/wrappers/java/CMakeLists.txt
 +++ b/wrappers/java/CMakeLists.txt
-@@ -35,9 +35,9 @@
+@@ -35,9 +35,10 @@
  set(target_specific_public_libraries "")
  
  # OsmAndCore JNI-only library
@@ -169,10 +169,11 @@ diff --git a/wrappers/java/CMakeLists.txt b/wrappers/java/CMakeLists.txt
 +add_library(OsmAndCoreJNI SHARED
 +	${swig_generated_cpp}
 +	FlightVectorLineBridge.cpp
++)
  target_compile_definitions(OsmAndCoreJNI
  	PRIVATE
  		-DOSMAND_JNI_EXPORTS
-@@ -104,9 +104,9 @@
+@@ -104,9 +105,10 @@
  endif()
  
  # OsmAndCore+JNI library
@@ -182,6 +183,7 @@ diff --git a/wrappers/java/CMakeLists.txt b/wrappers/java/CMakeLists.txt
 +add_library(OsmAndCoreWithJNI SHARED
 +	${swig_generated_cpp}
 +	FlightVectorLineBridge.cpp
++)
  target_compile_definitions(OsmAndCoreWithJNI
  	PRIVATE
  		-DOSMAND_JNI_EXPORTS
