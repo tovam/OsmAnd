@@ -10,6 +10,7 @@ import android.opengl.Matrix
 import android.util.AttributeSet
 import net.osmand.plus.media.MediaMetadataUtils
 import net.osmand.util.PhotoPlaneGeometry
+import net.osmand.util.ResourceTransaction
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -87,23 +88,9 @@ class FlightTerrainView @JvmOverloads constructor(
 	) : GLSurfaceView.Renderer {
 
 		@Volatile
-		private var scene: FlightTerrainScene? = null
-		@Volatile
-		private var sample: FlightSample? = null
-		@Volatile
 		private var viewState = RenderViewState()
-		@Volatile
-		private var shadingEnabled: Boolean = true
-		@Volatile
-		private var shadowIntensity: Float = 0.85f
-		@Volatile
-		private var satelliteOpacity: Float = 0.92f
-		@Volatile
-		private var showSatelliteQualityOverlay: Boolean = false
-		@Volatile
-		private var terrainOpacity: Float = 0.70f
-		@Volatile
-		private var nativeMapOpacity: Float = 0.58f
+		private var displayedScene: FlightTerrainScene? = null
+		private var retryUploadAfterNanos = 0L
 		private var program = 0
 		private var shadowProgram = 0
 		private var photoProgram = 0
@@ -191,20 +178,16 @@ class FlightTerrainView @JvmOverloads constructor(
 			nativeMapOpacity: Float,
 			spatialPhoto: FlightSpatialPhotoOverlay?
 		) {
-			this.scene = scene
-			this.sample = sample
+			// One immutable publication: no frame can mix origins, aircraft and camera revisions.
 			this.viewState = RenderViewState(
-				windowPlacement = windowPlacement.clamped(),
-				windowLook = windowLook.clamped(),
-				altitudeOverrideMeters = altitudeOverrideMeters,
-				spatialPhoto = spatialPhoto?.clamped()
+				scene = scene, sample = sample,
+				windowPlacement = windowPlacement.clamped(), windowLook = windowLook.clamped(),
+				altitudeOverrideMeters = altitudeOverrideMeters, spatialPhoto = spatialPhoto?.clamped(),
+				shadingEnabled = shadingEnabled, shadowIntensity = shadowIntensity.coerceIn(0f, 1f),
+				satelliteOpacity = satelliteOpacity.coerceIn(0f, 1f),
+				showSatelliteQualityOverlay = showSatelliteQualityOverlay,
+				terrainOpacity = terrainOpacity.coerceIn(0f, 1f), nativeMapOpacity = nativeMapOpacity.coerceIn(0f, 1f)
 			)
-			this.shadingEnabled = shadingEnabled
-			this.shadowIntensity = shadowIntensity.coerceIn(0f, 1f)
-			this.satelliteOpacity = satelliteOpacity.coerceIn(0f, 1f)
-			this.showSatelliteQualityOverlay = showSatelliteQualityOverlay
-			this.terrainOpacity = terrainOpacity.coerceIn(0f, 1f)
-			this.nativeMapOpacity = nativeMapOpacity.coerceIn(0f, 1f)
 		}
 
 		override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -252,6 +235,8 @@ class FlightTerrainView @JvmOverloads constructor(
 				shadowMvpLocation = GLES20.glGetUniformLocation(shadowProgram, "uLightMvp")
 				shadowAvailable = createShadowResources()
 				uploadedGeneration = Long.MIN_VALUE
+				displayedScene = null
+				retryUploadAfterNanos = 0L
 				renderMeshes = emptyList()
 				geometryCache.clear()
 				textureCache.clear()
@@ -286,9 +271,15 @@ class FlightTerrainView @JvmOverloads constructor(
 				GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 				return
 			}
-			val currentScene = scene
-			val currentSample = sample
 			val currentViewState = viewState
+			var currentScene = currentViewState.scene
+			val currentSample = currentViewState.sample
+			val shadingEnabled = currentViewState.shadingEnabled
+			val shadowIntensity = currentViewState.shadowIntensity
+			val satelliteOpacity = currentViewState.satelliteOpacity
+			val showSatelliteQualityOverlay = currentViewState.showSatelliteQualityOverlay
+			val terrainOpacity = currentViewState.terrainOpacity
+			val nativeMapOpacity = currentViewState.nativeMapOpacity
 			val currentWindowPlacement = currentViewState.windowPlacement
 			// Camera, cabin overlays and the spatial photo must consume the exact same
 			// gesture pose. A second renderer-only interpolation made the terrain lag
@@ -308,17 +299,21 @@ class FlightTerrainView @JvmOverloads constructor(
 				clearDefaultFrameBuffer(sky)
 				return
 			}
-			if (uploadedGeneration != currentScene.generation) {
+			if (uploadedGeneration != currentScene.generation && System.nanoTime() >= retryUploadAfterNanos) {
 				try {
 					replaceRenderMeshes(currentScene.meshes)
 					uploadedGeneration = currentScene.generation
+					displayedScene = currentScene
+					retryUploadAfterNanos = 0L
 				} catch (error: RuntimeException) {
-					releaseRenderMeshes()
-					uploadedGeneration = currentScene.generation
-					onError(error.message ?: "Mise à jour GPU du relief impossible")
-					clearDefaultFrameBuffer(sky)
-					return
+					// Keep every last-good resource and its coordinate origin; retry this revision.
+					retryUploadAfterNanos = System.nanoTime() + 1_000_000_000L
+					onError(error.message ?: "Terrain GPU upload failed")
 				}
+			}
+			if (uploadedGeneration != currentScene.generation) {
+				currentScene = displayedScene ?: currentScene
+				requestFrame()
 			}
 			processTextureUploads()
 			publishRenderStats()
@@ -1000,9 +995,13 @@ class FlightTerrainView @JvmOverloads constructor(
 
 		private fun replaceRenderMeshes(meshes: List<FlightTerrainMesh>) {
 			val activeTileIds = meshes.mapTo(hashSetOf()) { it.tileId }
-			renderMeshes = meshes.map { mesh ->
+			val transaction = ResourceTransaction(geometryCache) { value: CachedGeometry -> releaseGeometry(value) }
+			val replacements = try {
+				meshes.map { mesh ->
+				val geometry = cachedGeometry(mesh)
+				if (geometryCache[mesh.tileId] !== geometry) transaction.stage(mesh.tileId, geometry)
 				RenderMesh(
-					geometry = cachedGeometry(mesh),
+					geometry = geometry,
 					refinementLevel = mesh.refinementLevel,
 					terrainAvailable = mesh.terrainAvailable,
 					satelliteTexturePath = mesh.satelliteTexturePath,
@@ -1010,7 +1009,13 @@ class FlightTerrainView @JvmOverloads constructor(
 					satelliteTextureTier = mesh.satelliteTextureTier,
 					nativeMapTexturePath = mesh.nativeMapTexturePath
 				)
+				}
+			} catch (failure: Throwable) {
+				transaction.close()
+				throw failure
 			}
+			transaction.commit()
+			renderMeshes = replacements
 			evictGeometryCache(activeTileIds)
 
 			val wantedPaths = renderMeshes.flatMapTo(linkedSetOf()) { mesh ->
@@ -1041,7 +1046,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			if (cached != null && cached.sourceVertices === mesh.vertices && cached.sourceIndices === mesh.indices) {
 				return cached
 			}
-			if (cached != null) releaseGeometry(cached)
+			require(mesh.vertices.size % 9 == 0 && mesh.vertices.all(Float::isFinite)) { "Invalid terrain vertices" }
+			require(mesh.indices.all { (it.toInt() and 0xffff) < mesh.vertices.size / 9 }) { "Invalid terrain indices" }
 			val vertexBuffer = ByteBuffer.allocateDirect(mesh.vertices.size * FLOAT_BYTES)
 				.order(ByteOrder.nativeOrder())
 				.asFloatBuffer()
@@ -1056,6 +1062,7 @@ class FlightTerrainView @JvmOverloads constructor(
 					put(mesh.indices)
 					position(0)
 				}
+			repeat(16) { if (GLES20.glGetError() == GLES20.GL_NO_ERROR) return@repeat }
 			val bufferIds = IntArray(2)
 			GLES20.glGenBuffers(bufferIds.size, bufferIds, 0)
 			if (bufferIds.any { it == 0 }) {
@@ -1079,6 +1086,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			)
 			GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
 			GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+			val uploadError = GLES20.glGetError()
+			if (uploadError != GLES20.GL_NO_ERROR) {
+				GLES20.glDeleteBuffers(bufferIds.size, bufferIds, 0)
+				throw IllegalStateException("Terrain GPU upload failed: $uploadError")
+			}
 			return CachedGeometry(
 				tileId = mesh.tileId,
 				sourceVertices = mesh.vertices,
@@ -1087,7 +1099,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				indexBufferId = bufferIds[1],
 				indexCount = mesh.indices.size,
 				bytes = mesh.vertices.size.toLong() * FLOAT_BYTES + mesh.indices.size.toLong() * SHORT_BYTES
-			).also { geometryCache[mesh.tileId] = it }
+			)
 		}
 
 		private fun enqueueTexture(path: String?) {
@@ -1248,7 +1260,15 @@ class FlightTerrainView @JvmOverloads constructor(
 			val windowPlacement: FlightWindowPlacement = FlightWindowPlacement(),
 			val windowLook: FlightWindowLook = FlightWindowLook(),
 			val altitudeOverrideMeters: Float? = null,
-			val spatialPhoto: FlightSpatialPhotoOverlay? = null
+			val spatialPhoto: FlightSpatialPhotoOverlay? = null,
+			val scene: FlightTerrainScene? = null,
+			val sample: FlightSample? = null,
+			val shadingEnabled: Boolean = true,
+			val shadowIntensity: Float = 0.85f,
+			val satelliteOpacity: Float = 0.92f,
+			val showSatelliteQualityOverlay: Boolean = false,
+			val terrainOpacity: Float = 0.70f,
+			val nativeMapOpacity: Float = 0.58f
 		)
 
 		private data class RenderMesh(
