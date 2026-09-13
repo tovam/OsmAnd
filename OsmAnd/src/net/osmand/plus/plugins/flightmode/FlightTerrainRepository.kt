@@ -16,6 +16,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.osmand.osm.io.NetworkUtils
 import net.osmand.plus.OsmandApplication
 import net.osmand.plus.Version
@@ -39,6 +41,10 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	private val satelliteDirectory = File(app.filesDir, FlightSatelliteSource.CACHE_DIRECTORY)
 	private val satelliteRenderDirectory = File(app.filesDir, FlightSatelliteSource.RENDER_CACHE_DIRECTORY)
 	private val nativeMapTextureRepository = FlightNativeMapTextureRepository(app)
+	private val assetScheduler = FlightAssetScheduler()
+	fun close() = assetScheduler.close()
+	fun cancelPendingAssets() = assetScheduler.reconcile(emptyList())
+
 	private val assetLocks = ConcurrentHashMap<String, ReentrantLock>()
 	private val decodedTerrainCache = object : LinkedHashMap<TerrainTileId, TerrariumTile>(
 		MAXIMUM_DECODED_TERRAIN_TILES + 1,
@@ -109,7 +115,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		previousScene: FlightTerrainScene? = null,
 		onScene: suspend (FlightTerrainScene) -> Unit = {},
 		onStatus: suspend (FlightTerrainStatus) -> Unit
-	): FlightTerrainScene {
+	): FlightTerrainScene = coroutineScope {
 		onStatus(FlightTerrainStatus(phase = FlightTerrainPhase.PLANNING))
 		val plan = runInterruptible(Dispatchers.Default) {
 			FlightTerrainTilePlanner.scenePlan(latitude, longitude, radiusKm)
@@ -276,6 +282,40 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			}
 		}
 
+		val coarseWork = orderedTiles.filterNot(tiles::containsKey).map { tile ->
+			FlightAssetScheduler.Work(FlightAssetScheduler.Key(tile), 1024L * 1024L) { loadTerrainTile(tile) }
+		}
+		val extraWork = buildList {
+			orderedTiles.filterNot(standardTexturePaths::containsKey).forEach { tile ->
+				add(FlightAssetScheduler.Work(FlightAssetScheduler.Key(tile, 0), 1024L * 1024L) {
+					loadStandardSatelliteTexture(tile, satelliteDownloadsEnabled.get())
+				})
+			}
+			requestedRefinementTiles.filterNot(refinementTiles::containsKey).forEach { tile ->
+				add(FlightAssetScheduler.Work(FlightAssetScheduler.Key(tile), 1024L * 1024L) { loadTerrainTile(tile) })
+			}
+			orderedTiles.forEach { tile ->
+				val tier = targetTierByTile.getValue(tile)
+				val quality = FlightTerrainLodPolicy.satelliteQuality(tier)
+				if (quality != null && quality != FlightSatelliteQuality.STANDARD &&
+					(detailedTextureTiers[tile]?.ordinal ?: -1) < tier.ordinal) {
+					add(FlightAssetScheduler.Work(FlightAssetScheduler.Key(tile, quality.zoomDelta), 128L * 1024L * 1024L) {
+						loadDetailedSatelliteTexture(tile, quality, satelliteDownloadsEnabled.get())
+					})
+				}
+			}
+		}.sortedWith(compareBy({ tileNearestDistanceKm(it.key.tile, latitude, longitude) }, { it.reservedBytes }))
+		// Immediate nearby coarse coverage, then a reserved coarse lane interleaved
+		// with refinements/imagery. A slow distant tile cannot block the entire next phase.
+		assetScheduler.reconcile(buildList {
+			addAll(coarseWork.take(9))
+			val rest = coarseWork.drop(9)
+			for (index in 0 until maxOf(rest.size, extraWork.size)) {
+				rest.getOrNull(index)?.let(::add)
+				extraWork.getOrNull(index)?.let(::add)
+			}
+		})
+
 		suspend fun <T> interruptibleResult(block: () -> T): Result<T> = try {
 			Result.success(runInterruptible(Dispatchers.IO) { block() })
 		} catch (error: CancellationException) {
@@ -385,7 +425,21 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				geometryCache = geometryCache,
 				geometryGeneration = sceneGeometryGeneration(tiles.keys, activeGeometryQuads),
 				includePlaceholders = true,
-				workerCount = geometryWorkerCount
+				workerCount = geometryWorkerCount,
+				onPartialScene = { partial ->
+					val retained = (latestScene ?: previousScene)?.takeIf {
+						it.coordinateOriginLatitude == origin.first && it.coordinateOriginLongitude == origin.second
+					}
+					val finished = partial.meshes.mapTo(hashSetOf()) { it.tileId }
+					val previousByTile = retained?.meshes.orEmpty().associateBy { it.tileId }
+					val safeMeshes = partial.meshes.map { mesh ->
+						if (mesh.terrainAvailable) mesh else previousByTile[mesh.tileId]
+							?.takeIf { it.terrainAvailable } ?: mesh
+					}
+					val progressive = partial.copy(meshes = safeMeshes +
+						retained?.meshes.orEmpty().filter { it.tileId !in finished })
+					onScene(progressive)
+				}
 			)
 		}
 
@@ -442,14 +496,15 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			)
 		}
 
+		val publicationLock = Mutex()
 		suspend fun publishProgressiveScene(
 			force: Boolean = false,
 			retainPreviousCoverage: Boolean = true
-		) {
+		) = publicationLock.withLock {
 			val now = System.nanoTime()
 			val enoughNewTiles = visualUpdates - lastPublishedVisualUpdates >= SCENE_PUBLISH_TILE_BATCH
 			val enoughTime = now - lastScenePublishNanos >= SCENE_PUBLISH_INTERVAL_NANOS
-			if (!force && latestScene != null && !enoughNewTiles && !enoughTime) return
+			if (!force && latestScene != null && !enoughNewTiles && !enoughTime) return@withLock
 			val built = withRefinementMeshes(
 				baseScene = buildBaseScene(),
 				retainPreviousRefinements = true
@@ -484,7 +539,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			} else built
 			lastScenePublishNanos = now
 			lastPublishedVisualUpdates = visualUpdates
-			onScene(latestScene ?: return)
+			onScene(latestScene ?: return@withLock)
 		}
 
 		onStatus(status(FlightTerrainPhase.DOWNLOADING, "Cache local et relief…"))
@@ -519,7 +574,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						results.send(
 							TerrainElevationResult(
 								request,
-								interruptibleResult { loadTerrainTile(request.tileId) }
+								assetScheduler.await<LoadedTerrainTile>(FlightAssetScheduler.Key(request.tileId))
 							)
 						)
 					}
@@ -562,14 +617,15 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			passFailures
 		}
 
-		var pendingBaseRequests = baseTerrainRequests
-		var baseAttempt = 1
-		while (pendingBaseRequests.isNotEmpty() && baseAttempt <= BASE_TERRAIN_MAX_ATTEMPTS) {
-			pendingBaseRequests = loadBaseTerrainPass(pendingBaseRequests, baseAttempt)
-			baseAttempt++
+		val nearFailures = loadBaseTerrainPass(baseTerrainRequests.take(9), 1)
+		val remainingBase = async {
+			var pending = baseTerrainRequests.drop(9) + nearFailures
+			var attempt = 1
+			while (pending.isNotEmpty() && attempt <= BASE_TERRAIN_MAX_ATTEMPTS) {
+				pending = loadBaseTerrainPass(pending, attempt++)
+			}
+			failed += pending.size
 		}
-		failed += pendingBaseRequests.size
-		if (tiles.isEmpty()) throw IOException("Aucune tuile de relief disponible")
 		publishProgressiveScene(force = true, retainPreviousCoverage = true)
 		onStatus(
 			status(
@@ -599,7 +655,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			}
 			.sortedWith(TERRAIN_WORK_COMPARATOR)
 		val standardRequests = orderedTiles
-			.filter { it in tiles && it !in standardTexturePaths }
+			.filter { it !in standardTexturePaths }
 			.map { tileId ->
 				SatelliteTextureWork(
 					tileId = tileId,
@@ -613,7 +669,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			val tier = targetTierByTile[tileId] ?: return@mapNotNull null
 			val quality = FlightTerrainLodPolicy.satelliteQuality(tier) ?: return@mapNotNull null
 			val residentTier = detailedTextureTiers[tileId]
-			if (quality == FlightSatelliteQuality.STANDARD || tileId !in tiles ||
+			if (quality == FlightSatelliteQuality.STANDARD ||
 				residentTier?.ordinal?.let { it >= tier.ordinal } == true
 			) {
 				null
@@ -653,7 +709,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						results.send(
 							TerrainElevationResult(
 								request,
-								interruptibleResult { loadTerrainTile(request.tileId) }
+								assetScheduler.await<LoadedTerrainTile>(FlightAssetScheduler.Key(request.tileId))
 							)
 						)
 					}
@@ -665,12 +721,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						results.send(
 							SatelliteTextureResult(
 								request,
-								interruptibleResult {
-									loadStandardSatelliteTexture(
-										request.tileId,
-										satelliteDownloadsEnabled.get()
-									)
-								}
+								assetScheduler.await<LoadedSatelliteTexture>(FlightAssetScheduler.Key(request.tileId, 0))
 							)
 						)
 					}
@@ -682,13 +733,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						results.send(
 							SatelliteTextureResult(
 								request,
-								interruptibleResult {
-									loadDetailedSatelliteTexture(
-										request.tileId,
-										request.quality,
-										satelliteDownloadsEnabled.get()
-									)
-								}
+								assetScheduler.await<LoadedSatelliteTexture>(FlightAssetScheduler.Key(request.tileId, request.quality.zoomDelta))
 							)
 						)
 					}
@@ -787,13 +832,15 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		} else {
 			FlightNativeMapTextureResult(emptyMap(), 0)
 		}
+		remainingBase.await()
+		if (tiles.isEmpty()) throw IOException("No terrain tile available")
 		val finalBaseScene = buildBaseScene(
 			nativeMapTexturePaths = nativeMapResult.texturePaths,
 			nativeMapFailedTiles = nativeMapResult.failedTiles
 		)
 		val finalScene = withRefinementMeshes(finalBaseScene, retainPreviousRefinements = false)
 		onScene(finalScene)
-		return finalScene
+		return@coroutineScope finalScene
 	}
 
 	private fun refinementLayers(

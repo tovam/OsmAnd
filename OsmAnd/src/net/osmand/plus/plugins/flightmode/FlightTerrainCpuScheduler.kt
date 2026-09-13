@@ -21,13 +21,14 @@ object FlightTerrainCpuScheduler {
 	suspend fun <T, R> map(
 		items: List<T>,
 		workerCount: Int = geometryWorkerCount(),
+		onCompleted: suspend (R) -> Unit = {},
 		transform: (T) -> R
 	): List<R> {
 		if (items.isEmpty()) return emptyList()
 		val activeWorkers = workerCount.coerceIn(1, items.size)
 		if (activeWorkers == 1) {
 			return items.map { item ->
-				runInterruptible(Dispatchers.Default) { transform(item) }
+				runInterruptible(Dispatchers.Default) { transform(item) }.also { onCompleted(it) }
 			}
 		}
 		return coroutineScope {
@@ -49,6 +50,7 @@ object FlightTerrainCpuScheduler {
 			repeat(items.size) {
 				val result = results.receive()
 				orderedResults[result.index] = result.value
+				onCompleted(result.value)
 			}
 			producer.join()
 			workers.forEach { it.join() }

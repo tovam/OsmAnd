@@ -185,7 +185,8 @@ object FlightTerrainMeshBuilder {
 		geometryCache: MutableMap<FlightTerrainGeometryCacheKey, FlightTerrainGeometry>? = null,
 		geometryGeneration: Long = System.nanoTime(),
 		includePlaceholders: Boolean = false,
-		workerCount: Int = FlightTerrainCpuScheduler.geometryWorkerCount()
+		workerCount: Int = FlightTerrainCpuScheduler.geometryWorkerCount(),
+		onPartialScene: suspend (FlightTerrainScene) -> Unit = {}
 	): FlightTerrainScene {
 		val useParallelTiles = plan.tiles.size > 1 && workerCount > 1
 		val partialPlans = if (useParallelTiles) {
@@ -193,9 +194,19 @@ object FlightTerrainMeshBuilder {
 		} else {
 			listOf(plan)
 		}
+		val completedMeshes = mutableListOf<FlightTerrainMesh>()
+		var lastPartialNanos = 0L
 		val partialScenes = FlightTerrainCpuScheduler.map(
 			items = partialPlans,
-			workerCount = if (useParallelTiles) workerCount else 1
+			workerCount = if (useParallelTiles) workerCount else 1,
+			onCompleted = { partial ->
+				completedMeshes.addAll(partial.meshes)
+				val now = System.nanoTime()
+				if (now - lastPartialNanos >= 25_000_000L) {
+					lastPartialNanos = now
+					onPartialScene(partial.copy(meshes = completedMeshes.toList(), generation = now))
+				}
+			}
 		) { partialPlan ->
 			build(
 				centerLatitude = centerLatitude,

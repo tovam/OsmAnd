@@ -210,6 +210,7 @@ class FlightSceneStreamingEngine(
 	}
 
 	fun reset() {
+		repository.cancelPendingAssets()
 		generation++
 		backgroundGeneration++
 		backgroundExecutionGeneration++
@@ -230,6 +231,7 @@ class FlightSceneStreamingEngine(
 	fun close() {
 		closed = true
 		reset()
+		repository.close()
 	}
 
 	private fun scheduleDesiredDemand(
