@@ -3338,16 +3338,17 @@ private fun FlightCompassOverlay(
 			drawLine(Color.Black.copy(alpha = 0.30f), center, relativeDirectionEnd(it, radius * 0.88f), 3.dp.toPx())
 		}
 		drawIntoCanvas { composeCanvas ->
-			labelPaint.textSize = 7.dp.toPx()
+			labelPaint.textSize = 14.dp.toPx()
+			labelPaint.color = android.graphics.Color.BLACK
 			composeCanvas.nativeCanvas.drawText(
 				bearing?.let { "CAP %03d°".format(Math.floorMod(it.roundToInt(), 360)) } ?: "CAP —",
 				center.x,
-				center.y + radius + 10.dp.toPx(),
+				center.y + radius + 18.dp.toPx(),
 				labelPaint
 			)
 			composeCanvas.nativeCanvas.drawText(
 				"$altitudeLabel ${altitude?.let { "${it.roundToInt()} m" } ?: "—"}",
-				center.x, center.y + radius + 21.dp.toPx(), labelPaint
+				center.x, center.y + radius + 37.dp.toPx(), labelPaint
 			)
 		}
 	}
