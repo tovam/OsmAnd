@@ -7,20 +7,20 @@ public class PhotoCalibrationInputTest {
 	}
 
 	public static void main(String[] args) {
-		boolean[] photo = new boolean[5], map = new boolean[5];
-		for (boolean[] surface : new boolean[][] {photo, map}) {
-			int selected = PhotoCalibrationInput.nextUnplaced(surface, -1);
-			for (int tap = 0; tap < 5; tap++) {
-				require(selected == tap);
-				surface[selected] = true;
-				selected = PhotoCalibrationInput.nextUnplaced(surface, selected);
+		for (int count = 0; count < 1000; count++) {
+			require(PhotoCalibrationInput.placementIndex(PhotoCalibrationInput.Action.ADD, 0, count, true) == count);
+			require(PhotoCalibrationInput.placementIndex(PhotoCalibrationInput.Action.ADD, 0, count, false) == -1);
+			require(PhotoCalibrationInput.placementIndex(PhotoCalibrationInput.Action.EXPLORE, 0, count, true) == -1);
+			if (count > 0) {
+				require(PhotoCalibrationInput.placementIndex(PhotoCalibrationInput.Action.MOVE, count - 1, count, true) == count - 1);
+				require(PhotoCalibrationInput.placementIndex(PhotoCalibrationInput.Action.MOVE, count - 1, count, false) == count - 1);
 			}
-			require(selected == -1); // Sixth click cannot overwrite the last point.
+			require(PhotoCalibrationInput.placementIndex(PhotoCalibrationInput.Action.MOVE, count, count, true) == -1);
 		}
-		photo[1] = false;
-		require(PhotoCalibrationInput.nextUnplaced(photo, 4) == 1);
-		require(PhotoCalibrationInput.nextUnplaced(new boolean[] {true, false, true, false}, 1) == 3);
-		require(PhotoCalibrationInput.nextUnplaced(new boolean[0], -1) == -1);
+		require(PhotoCalibrationInput.backTab(1) == 0); // Satellite back returns to photo, not gallery.
+		require(PhotoCalibrationInput.backTab(2) == 1);
+		require(PhotoCalibrationInput.backTab(3) == 1);
+		require(PhotoCalibrationInput.backTab(0) == -1);
 		require(PhotoCalibrationInput.readiness(false, true, true, 5) == Readiness.IMAGE_MISSING);
 		require(PhotoCalibrationInput.readiness(true, false, true, 5) == Readiness.ASSOCIATION_MISSING);
 		require(PhotoCalibrationInput.readiness(true, true, false, 5) == Readiness.ALTITUDE_MISSING);
@@ -33,6 +33,6 @@ public class PhotoCalibrationInputTest {
 		require(PhotoCalibrationInput.scalePhoto(2f, Float.NaN) == 2f);
 		require(PhotoCalibrationInput.scalePhoto(2f, 0f) == 2f);
 		require(PhotoCalibrationInput.scalePhoto(19f, 2f) == 20f);
-		System.out.println("Photo Plus: sequential independent landmarks, disarming, readiness and undamped zoom passed");
+		System.out.println("Photo Plus: explicit toolbar actions through 1000 points, back navigation, readiness and undamped zoom passed");
 	}
 }

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_cal_place">Placer</string>
+	<string name="flight_cal_explore">Explorer</string>
 	<string name="flight_plan_repeat_completed">Ce journal est terminé. Utilise « Répéter ce trajet » pour programmer un nouveau vol sans effacer le précédent.</string>
 	<string name="flight_plan_low_space">Incomplet : moins de 256 Mio libres. Les fichiers terminés sont conservés ; libère de la place puis reprends.</string>
 	<string name="flight_plan_free_space">Espace libre sur le téléphone : %1$.2f Gio. Une réserve de 256 Mio est conservée.</string>

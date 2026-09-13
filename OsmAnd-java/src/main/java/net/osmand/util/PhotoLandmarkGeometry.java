@@ -9,14 +9,13 @@ public final class PhotoLandmarkGeometry {
         return new double[] {cx + (x-cx)*c - (y-cy)*s, cy + (x-cx)*s + (y-cy)*c};
     }
 
-    public static int hit(double[][] positions, double x, double y, double radius) {
-        int closest = -1;
-        double distance = radius * radius;
-        for (int i = 0; i < positions.length; i++) {
-            if (positions[i] == null) continue;
-            double dx = positions[i][0]-x, dy = positions[i][1]-y, d = dx*dx+dy*dy;
-            if (d <= distance) { closest = i; distance = d; }
-        }
-        return closest;
+    /** Continuous screen-space pan/pinch/rotation, anchored to the moving finger centroid. */
+    public static double[] transformCenter(double x, double y, double previousX, double previousY,
+            double focusX, double focusY, double scale, double radians) {
+        double dx = x - previousX, dy = y - previousY;
+        double c = Math.cos(radians), s = Math.sin(radians);
+        return new double[] {focusX + (dx * c - dy * s) * scale,
+                focusY + (dx * s + dy * c) * scale};
     }
+
 }

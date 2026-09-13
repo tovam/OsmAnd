@@ -545,7 +545,6 @@ private fun FlightPlanMap(
                 (plan.preparation?.bands?.maxOfOrNull { it.radiusKm } ?: 300).toDouble()
             v.coverage = coverage
             v.onMapPoint = { lat, lon -> if (editable) onPoint(lat, lon) }
-            v.onSelectPoint = { if (editable) onSelect(it) }
             v.update(
                 null,
                 FlightPhotoCalibration(points = points),

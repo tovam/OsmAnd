@@ -5,14 +5,17 @@ public final class PhotoCalibrationInput {
 	private PhotoCalibrationInput() { }
 
 	public enum Readiness { READY, IMAGE_MISSING, ASSOCIATION_MISSING, ALTITUDE_MISSING, PAIRS_MISSING }
+	public enum Action { EXPLORE, ADD, MOVE }
 
-	/** -1 disarms placement when every slot is filled; never implicitly overwrite a point. */
-	public static int nextUnplaced(boolean[] placed, int after) {
-		for (int offset = 1; offset <= placed.length; offset++) {
-			int index = Math.floorMod(after + offset, placed.length);
-			if (!placed[index]) return index;
-		}
+	/** Canvas taps never select a marker. Only the toolbar determines the edited slot. */
+	public static int placementIndex(Action action, int selected, int count, boolean photo) {
+		if (action == Action.ADD && photo) return count;
+		if (action == Action.MOVE && selected >= 0 && selected < count) return selected;
 		return -1;
+	}
+
+	public static int backTab(int tab) {
+		return tab == 0 ? -1 : tab == 1 ? 0 : 1;
 	}
 
 	public static Readiness readiness(boolean imageLoaded, boolean associated,
