@@ -25,7 +25,8 @@ object FlightViewGeometry {
 	): FlightPhotoSpatialPose? {
 		val position = samplePosition?.takeIf { it.isFinite() } ?: return null
 		val sample = FlightSampleInterpolator.sampleAt(trip, position) ?: return null
-		val bearing = sample.bearingDegrees ?: return null
+		// Use the renderer's north-facing fallback for a stationary/one-point track.
+		val bearing = sample.bearingDegrees ?: 0f
 		return FlightPhotoSpatialPose(
 			samplePosition = FlightSampleInterpolator.quantizePosition(position),
 			timestampMillis = sample.timestampMillis.takeIf { it > 0L },

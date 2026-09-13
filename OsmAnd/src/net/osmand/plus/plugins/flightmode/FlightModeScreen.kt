@@ -208,6 +208,7 @@ fun FlightModeScreen(
 	onSetWindowGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onTransformWindowPhoto: (Float, Float, Float) -> Unit,
 	onTransformLinkedWindowView: (Float, Float, Float, Float) -> Unit,
+	onInitializeWindowPhotoViewport: (String, Float) -> Unit,
 	onResetWindowPhotoTransform: () -> Unit,
 	onClearWindowPhotoOverlay: () -> Unit,
 	onUpdateJourneyName: (String) -> Unit,
@@ -340,6 +341,7 @@ fun FlightModeScreen(
 					onSetGestureTarget = onSetWindowGestureTarget,
 					onTransformPhoto = onTransformWindowPhoto,
 					onTransformLinkedView = onTransformLinkedWindowView,
+					onInitializePhotoViewport = onInitializeWindowPhotoViewport,
 					onRotatePhoto = onRotatePhoto,
 					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onResetPhotoTransform = onResetWindowPhotoTransform,
@@ -949,6 +951,7 @@ private fun WindowScreen(
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onTransformPhoto: (Float, Float, Float) -> Unit,
 	onTransformLinkedView: (Float, Float, Float, Float) -> Unit,
+	onInitializePhotoViewport: (String, Float) -> Unit,
 	onRotatePhoto: (String, Float) -> Unit,
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onResetPhotoTransform: () -> Unit,
@@ -988,6 +991,7 @@ private fun WindowScreen(
 				onChangeZoom = onChangeZoom,
 				onTransformPhoto = onTransformPhoto,
 				onTransformLinkedView = onTransformLinkedView,
+				onInitializePhotoViewport = onInitializePhotoViewport,
 				onSetPhotoOpacity = onSetPhotoOpacity,
 				onSetGestureTarget = onSetGestureTarget,
 				onResetPhotoTransform = onResetPhotoTransform,
@@ -2995,6 +2999,7 @@ private fun FlightWindowScene(
 	onChangeZoom: (Float) -> Unit,
 	onTransformPhoto: (Float, Float, Float) -> Unit,
 	onTransformLinkedView: (Float, Float, Float, Float) -> Unit,
+	onInitializePhotoViewport: (String, Float) -> Unit,
 	onSetPhotoOpacity: (Float) -> Unit,
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onResetPhotoTransform: () -> Unit,
@@ -3014,28 +3019,20 @@ private fun FlightWindowScene(
 	val latestTransformPhoto by rememberUpdatedState(onTransformPhoto)
 	val latestTransformLinkedView by rememberUpdatedState(onTransformLinkedView)
 	val latestRotatePhoto by rememberUpdatedState(onRotatePhoto)
-	var sceneAspectRatio by remember { mutableStateOf(1f) }
+	var sceneAspectRatio by remember { mutableStateOf(0f) }
 	val activePhoto = photo?.takeIf { photoOverlay.photoId == it.id }
 	val latestActivePhotoId by rememberUpdatedState(activePhoto?.id)
 	val photoOverlayVisible = activePhoto != null
-	val spatialPhotoPose = activePhoto?.let { currentPhoto ->
-		if (photoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED) {
-			// Linked gestures update the camera every pointer frame. Render the photo
-			// from that same live pose; persistence is intentionally debounced so it
-			// cannot stall the gesture, and catches up just after the finger stops.
-			FlightViewGeometry.photoSpatialPose(
-				trip = trip,
-				samplePosition = currentPhoto.matchedSamplePosition,
-				placement = placement,
-				look = look,
-				altitudeOverrideMeters = altitudeOverrideMeters
-			) ?: currentPhoto.windowAlignment?.spatialPose
-		} else {
-			currentPhoto.windowAlignment?.spatialPose
+	val spatialPhotoPose = activePhoto?.windowAlignment?.spatialPose
+	LaunchedEffect(activePhoto?.id, spatialPhotoPose, sceneAspectRatio) {
+		if (activePhoto != null && spatialPhotoPose != null &&
+			spatialPhotoPose.referenceAspectRatio == null && sceneAspectRatio > 0f
+		) {
+			onInitializePhotoViewport(activePhoto.id, sceneAspectRatio)
 		}
 	}
 	val spatialPhoto = activePhoto?.let { currentPhoto ->
-		spatialPhotoPose?.let { pose ->
+		spatialPhotoPose?.takeIf { it.referenceAspectRatio != null }?.let { pose ->
 			FlightSpatialPhotoOverlay(
 				id = currentPhoto.id,
 				localPath = currentPhoto.localPath,
@@ -3112,11 +3109,6 @@ private fun FlightWindowScene(
 			onRenderStats = onRenderStats,
 			modifier = Modifier.fillMaxSize()
 		)
-		// A just-imported legacy photo can need one frame before its absolute pose is
-		// backfilled. Only that transient state uses the old screen-space fallback.
-		if (spatialPhoto == null) {
-			activePhoto?.let { FlightWindowPhotoOverlayImage(it, photoOverlay, Modifier.fillMaxSize()) }
-		}
 		if (showSatelliteQualityOverlay) {
 			SatelliteQualityLegend(
 				modifier = Modifier.align(Alignment.CenterStart).padding(start = 7.dp)
@@ -3227,36 +3219,6 @@ private fun WindowQuickControls(
 			contentAlignment = Alignment.Center
 		) {
 			Text("☀", color = if (shadowsEnabled) FlightOrange else FlightMuted, fontSize = 14.sp)
-		}
-	}
-}
-
-@Composable
-private fun FlightWindowPhotoOverlayImage(
-	photo: FlightPhotoAttachment,
-	overlay: FlightWindowPhotoOverlay,
-	modifier: Modifier = Modifier
-) {
-	val preview by produceState(initialValue = PhotoPreviewState(), key1 = photo.localPath) {
-		val loaded = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath)) }
-		value = PhotoPreviewState(loading = false, bitmap = loaded)
-	}
-	Box(modifier.clipToBounds(), contentAlignment = Alignment.Center) {
-		preview.bitmap?.let { bitmap ->
-			Image(
-				bitmap = bitmap.asImageBitmap(),
-				contentDescription = photo.fileName,
-				contentScale = ContentScale.Fit,
-				colorFilter = photoColorFilter(photo.imageAdjustments),
-				modifier = Modifier.fillMaxSize().graphicsLayer {
-					alpha = overlay.opacity
-					scaleX = overlay.scale
-					scaleY = overlay.scale
-					translationX = overlay.offsetXFraction * size.width
-					translationY = overlay.offsetYFraction * size.height
-					rotationZ = photo.rotationDegrees.toFloat()
-				}
-			)
 		}
 	}
 }
@@ -4434,6 +4396,7 @@ private fun FlightModePreview(state: FlightUiState) {
 		onSetPhotoImageAdjustments = { _, _ -> }, onOpenPhotoOnMap = {}, onOpenPhotoInWindow = {},
 		onSetWindowPhotoOpacity = {}, onSetWindowGestureTarget = {},
 		onTransformWindowPhoto = { _, _, _ -> }, onTransformLinkedWindowView = { _, _, _, _ -> },
+		onInitializeWindowPhotoViewport = { _, _ -> },
 		onResetWindowPhotoTransform = {}, onClearWindowPhotoOverlay = {},
 		onUpdateJourneyName = {}, onSaveJourney = {}, onExportJourney = {}, onOpenJourney = {},
 		onOpenDuplicateJourney = {}, onContinueDuplicateImport = {}, onDismissDuplicateImport = {}

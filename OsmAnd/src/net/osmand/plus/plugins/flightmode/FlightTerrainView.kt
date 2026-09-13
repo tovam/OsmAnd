@@ -9,6 +9,7 @@ import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.AttributeSet
 import net.osmand.plus.media.MediaMetadataUtils
+import net.osmand.util.PhotoPlaneGeometry
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -577,44 +578,15 @@ class FlightTerrainView @JvmOverloads constructor(
 			val cameraRight = normalized(cross(direction, localUp)) ?: return
 			val cameraUp = normalized(cross(cameraRight, direction)) ?: return
 
-			// UI gestures and graphicsLayer use positive angles for a clockwise rotation
-			// on screen. Rotating the 3D right/up basis uses the mathematical convention,
-			// where the same positive angle is counter-clockwise, so convert the sign here.
-			val roll = Math.toRadians(-photo.rotationDegrees.toDouble())
-			val rollCos = cos(roll).toFloat()
-			val rollSin = sin(roll).toFloat()
-			val right = FloatArray(3) { index ->
-				cameraRight[index] * rollCos + cameraUp[index] * rollSin
-			}
-			val up = FloatArray(3) { index ->
-				-cameraRight[index] * rollSin + cameraUp[index] * rollCos
-			}
 			val distance = (abs(eyeAltitude) * PHOTO_PLANE_ALTITUDE_FACTOR)
 				.coerceIn(MINIMUM_PHOTO_PLANE_DISTANCE_METERS, MAXIMUM_PHOTO_PLANE_DISTANCE_METERS)
-			val baseHalfHeight = distance * tan(
-				Math.toRadians((pose.verticalFieldOfViewDegrees / 2f).toDouble())
-			).toFloat()
-			val aspect = texture.width.toFloat() / texture.height.coerceAtLeast(1)
-			val halfHeight = baseHalfHeight * photo.scale
-			val halfWidth = halfHeight * aspect
-			val viewHalfWidth = baseHalfHeight * surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1)
-			val center = FloatArray(3) { index ->
-				eye[index] + direction[index] * distance +
-					right[index] * photo.offsetXFraction * viewHalfWidth * 2f -
-					up[index] * photo.offsetYFraction * baseHalfHeight * 2f
-			}
-			val positions = FloatArray(12)
-			fun putCorner(corner: Int, horizontalSign: Float, verticalSign: Float) {
-				for (axis in 0 until 3) {
-					positions[corner * 3 + axis] = center[axis] +
-						right[axis] * halfWidth * horizontalSign +
-						up[axis] * halfHeight * verticalSign
-				}
-			}
-			putCorner(0, -1f, 1f)
-			putCorner(1, -1f, -1f)
-			putCorner(2, 1f, 1f)
-			putCorner(3, 1f, -1f)
+			val positions = PhotoPlaneGeometry.vertices(
+				eye, direction, cameraRight, cameraUp, distance,
+				pose.verticalFieldOfViewDegrees,
+				texture.width.toFloat() / texture.height.coerceAtLeast(1),
+				pose.referenceAspectRatio ?: return,
+				photo.scale, photo.offsetXFraction, photo.offsetYFraction, photo.rotationDegrees
+			)
 			val positionBuffer = directFloatBuffer(positions)
 			val textureBuffer = directFloatBuffer(
 				floatArrayOf(0f, 0f, 0f, 1f, 1f, 0f, 1f, 1f)
@@ -644,7 +616,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + PHOTO_TEXTURE_UNIT)
 			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.id)
 			GLES20.glUniform1i(photoTextureLocation, PHOTO_TEXTURE_UNIT)
-			GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+			GLES20.glEnable(GLES20.GL_DEPTH_TEST)
 			GLES20.glDepthMask(false)
 			GLES20.glEnable(GLES20.GL_BLEND)
 			GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)

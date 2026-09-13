@@ -169,6 +169,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onSetWindowGestureTarget = viewModel::setWindowGestureTarget,
 					onTransformWindowPhoto = viewModel::transformWindowPhoto,
 					onTransformLinkedWindowView = viewModel::transformLinkedWindowView,
+					onInitializeWindowPhotoViewport = viewModel::initializeWindowPhotoViewport,
 					onResetWindowPhotoTransform = viewModel::resetWindowPhotoTransform,
 					onClearWindowPhotoOverlay = viewModel::clearWindowPhotoOverlay,
 					onUpdateJourneyName = viewModel::updateJourneyName,

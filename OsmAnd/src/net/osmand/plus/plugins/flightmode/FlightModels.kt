@@ -508,7 +508,7 @@ object FlightPhotoColorMatrix {
 enum class FlightWindowGestureTarget {
 	VIEW,
 	PHOTO,
-	/** Move the virtual camera while keeping the calibrated photo registered to it. */
+	/** Move the camera around the terrain and the fixed, calibrated world-space photo. */
 	LINKED
 }
 
@@ -600,7 +600,9 @@ data class FlightPhotoSpatialPose(
 	val aircraftBearingDegrees: Float,
 	val viewAzimuthDegrees: Float,
 	val viewElevationDegrees: Float,
-	val verticalFieldOfViewDegrees: Float
+	val verticalFieldOfViewDegrees: Float,
+	/** Viewport used for calibration; never replaced when the viewing camera moves. */
+	val referenceAspectRatio: Float? = null
 ) {
 	fun clampedOrNull(): FlightPhotoSpatialPose? {
 		if (!samplePosition.isFinite() || samplePosition < 0.0 ||
@@ -611,6 +613,7 @@ data class FlightPhotoSpatialPose(
 		) return null
 		return copy(
 			eyeLongitude = normalizeLongitude(eyeLongitude),
+			referenceAspectRatio = referenceAspectRatio?.takeIf { it.isFinite() && it > 0f },
 			eyeAltitudeMeters = eyeAltitudeMeters?.takeIf(Float::isFinite)
 				?.coerceIn(FlightPhotoWindowAlignment.MIN_ALTITUDE_OVERRIDE_METERS, MAXIMUM_PHOTO_EYE_ALTITUDE_METERS),
 			aircraftBearingDegrees = normalizeDegrees(aircraftBearingDegrees),
@@ -651,12 +654,8 @@ data class FlightWindowLinkedTransform(
 )
 
 /**
- * Applies one gesture to the 3D camera and its calibrated photo as a single unit.
- *
- * The photo scale follows the actual perspective projection rather than the raw
- * pinch factor. This matters at wide angles: halving a FOV in degrees does not
- * exactly double its projected size. The photo translation follows only the
- * camera movement that survived the vertical look limits.
+ * Moves only the viewing camera. Terrain and the fixed world-space photo are
+ * projected by the same OpenGL matrix: no second, screen-space compensation.
  */
 fun linkedFlightWindowTransform(
 	placement: FlightWindowPlacement,
@@ -669,7 +668,6 @@ fun linkedFlightWindowTransform(
 ): FlightWindowLinkedTransform {
 	val safePlacement = placement.clamped()
 	val safeLook = look.clamped()
-	val safeOverlay = photoOverlay.clamped()
 	val safePanX = panXFraction.takeIf(Float::isFinite) ?: 0f
 	val safePanY = panYFraction.takeIf(Float::isFinite) ?: 0f
 	val verticalFovBefore = safePlacement.verticalFieldOfViewDegrees()
@@ -678,34 +676,9 @@ fun linkedFlightWindowTransform(
 		yawDegrees = safeLook.yawDegrees - safePanX * horizontalFovBefore,
 		pitchDegrees = safeLook.pitchDegrees + safePanY * verticalFovBefore
 	).clamped()
-	val realizedYawDelta = FlightWindowLook.normalizeYaw(nextLook.yawDegrees - safeLook.yawDegrees)
-	val realizedPitchDelta = nextLook.pitchDegrees - safeLook.pitchDegrees
-
 	val dampedZoom = dampedFlightPinchFactor(rawZoomFactor).coerceIn(0.75f, 1.35f)
 	val nextPlacement = safePlacement.copy(zoom = safePlacement.zoom * dampedZoom).clamped()
-	val verticalFovAfter = nextPlacement.verticalFieldOfViewDegrees()
-	val horizontalFovAfter = nextPlacement.horizontalFieldOfViewDegrees(viewAspectRatio)
-	val projectionMagnification = (
-		tan(Math.toRadians((verticalFovBefore / 2f).toDouble())) /
-			tan(Math.toRadians((verticalFovAfter / 2f).toDouble()))
-	).toFloat().takeIf { it.isFinite() && it > 0f } ?: 1f
-	val projectedPanX = -0.5f * projectedTangentRatio(realizedYawDelta, horizontalFovAfter)
-	val projectedPanY = 0.5f * projectedTangentRatio(realizedPitchDelta, verticalFovAfter)
-	val nextOverlay = safeOverlay.copy(
-		scale = safeOverlay.scale * projectionMagnification,
-		offsetXFraction = safeOverlay.offsetXFraction * projectionMagnification + projectedPanX,
-		offsetYFraction = safeOverlay.offsetYFraction * projectionMagnification + projectedPanY,
-		gestureTarget = FlightWindowGestureTarget.LINKED
-	).clamped()
-	return FlightWindowLinkedTransform(nextPlacement, nextLook, nextOverlay)
-}
-
-private fun projectedTangentRatio(angleDegrees: Float, fieldOfViewDegrees: Float): Float {
-	val safeAngle = angleDegrees.coerceIn(-85f, 85f)
-	val denominator = tan(Math.toRadians((fieldOfViewDegrees / 2f).toDouble()))
-	if (!denominator.isFinite() || denominator == 0.0) return 0f
-	return (tan(Math.toRadians(safeAngle.toDouble())) / denominator)
-		.toFloat().takeIf(Float::isFinite) ?: 0f
+	return FlightWindowLinkedTransform(nextPlacement, nextLook, photoOverlay)
 }
 
 data class FlightOfflineAssets(

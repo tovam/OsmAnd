@@ -33,7 +33,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var storageJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var photoPersistenceJob: Job? = null
-	private var windowPhotoAlignmentJob: Job? = null
 	private val liveSamples = mutableListOf<FlightSample>()
 	private var liveDistanceMeters = 0.0
 	private var liveSequence = 0
@@ -735,7 +734,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				MAXIMUM_WINDOW_ALTITUDE_METERS
 			)
 		)
-		scheduleActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -767,14 +765,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				pitchDegrees = current.pitchDegrees + pitchDeltaDegrees
 			).clamped()
 		)
-		scheduleActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
 	fun recenterWindowLook() {
 		if (uiState.windowLook != FlightWindowLook()) {
 			uiState = uiState.copy(windowLook = FlightWindowLook())
-			scheduleActiveWindowPhotoAlignmentIfLinked()
 			scheduleTerrainDetailFocus()
 		}
 	}
@@ -801,7 +797,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val safePlacement = placement.clamped()
 		if (persist) windowPlacementStore.save(safePlacement)
 		uiState = uiState.copy(windowPlacement = safePlacement)
-		scheduleActiveWindowPhotoAlignmentIfLinked()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -1224,36 +1219,48 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					uiState.windowAltitudeOverrideMeters
 				}
 			)
-			// Opening a legacy calibration also backfills its absolute WGS84 pose. For a
-			// new photo with no known FOV, leave the alignment empty until perspective
-			// detection has had a chance to choose the initial camera zoom.
-			if (savedAlignment != null || detectedFov != null) {
-				storeActiveWindowPhotoAlignment()
-			}
-			if (detectedFov == null) detectAndApplyPhotoPerspective(id)
+			// A photo always starts as a world-space object, even without EXIF.
+			storeActiveWindowPhotoAlignment()
+			if (detectedFov == null) detectAndApplyPhotoPerspective(id, savedAlignment == null)
 			scheduleTerrainDetailFocus()
 		}
 	}
 
-	private fun detectAndApplyPhotoPerspective(id: String) {
+	private fun detectAndApplyPhotoPerspective(id: String, mayInitializeCamera: Boolean) {
 		viewModelScope.launch {
 			val photo = findPhoto(id) ?: return@launch
+			val initialPlacement = uiState.windowPlacement
+			val initialLook = uiState.windowLook
+			val initialAltitude = uiState.windowAltitudeOverrideMeters
 			val detectedFov = withContext(Dispatchers.IO) {
 				journeyStore.detectPhotoVerticalFieldOfViewDegrees(photo)
 			} ?: return@launch
 			val latestPhoto = findPhoto(id) ?: return@launch
+			val currentAlignment = latestPhoto.windowAlignment
+			// Initial viewport measurement is not a user edit.
+			val comparableAlignment = currentAlignment?.copy(
+				spatialPose = currentAlignment.spatialPose?.copy(
+					referenceAspectRatio = photo.windowAlignment?.spatialPose?.referenceAspectRatio
+				)
+			)
 			if (latestPhoto.cameraVerticalFieldOfViewDegrees == null) {
 				replacePhoto(
 					latestPhoto.copy(cameraVerticalFieldOfViewDegrees = detectedFov),
 					message = null
 				)
 			}
-			if (uiState.windowPhotoOverlay.photoId == id && latestPhoto.windowAlignment == null) {
+			// Metadata arriving late must not overwrite a user's calibration or view.
+			if (mayInitializeCamera && uiState.windowPhotoOverlay.photoId == id &&
+				comparableAlignment == photo.windowAlignment &&
+				latestPhoto.rotationDegrees == photo.rotationDegrees &&
+				uiState.windowPlacement == initialPlacement && uiState.windowLook == initialLook &&
+				uiState.windowAltitudeOverrideMeters == initialAltitude
+			) {
 				val placement = uiState.windowPlacement.copy(
 					zoom = FlightPhotoPerspective.windowZoomForVerticalFieldOfView(detectedFov)
 				).clamped()
 				uiState = uiState.copy(windowPlacement = placement)
-				storeActiveWindowPhotoAlignment()
+				storeActiveWindowPhotoAlignment(updateViewPose = true)
 			}
 		}
 	}
@@ -1267,13 +1274,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun setWindowGestureTarget(target: FlightWindowGestureTarget) {
 		if (target != FlightWindowGestureTarget.VIEW && uiState.windowPhotoOverlay.photoId == null) return
-		if (uiState.windowPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED &&
-			target != FlightWindowGestureTarget.LINKED
-		) {
-			windowPhotoAlignmentJob?.cancel()
-			windowPhotoAlignmentJob = null
-			storeActiveWindowPhotoAlignment()
-		}
 		uiState = uiState.copy(
 			windowPhotoOverlay = uiState.windowPhotoOverlay.copy(gestureTarget = target)
 		)
@@ -1314,7 +1314,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			windowLook = transformed.look,
 			windowPhotoOverlay = transformed.photoOverlay
 		)
-		scheduleActiveWindowPhotoAlignment()
 		scheduleTerrainDetailFocus()
 	}
 
@@ -1335,10 +1334,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	private fun exitWindowPhotoEditing() {
 		if (uiState.windowPhotoOverlay.photoId == null) return
-		val linked = uiState.windowPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED
-		windowPhotoAlignmentJob?.cancel()
-		windowPhotoAlignmentJob = null
-		storeActiveWindowPhotoAlignment(updateViewPose = linked)
+		storeActiveWindowPhotoAlignment()
 		uiState = uiState.copy(windowPhotoOverlay = FlightWindowPhotoOverlay())
 	}
 
@@ -1352,7 +1348,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		photo.matchedSamplePosition?.let { previous -> abs(previous - newPosition) < 0.005 } == true
 	}
 
-	private fun storeActiveWindowPhotoAlignment(updateViewPose: Boolean = true) {
+	private fun storeActiveWindowPhotoAlignment(updateViewPose: Boolean = false) {
 		val overlay = uiState.windowPhotoOverlay
 		val photo = overlay.photoId?.let(::findPhoto) ?: return
 		val referencePosition = photo.matchedSamplePosition
@@ -1369,7 +1365,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				previous.altitudeOverrideMeters
 			} else uiState.windowAltitudeOverrideMeters,
 			spatialPose = if (preserveViewPose) {
-				previous.spatialPose
+				previous.spatialPose ?: FlightViewGeometry.photoSpatialPose(
+					uiState.trip, referencePosition, previous.windowPlacement,
+					previous.windowLook, previous.altitudeOverrideMeters
+				)
 			} else {
 				FlightViewGeometry.photoSpatialPose(
 					trip = uiState.trip,
@@ -1377,7 +1376,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					placement = uiState.windowPlacement,
 					look = uiState.windowLook,
 					altitudeOverrideMeters = uiState.windowAltitudeOverrideMeters
-				)
+				)?.copy(referenceAspectRatio = previous?.spatialPose?.referenceAspectRatio)
 			}
 		).clamped()
 		if (photo.windowAlignment != alignment) {
@@ -1385,20 +1384,15 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
-	/** VIEW/PHOTO leave the saved camera pose fixed; LINKED deliberately moves it. */
-	private fun scheduleActiveWindowPhotoAlignmentIfLinked() {
-		if (uiState.windowPhotoOverlay.gestureTarget == FlightWindowGestureTarget.LINKED) {
-			scheduleActiveWindowPhotoAlignment()
-		}
-	}
-
-	private fun scheduleActiveWindowPhotoAlignment() {
-		windowPhotoAlignmentJob?.cancel()
-		windowPhotoAlignmentJob = viewModelScope.launch {
-			delay(WINDOW_PHOTO_ALIGNMENT_DEBOUNCE_MILLIS)
-			windowPhotoAlignmentJob = null
-			storeActiveWindowPhotoAlignment()
-		}
+	fun initializeWindowPhotoViewport(photoId: String, aspectRatio: Float) {
+		if (!aspectRatio.isFinite() || aspectRatio <= 0f) return
+		val photo = findPhoto(photoId) ?: return
+		val alignment = photo.windowAlignment ?: return
+		val pose = alignment.spatialPose ?: return
+		if (pose.referenceAspectRatio != null) return
+		replacePhoto(photo.copy(windowAlignment = alignment.copy(
+			spatialPose = pose.copy(referenceAspectRatio = aspectRatio)
+		)), message = null)
 	}
 
 	private fun replacePhoto(photo: FlightPhotoAttachment, message: String?) {
@@ -1441,7 +1435,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		storageJob?.cancel()
 		citySearchJob?.cancel()
 		photoPersistenceJob?.cancel()
-		windowPhotoAlignmentJob?.cancel()
 		super.onCleared()
 	}
 
@@ -1459,7 +1452,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		private const val MINIMUM_CITY_QUERY_LENGTH = 2
 		private const val CITY_SEARCH_DEBOUNCE_MILLIS = 180L
 		private const val PHOTO_PERSISTENCE_DEBOUNCE_MILLIS = 450L
-		private const val WINDOW_PHOTO_ALIGNMENT_DEBOUNCE_MILLIS = 90L
 		private const val MINIMUM_WINDOW_ALTITUDE_METERS = -500f
 		private const val MAXIMUM_WINDOW_ALTITUDE_METERS = 15_000f
 		private const val MINIMUM_FLIGHT_SPAN_PROGRESS = 0.0005f

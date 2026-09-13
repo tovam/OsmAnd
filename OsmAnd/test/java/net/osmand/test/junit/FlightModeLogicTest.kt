@@ -545,7 +545,7 @@ class FlightModeLogicTest {
 	}
 
 	@Test
-	fun linkedHublotGestureMovesCameraAndPhotoWithTheSameProjection() {
+	fun linkedHublotGestureMovesOnlyCameraLeavingPhotoCalibrationUntouched() {
 		val placement = FlightWindowPlacement(zoom = 1f)
 		val overlay = FlightWindowPhotoOverlay(
 			photoId = "photo-1",
@@ -563,27 +563,34 @@ class FlightModeLogicTest {
 			rawZoomFactor = 1.44f,
 			viewAspectRatio = 1.5f
 		)
-		val expectedMagnification = (
-			kotlin.math.tan(Math.toRadians((placement.verticalFieldOfViewDegrees() / 2f).toDouble())) /
-				kotlin.math.tan(Math.toRadians((result.placement.verticalFieldOfViewDegrees() / 2f).toDouble()))
-		).toFloat()
-		val horizontalFovAfter = result.placement.horizontalFieldOfViewDegrees(1.5f)
-		val expectedPanX = -0.5f * (
-			kotlin.math.tan(Math.toRadians(result.look.yawDegrees.toDouble())) /
-				kotlin.math.tan(Math.toRadians((horizontalFovAfter / 2f).toDouble()))
-		).toFloat()
-		val expectedPanY = 0.5f * (
-			kotlin.math.tan(Math.toRadians(result.look.pitchDegrees.toDouble())) /
-				kotlin.math.tan(Math.toRadians((result.placement.verticalFieldOfViewDegrees() / 2f).toDouble()))
-		).toFloat()
-
 		assertTrue(result.look.yawDegrees < 0f)
 		assertTrue(result.look.pitchDegrees < 0f)
 		assertEquals(1.2f, result.placement.zoom, 0.0001f)
-		assertEquals(overlay.scale * expectedMagnification, result.photoOverlay.scale, 0.0001f)
-		assertEquals(overlay.offsetXFraction * expectedMagnification + expectedPanX, result.photoOverlay.offsetXFraction, 0.0001f)
-		assertEquals(overlay.offsetYFraction * expectedMagnification + expectedPanY, result.photoOverlay.offsetYFraction, 0.0001f)
-		assertEquals(FlightWindowGestureTarget.LINKED, result.photoOverlay.gestureTarget)
+		assertSame(overlay, result.photoOverlay)
+	}
+
+	@Test
+	fun photoTimelineUsesAssociatedFractionalPositionAndActualTimestamps() {
+		val trip = FlightTrip("photo-bars", listOf(
+			sample(0, 1_000L, 48.0, 2.0),
+			sample(1, 11_000L, 48.1, 2.1),
+			sample(2, 41_000L, 48.2, 2.2)
+		), emptyList(), true, 20_000.0, "synthetic.gpx")
+		assertEquals(0.125f, FlightSampleInterpolator.progressAt(trip, 0.5)!!, 0.0001f)
+		assertEquals(0.625f, FlightSampleInterpolator.progressAt(trip, 1.5)!!, 0.0001f)
+		assertTrue(FlightSampleInterpolator.progressAt(trip, null) == null)
+	}
+
+	@Test
+	fun photoWithoutExifOrBearingStillGetsAWorldPose() {
+		val trip = FlightTrip("stationary-photo", listOf(sample(0, 1_000L, 48.0, 2.0).copy(bearingDegrees = null)),
+			emptyList(), true, 0.0, "synthetic.gpx")
+		val pose = FlightViewGeometry.photoSpatialPose(
+			trip, 0.0, FlightWindowPlacement(), FlightWindowLook(), null
+		)!!
+		assertEquals(0f, pose.aircraftBearingDegrees, 0f)
+		assertEquals(.6f, pose.copy(referenceAspectRatio = .6f).clampedOrNull()!!.referenceAspectRatio!!, 0f)
+		assertTrue(pose.copy(referenceAspectRatio = Float.NaN).clampedOrNull()!!.referenceAspectRatio == null)
 	}
 
 	@Test

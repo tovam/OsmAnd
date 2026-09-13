@@ -573,6 +573,7 @@ class FlightJourneyStore(private val context: Context) {
 		put("viewAzimuthDegrees", pose.viewAzimuthDegrees)
 		put("viewElevationDegrees", pose.viewElevationDegrees)
 		put("verticalFieldOfViewDegrees", pose.verticalFieldOfViewDegrees)
+		putOptional("referenceAspectRatio", pose.referenceAspectRatio)
 	}
 
 	private fun photoSpatialPoseFromJson(json: JSONObject?): FlightPhotoSpatialPose? {
@@ -589,7 +590,8 @@ class FlightJourneyStore(private val context: Context) {
 			aircraftBearingDegrees = json.optDouble("aircraftBearingDegrees", Double.NaN).toFloat(),
 			viewAzimuthDegrees = json.optDouble("viewAzimuthDegrees", Double.NaN).toFloat(),
 			viewElevationDegrees = json.optDouble("viewElevationDegrees", Double.NaN).toFloat(),
-			verticalFieldOfViewDegrees = json.optDouble("verticalFieldOfViewDegrees", Double.NaN).toFloat()
+			verticalFieldOfViewDegrees = json.optDouble("verticalFieldOfViewDegrees", Double.NaN).toFloat(),
+			referenceAspectRatio = json.optNullableDouble("referenceAspectRatio")?.toFloat()
 		).clampedOrNull()
 	}
 
