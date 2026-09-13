@@ -64,7 +64,10 @@ data class FlightTerrainRenderStats(
 	val cachedTextures: Int = 0,
 	val queuedTextureUploads: Int = 0,
 	val geometryBytes: Long = 0L,
-	val textureBytes: Long = 0L
+	val textureBytes: Long = 0L,
+	val preparedBytes: Long = 0L,
+	val preparationQueue: Int = 0,
+	val preparationFailures: Long = 0L
 )
 
 data class TerrainTileId(

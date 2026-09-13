@@ -1,17 +1,14 @@
 package net.osmand.plus.plugins.flightmode
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.AttributeSet
-import net.osmand.plus.media.MediaMetadataUtils
 import net.osmand.util.PhotoPlaneGeometry
 import net.osmand.util.ResourceTransaction
-import java.io.File
+import net.osmand.util.PreparedResourceQueue
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.LinkedHashMap
@@ -44,6 +41,11 @@ class FlightTerrainView @JvmOverloads constructor(
 		setPreserveEGLContextOnPause(true)
 		setRenderer(terrainRenderer)
 		renderMode = RENDERMODE_WHEN_DIRTY
+	}
+
+	override fun onDetachedFromWindow() {
+		super.onDetachedFromWindow()
+		terrainRenderer.stopPreparation()
 	}
 
 	fun updateScene(
@@ -98,13 +100,19 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var surfaceHeight = 1
 		private var uploadedGeneration = Long.MIN_VALUE
 		private var renderMeshes: List<RenderMesh> = emptyList()
-		private val geometryCache = LinkedHashMap<TerrainTileId, CachedGeometry>(
+		private val geometryCache = LinkedHashMap<FlightPreparedAssets.GeometryKey, CachedGeometry>(
 			MAXIMUM_RENDER_GEOMETRIES + 1,
 			0.75f,
 			true
 		)
 		private val textureCache = LinkedHashMap<String, UploadedTexture>(32, 0.75f, true)
 		private val pendingTextureUploads = linkedSetOf<String>()
+		private var preparation = FlightPreparedAssets(requestFrame)
+		private val imageKeys = HashMap<String, FlightPreparedAssets.ImageKey>()
+		private var preparationGeneration = Long.MIN_VALUE
+		private var preparationPhoto: String? = null
+		private var preparationDirty = true
+		fun stopPreparation() { preparation.close() }
 		private var lastReportedStats: FlightTerrainRenderStats? = null
 		private var lastStatsReportNanos = 0L
 
@@ -145,7 +153,6 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var photoColorRow3Location = -1
 		private var photoColorOffsetLocation = -1
 		private var photoTexture: UploadedPhotoTexture? = null
-		private var failedPhotoTexturePath: String? = null
 		private var maximumTextureEdge = DEFAULT_MAXIMUM_TEXTURE_EDGE
 
 		private var shadowPositionLocation = -1
@@ -241,11 +248,14 @@ class FlightTerrainView @JvmOverloads constructor(
 				geometryCache.clear()
 				textureCache.clear()
 				pendingTextureUploads.clear()
+				preparation.close()
+				preparation = FlightPreparedAssets(requestFrame)
+				preparationGeneration = Long.MIN_VALUE
+				preparationDirty = true
 				lastReportedStats = null
 				lastStatsReportNanos = 0L
 				shadowSceneGeneration = Long.MIN_VALUE
 				photoTexture = null
-				failedPhotoTexturePath = null
 				val textureLimits = IntArray(1)
 				GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, textureLimits, 0)
 				maximumTextureEdge = textureLimits[0].coerceAtLeast(MINIMUM_TEXTURE_EDGE)
@@ -299,11 +309,17 @@ class FlightTerrainView @JvmOverloads constructor(
 				clearDefaultFrameBuffer(sky)
 				return
 			}
+			if (preparation.closed) {
+				preparation = FlightPreparedAssets(requestFrame)
+				preparationDirty = true
+			}
+			reconcilePreparation(currentScene, currentViewState.spatialPhoto)
 			if (uploadedGeneration != currentScene.generation && System.nanoTime() >= retryUploadAfterNanos) {
 				try {
-					replaceRenderMeshes(currentScene.meshes)
-					uploadedGeneration = currentScene.generation
-					displayedScene = currentScene
+					if (replaceRenderMeshes(currentScene)) {
+						uploadedGeneration = currentScene.generation
+					}
+					if (renderMeshes.isNotEmpty() && compatibleOrigin(currentScene, displayedScene)) displayedScene = currentScene
 					retryUploadAfterNanos = 0L
 				} catch (error: RuntimeException) {
 					// Keep every last-good resource and its coordinate origin; retry this revision.
@@ -857,17 +873,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		}
 
 		private fun createTexture(path: String): UploadedTexture? {
-			val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-			BitmapFactory.decodeFile(path, bounds)
-			if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-			val sampleSize = textureSampleSize(bounds.outWidth, bounds.outHeight, maximumTextureEdge)
-			val bitmap = BitmapFactory.decodeFile(
-				path,
-				BitmapFactory.Options().apply {
-					inPreferredConfig = Bitmap.Config.RGB_565
-					inSampleSize = sampleSize
-				}
-			) ?: return null
+			val bitmap = preparation.takeImage(imageKeys[path] ?: return null)?.bitmap ?: return null
+			preparationDirty = true
 			try {
 				val textureIds = IntArray(1)
 				GLES20.glGenTextures(1, textureIds, 0)
@@ -885,6 +892,10 @@ class FlightTerrainView @JvmOverloads constructor(
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 				GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+				if (GLES20.glGetError() != GLES20.GL_NO_ERROR) {
+					GLES20.glDeleteTextures(1, textureIds, 0)
+					return null
+				}
 				if (useMipmaps) GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
 				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 				val baseBytes = bitmap.width.toLong() * bitmap.height * RGB_565_BYTES_PER_PIXEL
@@ -899,35 +910,16 @@ class FlightTerrainView @JvmOverloads constructor(
 
 		private fun ensurePhotoTexture(path: String): UploadedPhotoTexture? {
 			photoTexture?.takeIf { it.path == path }?.let { return it }
-			if (failedPhotoTexturePath == path) return null
+			val uploaded = createPhotoTexture(path) ?: return null
 			releasePhotoTexture()
-			val attempt = runCatching { createPhotoTexture(path) }
-			val uploaded = attempt.getOrNull()
-			if (uploaded == null) {
-				failedPhotoTexturePath = path
-				onError(attempt.exceptionOrNull()?.message ?: "Impossible de charger la photo dans la vue 3D")
-				return null
-			}
-			failedPhotoTexturePath = null
 			photoTexture = uploaded
 			return uploaded
 		}
 
 		private fun createPhotoTexture(path: String): UploadedPhotoTexture? {
-			val file = File(path)
-			if (!file.isFile) return null
-			val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-			BitmapFactory.decodeFile(path, bounds)
-			if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-			val targetEdge = min(maximumTextureEdge, MAXIMUM_PHOTO_TEXTURE_EDGE)
-			val decoded = BitmapFactory.decodeFile(
-				path,
-				BitmapFactory.Options().apply {
-					inPreferredConfig = Bitmap.Config.ARGB_8888
-					inSampleSize = textureSampleSize(bounds.outWidth, bounds.outHeight, targetEdge)
-				}
-			) ?: return null
-			val oriented = orientPhotoBitmap(decoded, MediaMetadataUtils.getExifOrientation(file))
+			val key = FlightPreparedAssets.ImageKey(path, min(maximumTextureEdge, MAXIMUM_PHOTO_TEXTURE_EDGE), true)
+			val oriented = preparation.takeImage(key)?.bitmap ?: return null
+			preparationDirty = true
 			try {
 				val textureIds = IntArray(1)
 				GLES20.glGenTextures(1, textureIds, 0)
@@ -939,38 +931,15 @@ class FlightTerrainView @JvmOverloads constructor(
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
 				GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 				GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, oriented, 0)
+				if (GLES20.glGetError() != GLES20.GL_NO_ERROR) {
+					GLES20.glDeleteTextures(1, textureIds, 0)
+					return null
+				}
 				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
 				return UploadedPhotoTexture(textureId, path, oriented.width, oriented.height)
 			} finally {
 				oriented.recycle()
-				if (oriented !== decoded && !decoded.isRecycled) decoded.recycle()
 			}
-		}
-
-		private fun orientPhotoBitmap(source: Bitmap, exifOrientation: Int): Bitmap {
-			val degrees = when (exifOrientation) {
-				3 -> 180f
-				6 -> 90f
-				8 -> 270f
-				else -> return source
-			}
-			return runCatching {
-				Bitmap.createBitmap(
-					source,
-					0,
-					0,
-					source.width,
-					source.height,
-					android.graphics.Matrix().apply { postRotate(degrees) },
-					true
-				)
-			}.getOrElse { source }
-		}
-
-		private fun textureSampleSize(width: Int, height: Int, targetEdge: Int): Int {
-			var sampleSize = 1
-			while (max(width, height) / sampleSize > targetEdge) sampleSize *= 2
-			return sampleSize
 		}
 
 		private fun releasePhotoTexture() {
@@ -978,7 +947,6 @@ class FlightTerrainView @JvmOverloads constructor(
 				GLES20.glDeleteTextures(1, intArrayOf(id), 0)
 			}
 			photoTexture = null
-			failedPhotoTexturePath = null
 		}
 
 		private fun isPowerOfTwo(value: Int): Boolean = value > 0 && (value and (value - 1)) == 0
@@ -993,13 +961,56 @@ class FlightTerrainView @JvmOverloads constructor(
 			pendingTextureUploads.clear()
 		}
 
-		private fun replaceRenderMeshes(meshes: List<FlightTerrainMesh>) {
-			val activeTileIds = meshes.mapTo(hashSetOf()) { it.tileId }
+		private fun reconcilePreparation(scene: FlightTerrainScene, photo: FlightSpatialPhotoOverlay?) {
+			if (!preparationDirty && preparationGeneration == scene.generation && preparationPhoto == photo?.localPath) return
+			preparationDirty = false
+			preparationGeneration = scene.generation
+			preparationPhoto = photo?.localPath
+			val requests = ArrayList<PreparedResourceQueue.Request<FlightPreparedAssets.Key, FlightPreparedAssets.Asset>>()
+			// Coarse shapes are first, independently of the requested satellite quality.
+			scene.meshes.forEach { mesh ->
+				if (FlightPreparedAssets.GeometryKey(mesh.vertices, mesh.indices) !in geometryCache) {
+					requests += preparation.geometryRequest(mesh)
+				}
+			}
+			if (photo != null && photoTexture?.path != photo.localPath) {
+				requests += preparation.imageRequest(FlightPreparedAssets.ImageKey(
+					photo.localPath, min(maximumTextureEdge, MAXIMUM_PHOTO_TEXTURE_EDGE), true
+				))
+			}
+			val wanted = linkedMapOf<String, Int>()
+			fun want(path: String?, edge: Int) {
+				if (path != null) wanted[path] = max(wanted[path] ?: 0, min(maximumTextureEdge, edge))
+			}
+			scene.meshes.forEach { mesh ->
+				want(mesh.standardSatelliteTexturePath, 256)
+				want(mesh.satelliteTexturePath, 256 shl (mesh.satelliteTextureTier.ordinal - 1).coerceIn(0, 5))
+				want(mesh.nativeMapTexturePath, 2048)
+			}
+			imageKeys.keys.retainAll(wanted.keys)
+			wanted.forEach { (path, edge) ->
+				val key = FlightPreparedAssets.ImageKey(path, edge)
+				imageKeys[path] = key
+				if (path !in textureCache) requests += preparation.imageRequest(key)
+			}
+			preparation.reconcile(requests)
+		}
+
+		private fun replaceRenderMeshes(scene: FlightTerrainScene): Boolean {
+			val meshes = scene.meshes
+			val previous = if (compatibleOrigin(scene, displayedScene)) renderMeshes.associateBy { it.geometry.tileId } else emptyMap()
+			val deadline = System.nanoTime() + GPU_UPLOAD_BUDGET_NANOS
+			var complete = true
 			val transaction = ResourceTransaction(geometryCache) { value: CachedGeometry -> releaseGeometry(value) }
 			val replacements = try {
-				meshes.map { mesh ->
-				val geometry = cachedGeometry(mesh)
-				if (geometryCache[mesh.tileId] !== geometry) transaction.stage(mesh.tileId, geometry)
+				meshes.mapNotNull { mesh ->
+				val key = FlightPreparedAssets.GeometryKey(mesh.vertices, mesh.indices)
+				val geometry = geometryCache[key] ?: if (System.nanoTime() < deadline) cachedGeometry(mesh) else null
+				if (geometry == null) {
+					complete = false
+					return@mapNotNull previous[mesh.tileId]
+				}
+				if (geometryCache[key] !== geometry) transaction.stage(key, geometry)
 				RenderMesh(
 					geometry = geometry,
 					refinementLevel = mesh.refinementLevel,
@@ -1015,8 +1026,11 @@ class FlightTerrainView @JvmOverloads constructor(
 				throw failure
 			}
 			transaction.commit()
+			// A different origin is only made visible after all its candidate meshes are ready.
+			if (!compatibleOrigin(scene, displayedScene) && !complete) return false
 			renderMeshes = replacements
-			evictGeometryCache(activeTileIds)
+			displayedScene = scene
+			evictGeometryCache(renderMeshes.mapTo(hashSetOf()) { it.geometry })
 
 			val wantedPaths = renderMeshes.flatMapTo(linkedSetOf()) { mesh ->
 				listOfNotNull(
@@ -1039,29 +1053,18 @@ class FlightTerrainView @JvmOverloads constructor(
 			// change can then switch handles without decoding the complete scene at once.
 			renderMeshes.forEach { mesh -> enqueueTexture(mesh.standardSatelliteTexturePath) }
 			evictTextureCache(wantedPaths)
+			return complete
 		}
 
-		private fun cachedGeometry(mesh: FlightTerrainMesh): CachedGeometry {
-			val cached = geometryCache[mesh.tileId]
-			if (cached != null && cached.sourceVertices === mesh.vertices && cached.sourceIndices === mesh.indices) {
-				return cached
-			}
-			require(mesh.vertices.size % 9 == 0 && mesh.vertices.all(Float::isFinite)) { "Invalid terrain vertices" }
-			require(mesh.indices.all { (it.toInt() and 0xffff) < mesh.vertices.size / 9 }) { "Invalid terrain indices" }
-			val vertexBuffer = ByteBuffer.allocateDirect(mesh.vertices.size * FLOAT_BYTES)
-				.order(ByteOrder.nativeOrder())
-				.asFloatBuffer()
-				.apply {
-					put(mesh.vertices)
-					position(0)
-				}
-			val indexBuffer = ByteBuffer.allocateDirect(mesh.indices.size * SHORT_BYTES)
-				.order(ByteOrder.nativeOrder())
-				.asShortBuffer()
-				.apply {
-					put(mesh.indices)
-					position(0)
-				}
+		private fun compatibleOrigin(a: FlightTerrainScene, b: FlightTerrainScene?): Boolean =
+			b == null || (a.coordinateOriginLatitude == b.coordinateOriginLatitude &&
+				a.coordinateOriginLongitude == b.coordinateOriginLongitude)
+
+		private fun cachedGeometry(mesh: FlightTerrainMesh): CachedGeometry? {
+			val prepared = preparation.takeGeometry(mesh) ?: return null
+			preparationDirty = true
+			val vertexBuffer = prepared.vertices
+			val indexBuffer = prepared.indices
 			repeat(16) { if (GLES20.glGetError() == GLES20.GL_NO_ERROR) return@repeat }
 			val bufferIds = IntArray(2)
 			GLES20.glGenBuffers(bufferIds.size, bufferIds, 0)
@@ -1109,21 +1112,23 @@ class FlightTerrainView @JvmOverloads constructor(
 		private fun processTextureUploads() {
 			var uploadedCount = 0
 			var uploadedBytes = 0L
+			val deadline = System.nanoTime() + GPU_UPLOAD_BUDGET_NANOS
 			val iterator = pendingTextureUploads.iterator()
-			while (iterator.hasNext() && uploadedCount < MAXIMUM_TEXTURE_UPLOADS_PER_FRAME) {
+			while (iterator.hasNext() && uploadedCount < MAXIMUM_TEXTURE_UPLOADS_PER_FRAME && System.nanoTime() < deadline) {
 				val path = iterator.next()
 				if (path in textureCache) {
 					iterator.remove()
 					continue
 				}
-				val estimatedBytes = estimatedTextureFileBytes(path)
+				val edge = imageKeys[path]?.edge ?: continue
+				val estimatedBytes = edge.toLong() * edge * 2L
 				if (uploadedCount > 0 && uploadedBytes + estimatedBytes > MAXIMUM_TEXTURE_UPLOAD_BYTES_PER_FRAME) break
-				iterator.remove()
 				createTexture(path)?.let { uploaded ->
+					iterator.remove()
 					textureCache[path] = uploaded
 					uploadedBytes += uploaded.bytes
+					uploadedCount++
 				}
-				uploadedCount++
 			}
 			val protectedPaths = renderMeshes.flatMapTo(hashSetOf()) { mesh ->
 				listOfNotNull(
@@ -1135,25 +1140,12 @@ class FlightTerrainView @JvmOverloads constructor(
 			evictTextureCache(protectedPaths)
 		}
 
-		private fun estimatedTextureFileBytes(path: String): Long {
-			val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-			BitmapFactory.decodeFile(path, options)
-			if (options.outWidth <= 0 || options.outHeight <= 0) return 0L
-			val sampleSize = textureSampleSize(options.outWidth, options.outHeight, maximumTextureEdge)
-			val width = (options.outWidth / sampleSize).coerceAtLeast(1)
-			val height = (options.outHeight / sampleSize).coerceAtLeast(1)
-			val base = width.toLong() * height * RGB_565_BYTES_PER_PIXEL
-			val useMipmaps = isPowerOfTwo(width) && isPowerOfTwo(height) &&
-				max(width, height) <= MAXIMUM_MIPMAPPED_TEXTURE_EDGE
-			return if (useMipmaps) base * 4L / 3L else base
-		}
-
-		private fun evictGeometryCache(activeTileIds: Set<TerrainTileId>) {
+		private fun evictGeometryCache(activeGeometry: Set<CachedGeometry>) {
 			var totalBytes = geometryCache.values.sumOf { it.bytes }
 			while (geometryCache.size > MAXIMUM_RENDER_GEOMETRIES ||
 				totalBytes > MAXIMUM_RENDER_GEOMETRY_BYTES
 			) {
-				val candidate = geometryCache.entries.firstOrNull { it.key !in activeTileIds } ?: break
+				val candidate = geometryCache.entries.firstOrNull { it.value !in activeGeometry } ?: break
 				geometryCache.remove(candidate.key)?.let { geometry ->
 					totalBytes -= geometry.bytes
 					releaseGeometry(geometry)
@@ -1186,7 +1178,10 @@ class FlightTerrainView @JvmOverloads constructor(
 				cachedTextures = textureCache.size,
 				queuedTextureUploads = pendingTextureUploads.size,
 				geometryBytes = geometryCache.values.sumOf { it.bytes },
-				textureBytes = textureCache.values.sumOf { it.bytes }
+				textureBytes = textureCache.values.sumOf { it.bytes },
+				preparedBytes = preparation.bytes,
+				preparationQueue = preparation.pending,
+				preparationFailures = preparation.failures
 			)
 			val now = System.nanoTime()
 			val queueJustCompleted = stats.queuedTextureUploads == 0 &&
@@ -1233,7 +1228,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			return shader
 		}
 
-		private data class CachedGeometry(
+		private class CachedGeometry(
 			val tileId: TerrainTileId,
 			val sourceVertices: FloatArray,
 			val sourceIndices: ShortArray,
@@ -1292,6 +1287,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val MAXIMUM_RENDER_GEOMETRIES = 768
 			private const val MAXIMUM_RENDER_GEOMETRY_BYTES = 128L * 1_024L * 1_024L
 			private const val MAXIMUM_TEXTURE_CACHE_BYTES = 128L * 1_024L * 1_024L
+			private const val GPU_UPLOAD_BUDGET_NANOS = 3_000_000L
 			private const val MAXIMUM_TEXTURE_UPLOADS_PER_FRAME = 2
 			private const val MAXIMUM_TEXTURE_UPLOAD_BYTES_PER_FRAME = 8L * 1_024L * 1_024L
 			private const val STATS_REPORT_INTERVAL_NANOS = 250_000_000L
