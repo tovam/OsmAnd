@@ -203,7 +203,7 @@ object FlightTerrainTilePlanner {
 	private fun tileGroundWidthKm(latitude: Double, zoom: Int): Double =
 		cos(Math.toRadians(latitude)) * 2.0 * PI * EARTH_RADIUS_KM / 2.0.pow(zoom)
 
-	private fun greatCircleInterpolate(
+	fun greatCircleInterpolate(
 		from: Pair<Double, Double>,
 		to: Pair<Double, Double>,
 		fraction: Double

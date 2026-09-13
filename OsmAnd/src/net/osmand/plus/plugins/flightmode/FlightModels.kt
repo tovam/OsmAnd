@@ -10,6 +10,7 @@ import kotlin.math.tan
 
 enum class FlightPage {
 	PREPARE,
+	LIVE,
 	MAP,
 	WINDOW,
 	WINDOW_SETUP,
@@ -165,7 +166,8 @@ data class FlightPlan(
 	val satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
 	val shadowsEnabled: Boolean = true,
 	val shadowIntensity: Float = 0.85f,
-	val resumeAfterRestart: Boolean = true
+	val resumeAfterRestart: Boolean = true,
+	val preparation: FlightPreparation? = null
 ) {
 	companion object {
 		const val MIN_TERRAIN_DETAIL_ZOOM = 9
@@ -702,7 +704,9 @@ data class FlightJourney(
 	val trip: FlightTrip,
 	val flightSpans: List<FlightSpan>,
 	val photos: List<FlightPhotoAttachment>,
-	val offlineAssets: FlightOfflineAssets = FlightOfflineAssets()
+	val offlineAssets: FlightOfflineAssets = FlightOfflineAssets(),
+	val batteryHistory: List<FlightBatteryPoint> = emptyList(),
+	val offlineRequest: FlightOfflineAssets = FlightOfflineAssets()
 )
 
 /** Ground point receiving an additional satellite-detail ring. */
@@ -743,6 +747,9 @@ data class FlightRecordingPolicy(
 }
 
 data class FlightUiState(
+	val liveState: FlightLiveState = FlightLiveState(),
+	val batteryHistory: List<FlightBatteryPoint> = emptyList(),
+	val previewingPlan: Boolean = false,
 	val page: FlightPage = FlightPage.PREPARE,
 	val sessionMode: FlightSessionMode = FlightSessionMode.PREPARE,
 	val plan: FlightPlan = FlightPlan.preview(),

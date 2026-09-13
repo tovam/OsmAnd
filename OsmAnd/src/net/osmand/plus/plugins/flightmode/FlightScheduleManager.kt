@@ -1,0 +1,155 @@
+package net.osmand.plus.plugins.flightmode
+
+import android.Manifest
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.*
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import androidx.core.content.ContextCompat
+import net.osmand.plus.R
+import org.json.JSONObject
+
+/** Each explicitly armed journal owns one alarm; reboot restores only uncompleted schedules. */
+internal object FlightScheduleManager {
+    private const val PREFS = "flight-schedules"
+    const val START = "flight.scheduled.start"
+
+    fun missingPermissions(context: Context): List<String> = buildList {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
+                PackageManager.PERMISSION_GRANTED
+        )
+            add(context.getString(R.string.flight_live_need_location))
+        if (
+            Build.VERSION.SDK_INT >= 29 &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+                ) != PackageManager.PERMISSION_GRANTED
+        )
+            add(context.getString(R.string.flight_live_need_background))
+        if (
+            Build.VERSION.SDK_INT >= 31 &&
+                !(context.getSystemService(Context.ALARM_SERVICE) as AlarmManager)
+                    .canScheduleExactAlarms()
+        )
+            add(context.getString(R.string.flight_live_need_alarm))
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+        )
+            add(context.getString(R.string.flight_live_need_notifications))
+    }
+
+    private fun alarmIntent(context: Context, id: String): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            0,
+            Intent(context, FlightScheduleReceiver::class.java)
+                .setAction(START)
+                .setData(
+                    Uri.fromParts(
+                        "flight-schedule",
+                        id.also { require(it.matches(Regex("[A-Za-z0-9_-]{1,80}"))) },
+                        null,
+                    )
+                )
+                .putExtra("journey", id),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    fun arm(context: Context, journey: FlightJourney) {
+        val p = requireNotNull(journey.plan.preparation)
+        require(
+            p.departureMillis > 0 &&
+                p.arrivalMillis > p.departureMillis &&
+                p.arrivalMillis > System.currentTimeMillis()
+        ) {
+            context.getString(R.string.flight_plan_dates_invalid)
+        }
+        require(
+            journey.plan.stops.size >= 2 &&
+                journey.plan.stops.all { it.latitude != null && it.longitude != null }
+        ) {
+            context.getString(R.string.flight_plan_coverage_required)
+        }
+        val phase = FlightRecordingStore(context, journey.id).readState().phase
+        check(phase != FlightTrackingPhase.LANDED && phase != FlightTrackingPhase.STOPPED) {
+            context.getString(R.string.flight_plan_repeat_completed)
+        }
+        check(missingPermissions(context).isEmpty()) {
+            missingPermissions(context).joinToString(" · ")
+        }
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            p.startMillis.coerceAtLeast(System.currentTimeMillis() + 1000),
+            alarmIntent(context, journey.id),
+        )
+        prefs.edit().putString(journey.id, p.toJson().toString()).apply()
+    }
+
+    fun cancel(context: Context, id: String) {
+        (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(
+            alarmIntent(context, id)
+        )
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(id).apply()
+    }
+
+    fun restore(context: Context) {
+        if (missingPermissions(context).isNotEmpty()) return
+        val now = System.currentTimeMillis()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).all.forEach { (id, value) ->
+            runCatching {
+                val p =
+                    FlightPreparation.fromJson(JSONObject(value as String)) ?: return@runCatching
+                val phase = FlightRecordingStore(context, id).readState().phase
+                if (
+                    p.arrivalMillis + 24 * 3_600_000L < now ||
+                        phase == FlightTrackingPhase.LANDED ||
+                        phase == FlightTrackingPhase.STOPPED
+                )
+                    cancel(context, id)
+                else
+                    (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager)
+                        .setExactAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP,
+                            p.startMillis.coerceAtLeast(now + 60_000),
+                            alarmIntent(context, id),
+                        )
+            }
+        }
+    }
+}
+
+class FlightScheduleReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == FlightScheduleManager.START) {
+            val id = intent.getStringExtra("journey") ?: return
+            try {
+                FlightRecordingService.start(context, id)
+            } catch (e: Exception) {
+                context
+                    .getSharedPreferences(FlightRecordingService.PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("error", e.message ?: e.javaClass.simpleName)
+                    .apply()
+            }
+        } else {
+            val pending = goAsync()
+            Thread {
+                    try {
+                        FlightScheduleManager.restore(context.applicationContext)
+                    } finally {
+                        pending.finish()
+                    }
+                }
+                .start()
+        }
+    }
+}

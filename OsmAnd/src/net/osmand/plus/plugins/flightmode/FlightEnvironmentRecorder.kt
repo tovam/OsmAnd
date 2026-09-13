@@ -33,8 +33,10 @@ data class FlightEnvironmentReading(
  */
 class FlightEnvironmentRecorder(
 	context: Context,
+	private val sensorHandler: Handler? = null,
 	private val onReading: (FlightEnvironmentReading) -> Unit
 ) : SensorEventListener {
+	constructor(context: Context, onReading: (FlightEnvironmentReading) -> Unit) : this(context, null, onReading)
 
 	private val sensorManager = context.applicationContext
 		.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -59,7 +61,7 @@ class FlightEnvironmentRecorder(
 		lastEmissionMillis = 0L
 		running = true
 		accelerometer?.let {
-			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, sensorHandler)
 		}
 		if (recordMicrophone) startMicrophone()
 	}

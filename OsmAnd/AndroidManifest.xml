@@ -10,6 +10,10 @@
 
 	<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 	<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+	<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+	<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+	<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 	<uses-permission android:name="android.permission.ACCESS_LOCATION_EXTRA_COMMANDS" />
 
 	<uses-permission android:name="android.permission.INTERNET" />
@@ -89,6 +93,17 @@
 		android:hasFragileUserData="true" android:requestLegacyExternalStorage="true"
 		android:localeConfig="@xml/locales_config"
 		android:enableOnBackInvokedCallback="false">
+
+		<service android:name=".plugins.flightmode.FlightRecordingService" android:exported="false"
+			android:foregroundServiceType="location|microphone" android:stopWithTask="false" />
+		<receiver android:name=".plugins.flightmode.FlightScheduleReceiver" android:exported="false">
+			<intent-filter>
+				<action android:name="android.intent.action.BOOT_COMPLETED" />
+				<action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+				<action android:name="android.intent.action.TIME_SET" />
+				<action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+			</intent-filter>
+		</receiver>
 
 		<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
 

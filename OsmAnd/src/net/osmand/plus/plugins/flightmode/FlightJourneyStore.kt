@@ -40,7 +40,7 @@ class FlightJourneyStore(private val context: Context) {
 		val currentJournalBytes = currentJourneyId?.let { id ->
 			runCatching {
 				File(journeysDirectory, "${validatedId(id)}.$JOURNEY_FILE_EXTENSION")
-					.takeIf(File::isFile)?.length() ?: 0L
+					.takeIf(File::isFile)?.length()?.plus(FlightRecordingStore(context,id).sizeBytes()) ?: 0L
 			}.getOrDefault(0L)
 		} ?: 0L
 		val mediaRoot = runCatching { mediaDirectory.canonicalFile }.getOrNull()
@@ -177,35 +177,45 @@ class FlightJourneyStore(private val context: Context) {
 		photoCount = root.optJSONArray("photos")?.length() ?: 0
 	)
 
-	fun save(journey: FlightJourney): FlightJourney {
-		val storedJourney = journey.copy(
-			offlineAssets = discoverOfflineAssets(journey.plan, journey.trip, journey.offlineAssets)
+	fun save(journey: FlightJourney): FlightJourney = synchronized(STORE_LOCK) {
+		val target=File(journeysDirectory,"${validatedId(journey.id)}.$JOURNEY_FILE_EXTENSION")
+		val previous=if(target.isFile) JSONObject(android.util.AtomicFile(target).openRead().bufferedReader().use { it.readText() }) else JSONObject()
+		val previousAssets=offlineAssetsFromJson(previous.optJSONObject("offlineAssets"))
+		val previousRequest=offlineAssetsFromJson(previous.optJSONObject("offlineRequest"))
+		val recorded=FlightRecordingStore(context,journey.id).merge(journey)
+		val request=FlightOfflineAssets((recorded.offlineRequest.terrainTiles+previousRequest.terrainTiles).distinct(),
+			(recorded.offlineRequest.standardSatelliteTiles+previousRequest.standardSatelliteTiles).distinct())
+		val combined=FlightOfflineAssets((recorded.offlineAssets.terrainTiles+previousAssets.terrainTiles+request.terrainTiles).distinct(),
+			(recorded.offlineAssets.standardSatelliteTiles+previousAssets.standardSatelliteTiles+request.standardSatelliteTiles).distinct())
+		val storedJourney = recorded.copy(
+			offlineRequest=request,
+			offlineAssets = discoverOfflineAssets(recorded.plan, recorded.trip, combined)
 		)
 		val safeId = validatedId(storedJourney.id)
 		val destination = File(journeysDirectory, "$safeId.$JOURNEY_FILE_EXTENSION")
-		val temporary = File(journeysDirectory, ".$safeId.tmp")
-		temporary.writeText(journeyToJson(storedJourney).toString())
-		if (destination.exists() && !destination.delete()) {
-			temporary.delete()
-			throw IOException("Impossible de remplacer le voyage enregistré")
-		}
-		if (!temporary.renameTo(destination)) {
-			temporary.delete()
-			throw IOException("Impossible d’enregistrer le voyage")
-		}
-		return storedJourney
+		val atomic = android.util.AtomicFile(destination)
+		val stream = atomic.startWrite()
+		try { stream.write(journeyToJson(storedJourney).toString().toByteArray(Charsets.UTF_8)); atomic.finishWrite(stream) }
+		catch (error: Exception) { atomic.failWrite(stream); throw error }
+		storedJourney
 	}
 
-	fun load(id: String): FlightJourney {
+	/** A single transaction prevents a recorder/download completion overwriting concurrent photo edits. */
+	fun update(id: String, transform: (FlightJourney) -> FlightJourney): FlightJourney = synchronized(STORE_LOCK) {
+		save(transform(load(id)))
+	}
+
+	fun load(id: String): FlightJourney = synchronized(STORE_LOCK) {
 		val file = File(journeysDirectory, "${validatedId(id)}.$JOURNEY_FILE_EXTENSION")
 		if (!file.isFile) throw IOException("Journal de vol introuvable")
-		val loaded = journeyFromJson(JSONObject(file.readText())) { storageName ->
+		val loaded = journeyFromJson(JSONObject(android.util.AtomicFile(file).openRead().bufferedReader().use { it.readText() })) { storageName ->
 			File(mediaDirectory, safeFileName(storageName)).absolutePath
 		}
-		val discoveredAssets = discoverOfflineAssets(loaded.plan, loaded.trip, loaded.offlineAssets)
-		return if (discoveredAssets != loaded.offlineAssets) {
-			save(loaded.copy(offlineAssets = discoveredAssets))
-		} else loaded
+		val withRecording = FlightRecordingStore(context, loaded.id).merge(loaded)
+		val discoveredAssets = discoverOfflineAssets(withRecording.plan, withRecording.trip, FlightOfflineAssets(
+			withRecording.offlineAssets.terrainTiles+withRecording.offlineRequest.terrainTiles,
+			withRecording.offlineAssets.standardSatelliteTiles+withRecording.offlineRequest.standardSatelliteTiles))
+		withRecording.copy(offlineAssets = discoveredAssets)
 	}
 
 	fun isJourneyArchive(uri: Uri): Boolean = context.contentResolver.openInputStream(uri)?.buffered()?.use { input ->
@@ -423,8 +433,10 @@ class FlightJourneyStore(private val context: Context) {
 		put("updatedAtMillis", journey.updatedAtMillis)
 		put("tripFingerprint", FlightTripFingerprint.create(journey.trip))
 		put("plan", planToJson(journey.plan))
+		put("battery", JSONArray().apply { journey.batteryHistory.forEach { put(JSONArray(listOf(it.timeMillis, it.percent, it.charging))) } })
 		put("trip", tripToJson(journey.trip))
 		put("offlineAssets", offlineAssetsToJson(journey.offlineAssets))
+		put("offlineRequest", offlineAssetsToJson(journey.offlineRequest))
 		put("flightSpans", JSONArray().apply {
 			journey.flightSpans.forEach { span ->
 				put(JSONObject().put("start", span.startProgress).put("end", span.endProgress))
@@ -510,7 +522,11 @@ class FlightJourneyStore(private val context: Context) {
 			trip = trip,
 			flightSpans = spans,
 			photos = photos,
-			offlineAssets = offlineAssetsFromJson(root.optJSONObject("offlineAssets"))
+			offlineAssets = offlineAssetsFromJson(root.optJSONObject("offlineAssets")),
+			offlineRequest = offlineAssetsFromJson(root.optJSONObject("offlineRequest")),
+			batteryHistory = root.optJSONArray("battery")?.let { a -> List(a.length()) { i ->
+				val b=a.getJSONArray(i); FlightBatteryPoint(b.getLong(0),b.getDouble(1).toFloat(),b.getBoolean(2))
+			} } ?: emptyList()
 		)
 	}
 
@@ -659,6 +675,7 @@ class FlightJourneyStore(private val context: Context) {
 		put("shadowsEnabled", plan.shadowsEnabled)
 		put("shadowIntensity", plan.shadowIntensity.coerceIn(0f, 1f).toDouble())
 		put("resumeAfterRestart", plan.resumeAfterRestart)
+		put("preparation", plan.preparation?.toJson())
 		put("stops", JSONArray().apply {
 			plan.stops.forEach { stop ->
 				put(JSONObject().apply {
@@ -697,7 +714,8 @@ class FlightJourneyStore(private val context: Context) {
 			}.getOrDefault(FlightSatelliteQuality.HIGH),
 			shadowsEnabled = json.optBoolean("shadowsEnabled", true),
 			shadowIntensity = json.optDouble("shadowIntensity", 0.85).toFloat().coerceIn(0f, 1f),
-			resumeAfterRestart = json.optBoolean("resumeAfterRestart", true)
+			resumeAfterRestart = json.optBoolean("resumeAfterRestart", true),
+			preparation = FlightPreparation.fromJson(json.optJSONObject("preparation"))
 		)
 	}
 
@@ -727,7 +745,7 @@ class FlightJourneyStore(private val context: Context) {
 		val samples = FlightTrackMath.fillMissingBearings((0 until samplesJson.length()).map { index ->
 			sampleFromJson(samplesJson.getJSONObject(index))
 		})
-		if (samples.isEmpty()) throw IOException("Voyage sans point GPS")
+		if (samples.isEmpty()) return recordedFlightTrip(json.optString("name"), emptyList())
 		val legsJson = json.optJSONArray("legs") ?: JSONArray()
 		val legs = (0 until legsJson.length()).mapNotNull { index ->
 			legsJson.optJSONObject(index)?.let { leg ->
@@ -755,7 +773,7 @@ class FlightJourneyStore(private val context: Context) {
 		)
 	}
 
-	private fun sampleToJson(sample: FlightSample): JSONObject = JSONObject().apply {
+	internal fun sampleToJson(sample: FlightSample): JSONObject = JSONObject().apply {
 		put("index", sample.index)
 		put("legIndex", sample.legIndex)
 		put("timestampMillis", sample.timestampMillis)
@@ -775,7 +793,7 @@ class FlightJourneyStore(private val context: Context) {
 		}
 	}
 
-	private fun sampleFromJson(json: JSONObject): FlightSample {
+	internal fun sampleFromJson(json: JSONObject): FlightSample {
 		val spectrumJson = json.optJSONArray("soundSpectrum")
 		return FlightSample(
 			index = json.optInt("index"),
@@ -1058,6 +1076,7 @@ class FlightJourneyStore(private val context: Context) {
 		.replace("'", "&apos;")
 
 	companion object {
+		private val STORE_LOCK=Any()
 		const val ARCHIVE_EXTENSION = "osmandflight"
 		private const val SCHEMA_VERSION = 9
 		private const val JOURNEYS_DIRECTORY = "flight-journeys"
