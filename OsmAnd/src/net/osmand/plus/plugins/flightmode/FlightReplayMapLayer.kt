@@ -58,6 +58,31 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private var nativeTrip: FlightTrip? = null
 	private var nativeHeights = FloatArray(0)
 	private var routeLinesCollection: VectorLinesCollection? = null
+	private var hypothesisCollection: VectorLinesCollection? = null
+	private var hypothesisPlan: FlightPlan? = null
+	private var hypothesisSample: FlightSample? = null
+	private var hypothesisDirty = true
+
+	fun updateHypothesis(plan: FlightPlan?, sample: FlightSample?) {
+		if(hypothesisPlan==plan && hypothesisSample==sample) return
+		hypothesisPlan=plan;hypothesisSample=sample;hypothesisDirty=true
+	}
+
+	private fun rebuildHypothesis() {
+		hypothesisCollection?.let { mapRenderer?.removeSymbolsProvider(it) }
+		hypothesisCollection=null; hypothesisDirty=false
+		val plan=hypothesisPlan?:return; val sample=hypothesisSample?:return
+		val route=FlightRouteHypothesis.remaining(plan,sample)
+		if(route.size<2)return
+		val points=QVectorPointI().apply { route.forEach { add(point31(it)) } }
+		val collection=VectorLinesCollection(true)
+		VectorLineBuilder().setLineId(9180).setBaseOrder(pointsOrder+3).setPoints(points)
+			.setLineWidth(1.5*GeometryWayDrawer.getVectorLineScale(application))
+			.setFillColor(NativeUtilities.createFColorARGB(Color.rgb(100,150,165)))
+			.setSurfaceLineVisibility(true).setElevatedLineVisibility(false).setApproximationEnabled(false)
+			.buildAndAddToCollection(collection)
+		hypothesisCollection=collection
+	}
 	private var pointMarkersCollection: MapMarkersCollection? = null
 	private var photoMarkersCollection: MapMarkersCollection? = null
 	private var aircraftLinesCollection: VectorLinesCollection? = null
@@ -153,6 +178,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			return
 		}
 		if (mapRendererChanged) {
+			hypothesisDirty=true
 			clearNativeCollections()
 			routeGeometryDirty = true
 			pointGeometryDirty = true
@@ -161,6 +187,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			mapRendererChanged = false
 		}
 		if (routeGeometryDirty) rebuildRoute(current.trip)
+		if (hypothesisDirty) rebuildHypothesis()
 		if (pointGeometryDirty) rebuildRecordedPoints(current.trip, current.showPoints)
 		if (photoGeometryDirty) rebuildPhotoMarkers(current.trip, current.photos)
 		val groundAltitudeMeters = current.sample?.let { sample ->
@@ -180,6 +207,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		}
 
 		routeLinesCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
+		hypothesisCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		pointMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		photoMarkersCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
 		aircraftLinesCollection?.let { if (!renderer.hasSymbolsProvider(it)) renderer.addSymbolsProvider(it) }
@@ -666,6 +694,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	}
 
 	private fun clearNativeCollections() {
+		hypothesisCollection?.let { mapRenderer?.removeSymbolsProvider(it) }; hypothesisCollection=null
 		clearRouteCollection()
 		clearPointCollection()
 		clearPhotoCollection()

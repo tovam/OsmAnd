@@ -104,6 +104,7 @@ jobs:
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoPoseSolverTest
 
       - name: Resolve patched core cache identity
+        # Keep the native cache separate from the inexpensive JVM checks below.
         id: patched-core-identity
         run: |
           echo "core_sha=$(git -C core rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
@@ -184,6 +185,17 @@ jobs:
           export APK_VERSION_SUFFIX="#smart${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           echo "Building update-compatible versionCode ${APK_NUMBER_VERSION}"
           ./gradlew --build-cache -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
+
+      - name: Test flight preparation and interrupted recording recovery
+        working-directory: android
+        run: |
+          mkdir -p .flight-test-tools
+          curl --fail --silent --show-error https://repo.maven.apache.org/maven2/com/facebook/ktfmt/0.54/ktfmt-0.54-jar-with-dependencies.jar -o .flight-test-tools/ktfmt.jar
+          curl --fail --silent --show-error https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar -o .flight-test-tools/json.jar
+          curl --fail --silent --show-error https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.8.1/kotlinx-coroutines-core-jvm-1.8.1.jar -o .flight-test-tools/coroutines.jar
+          curl --fail --silent --show-error https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar -o .flight-test-tools/junit.jar
+          curl --fail --silent --show-error https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar -o .flight-test-tools/hamcrest.jar
+          bash OsmAnd/test/standalone/check-flight-preparation.sh .flight-test-tools
 
       - name: Verify patched native core is packaged
         run: |

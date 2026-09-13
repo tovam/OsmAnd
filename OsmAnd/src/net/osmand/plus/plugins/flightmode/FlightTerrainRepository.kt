@@ -935,6 +935,10 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		trip: FlightTrip?,
 		onStatus: suspend (FlightTerrainStatus) -> Unit
 	): FlightTerrainStatus {
+		if (plan.preparation != null) {
+			val quote = withContext(Dispatchers.Default) { FlightOfflinePreparation.quote(plan) }
+			return preloadPrepared(quote,onStatus)
+		}
 		onStatus(FlightTerrainStatus(phase = FlightTerrainPhase.PLANNING))
 		val tilePlan = withContext(Dispatchers.Default) {
 			trip?.samples?.takeIf { it.size >= 2 }?.let {
@@ -962,7 +966,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					available++
 					if (cached.downloaded) downloaded++
 					if (cached.standardSatellite != null) satelliteAvailable++
-					else if (cached.satelliteAttempted) satelliteFailed++
+					else satelliteFailed++
 					bytesDownloaded += cached.downloadedBytes
 				}.onFailure {
 					failed++
@@ -990,7 +994,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		}
 		if (available == 0) throw IOException("Aucune tuile de relief n’a pu être préchargée")
 		return FlightTerrainStatus(
-			phase = FlightTerrainPhase.READY,
+			phase = if (failed == 0 && satelliteAvailable == tilePlan.tiles.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR,
 			requestedTiles = tilePlan.tiles.size,
 			availableTiles = available,
 			downloadedTiles = downloaded,
@@ -1008,6 +1012,48 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				else -> "Relief + satellite Standard rattachés au trajet"
 			}
 		)
+	}
+
+	/** Verify each expected source independently, including cached files, before declaring readiness. */
+	suspend fun preloadPrepared(quote: FlightOfflineQuote, onStatus: suspend (FlightTerrainStatus) -> Unit): FlightTerrainStatus {
+		var terrain=0; var satellite=0; var failedTerrain=0; var failedSatellite=0; var downloaded=0
+		var bytes=0L
+		val started=android.os.SystemClock.elapsedRealtime()
+		val terrainCount=quote.requests.count { !it.satellite }
+		fun status(phase:FlightTerrainPhase)=FlightTerrainStatus(phase=phase,requestedTiles=terrainCount,
+			availableTiles=terrain,failedTiles=failedTerrain,satelliteTiles=satellite,satelliteFailedTiles=failedSatellite,
+			downloadedTiles=downloaded,bytesDownloaded=bytes,
+			bytesPerSecond=bytes*1000/(android.os.SystemClock.elapsedRealtime()-started).coerceAtLeast(1),
+			message=app.getString(net.osmand.plus.R.string.flight_plan_missing_tiles,terrain+satellite,quote.requests.size,failedTerrain+failedSatellite))
+		for(chunk in quote.requests.chunked(PARALLEL_DOWNLOADS)) {
+			if(app.filesDir.usableSpace<256L*1024*1024 && chunk.any {
+				!(if(it.satellite) satelliteFile(it.tile) else tileFile(it.tile)).isFile })
+				return status(FlightTerrainPhase.ERROR).copy(message=app.getString(net.osmand.plus.R.string.flight_plan_low_space))
+			val results=coroutineScope { chunk.map { request -> async(Dispatchers.IO) {
+				try {
+					var cached=if(request.satellite) ensureSatelliteSourceFile(request.tile,true)
+						else ensureTerrainFile(request.tile)
+					if (!fullyDecodedTile(cached.file)) {
+						withAssetLock(cached.file) {
+							if (!fullyDecodedTile(cached.file) && cached.file.exists() && !cached.file.delete())
+								throw IOException("Cannot replace corrupt tile ${request.tile}")
+						}
+						cached=if(request.satellite) ensureSatelliteSourceFile(request.tile,true) else ensureTerrainFile(request.tile)
+						if(!fullyDecodedTile(cached.file)) throw IOException("Unreadable downloaded tile ${request.tile}")
+					}
+					Result.success(cached)
+				} catch(e:CancellationException) { throw e } catch(e:Exception) { Result.failure<CachedAsset>(e) }
+			} }.awaitAll() }
+			results.forEachIndexed { i,result ->
+				result.onSuccess {
+					if(chunk[i].satellite) satellite++ else terrain++
+					if(it.downloaded) downloaded++
+					bytes+=it.downloadedBytes
+				}.onFailure { if(chunk[i].satellite) failedSatellite++ else failedTerrain++ }
+			}
+			onStatus(status(FlightTerrainPhase.DOWNLOADING))
+		}
+		return status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR)
 	}
 
 	private fun loadTerrainTile(tileId: TerrainTileId): LoadedTerrainTile {
@@ -1326,6 +1372,24 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 		BitmapFactory.decodeFile(file.absolutePath, options)
 		return options.outWidth > 0 && options.outHeight > 0
+	}
+
+	/** Completion verifies pixels, not only a readable PNG/JPEG header. */
+	private fun fullyDecodedTile(file: File): Boolean {
+		ensureWorkActive()
+		if (!isDecodableImage(file)) return false
+		val bitmap=BitmapFactory.decodeFile(file.absolutePath) ?: return false
+		return try { bitmap.width==256 && bitmap.height==256 } finally { bitmap.recycle() }
+	}
+
+	suspend fun existingPreparationBytes(quote: FlightOfflineQuote): Pair<Int,Long> = withContext(Dispatchers.IO) {
+		var count=0;var bytes=0L
+		for(request in quote.requests) {
+			kotlin.coroutines.coroutineContext.ensureActive()
+			val file=if(request.satellite) satelliteFile(request.tile) else tileFile(request.tile)
+			if(file.isFile && file.length()>0) { count++;bytes+=file.length() }
+		}
+		count to bytes
 	}
 
 	private fun decodeTile(tileId: TerrainTileId, file: File): TerrariumTile? {

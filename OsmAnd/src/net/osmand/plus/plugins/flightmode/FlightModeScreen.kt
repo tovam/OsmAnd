@@ -222,7 +222,15 @@ fun FlightModeScreen(
 	onOpenJourney: (String) -> Unit,
 	onOpenDuplicateJourney: () -> Unit,
 	onContinueDuplicateImport: () -> Unit,
-	onDismissDuplicateImport: () -> Unit
+	onDismissDuplicateImport: () -> Unit,
+	onSavePreparation: (Boolean) -> Unit = {},
+	onNewPreparation: (Boolean) -> Unit = {},
+	onPreloadPreparation: (FlightOfflineQuote) -> Unit = {},
+	onCancelPreparationDownload: () -> Unit = {},
+	onRehearsePreparation: () -> Unit = {},
+	onPreparationPermissions: () -> Unit = {},
+	onStopLive: () -> Unit = {},
+	onToggleLiveMicrophone: () -> Unit = {}
 ) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
@@ -291,20 +299,10 @@ fun FlightModeScreen(
 				.windowInsetsPadding(safeDrawingInsets)
 		) {
 			when (state.page) {
-				FlightPage.PREPARE -> PrepareScreen(
-					state = state,
-					onClose = onClose,
-					onImportTrip = onImportTrip,
-					onSelectInternalTrack = onSelectInternalTrack,
-					onStartLive = onStartLive,
-					onUpdateStop = onUpdateStop,
-					onSelectCity = onSelectCity,
-					onDismissCitySuggestions = onDismissCitySuggestions,
-					onAddStop = onAddStop,
-					onRemoveStop = onRemoveStop,
-					onUpdatePlan = onUpdatePlan,
-					onOpenJourney = onOpenJourney
-				)
+				FlightPage.LIVE -> FlightLiveScreen(state,onPageChange,onStartLive,onStopLive,onToggleLiveMicrophone,onPhotoAction)
+				FlightPage.PREPARE -> key(state.journeyId) { FlightPlanningScreen(state,onClose,onUpdatePlan,
+					onSavePreparation,onPreloadPreparation,onCancelPreparationDownload,onRehearsePreparation,
+					onStartLive,onPreparationPermissions,onImportTrip,onSelectInternalTrack,onOpenJourney,onNewPreparation) }
 				FlightPage.MAP -> MapScreen(
 					state = state,
 					mapView = mapView,
@@ -405,6 +403,11 @@ fun FlightModeScreen(
 				)
 			}
 
+			if(state.previewingPlan) {
+				Row(Modifier.align(Alignment.TopCenter).background(FlightPanelStrong)) {
+					PlanAction(stringResource(R.string.flight_plan_simulation_exit),{onPageChange(FlightPage.PREPARE)})
+				}
+			}
 			if (state.loadingTrip) {
 				Box(
 					modifier = Modifier.fillMaxSize().background(Color(0xD900000000)),
@@ -1586,6 +1589,7 @@ private fun SensorsScreen(
 				SensorReadout(sample)
 			}
 			item { SectionTitle("ENVIRONNEMENT") }
+			item { Column(Modifier.padding(horizontal=8.dp)) { FlightBatteryChart(state.batteryHistory) } }
 			item {
 				EnvironmentSensorRow(
 					title = stringResource(R.string.flight_mode_sound),
@@ -2462,6 +2466,7 @@ private fun ReplayStepButton(text: String, onClick: () -> Unit) {
 @Composable
 private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage) -> Unit, overlay: Boolean = false) {
 	val pages = listOf(
+		FlightPage.LIVE to stringResource(R.string.flight_live_title),
 		FlightPage.MAP to stringResource(R.string.flight_mode_map),
 		FlightPage.WINDOW to stringResource(R.string.flight_mode_window),
 		FlightPage.SATELLITE to stringResource(R.string.flight_mode_cached_tiles_short),

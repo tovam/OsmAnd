@@ -43,11 +43,14 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var previous3DMapsEnabled: Boolean? = null
 	private var flightMapViewInitialized = false
 	private var flightRendererSetupRequested = false
+	private val locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+		if (granted[Manifest.permission.ACCESS_FINE_LOCATION]==true) viewModel.startLive()
+	}
 	private val microphonePermissionLauncher = registerForActivityResult(
 		ActivityResultContracts.RequestPermission()
 	) { granted ->
 		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
-			restartEnvironmentRecorder(recordMicrophone = granted)
+			FlightRecordingService.microphone(requireContext(),granted)
 		}
 	}
 	private val openTripLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -78,7 +81,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					viewModel.showPage(FlightPage.WINDOW)
 				}
 				FlightPage.WINDOW, FlightPage.SATELLITE, FlightPage.SENSORS, FlightPage.PHOTO,
-				FlightPage.JOURNEYS -> viewModel.showPage(FlightPage.MAP)
+				FlightPage.JOURNEYS, FlightPage.LIVE -> viewModel.showPage(FlightPage.MAP)
 				FlightPage.MAP, FlightPage.PREPARE -> close()
 			}
 		}
@@ -111,13 +114,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 						)
 					},
 					onSelectInternalTrack = ::openInternalTrack,
-					onStartLive = {
-						viewModel.startLive()
-						app.locationProvider.lastKnownLocation?.let {
-							viewModel.updateLiveLocation(it, app.locationProvider.gpsInfo)
-						}
-						startEnvironmentRecorder(requestPermission = true)
-					},
+					onStartLive = ::startLiveWithPermission,
 					onUpdateStop = viewModel::updateStop,
 					onSelectCity = viewModel::selectCity,
 					onDismissCitySuggestions = viewModel::dismissCitySuggestions,
@@ -180,7 +177,15 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onOpenJourney = viewModel::openJourney,
 					onOpenDuplicateJourney = viewModel::openDuplicateJourney,
 					onContinueDuplicateImport = viewModel::continueDuplicateImport,
-					onDismissDuplicateImport = viewModel::dismissDuplicateImport
+					onDismissDuplicateImport = viewModel::dismissDuplicateImport,
+					onSavePreparation = viewModel::savePreparation,
+					onNewPreparation = viewModel::newPreparation,
+					onPreloadPreparation = viewModel::preloadPreparation,
+					onCancelPreparationDownload = viewModel::pausePreparationDownload,
+					onRehearsePreparation = viewModel::rehearsePreparation,
+					onPreparationPermissions = ::showPreparationPermissions,
+					onStopLive = { FlightRecordingService.stop(requireContext()) },
+					onToggleLiveMicrophone = ::toggleLiveMicrophone
 				)
 			}
 		}
@@ -196,8 +201,16 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		}
 	}
 
+	private fun toggleLiveMicrophone() {
+		if (FlightRecordingService.state.value.microphone) FlightRecordingService.microphone(requireContext(),false)
+		else if(ContextCompat.checkSelfPermission(requireContext(),Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
+			FlightRecordingService.microphone(requireContext(),true)
+		else microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+	}
+
 	override fun onResume() {
 		super.onResume()
+		viewModel.setUiVisible(true)
 		val activity = requireMapActivity()
 		activity.disableDrawer()
 		val hud = activity.findViewById<View>(R.id.map_hud_container)
@@ -208,14 +221,11 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		disableNativeFlightRelief()
 		suppressSurfaceGpxTracks()
 		installMapInteractionGuard()
-		startLocationUpdates()
-		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
-			startEnvironmentRecorder(requestPermission = false)
-		}
 		activity.refreshMap()
 	}
 
 	override fun onPause() {
+		viewModel.setUiVisible(false)
 		if (!externalPhotoCaptureInProgress) {
 			stopLocationUpdates()
 			environmentRecorder?.stop()
@@ -252,9 +262,26 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	}
 
 	override fun updateLocation(location: Location?) {
-		if (location != null) {
-			viewModel.updateLiveLocation(location, app.locationProvider.gpsInfo)
-		}
+		// Measurements are supplied by FlightRecordingService, independently of this fragment.
+	}
+
+	private fun startLiveWithPermission() {
+		if (ContextCompat.checkSelfPermission(requireContext(),Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED)
+			viewModel.startLive()
+		else locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION))
+	}
+
+	private fun showPreparationPermissions() {
+		val context=requireContext()
+		val missing=FlightScheduleManager.missingPermissions(context)
+		androidx.appcompat.app.AlertDialog.Builder(context).setTitle(R.string.flight_plan_permissions)
+			.setMessage(getString(R.string.flight_plan_permission_explanation)+"\n\n"+missing.joinToString("\n"))
+			.setPositiveButton(R.string.flight_plan_open_settings) { _,_ ->
+				val alarm=context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+				val action=if(android.os.Build.VERSION.SDK_INT>=31 && !alarm.canScheduleExactAlarms())
+					android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM else android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+				startActivity(android.content.Intent(action,android.net.Uri.parse("package:${context.packageName}")))
+			}.setNegativeButton(R.string.shared_string_cancel,null).show()
 	}
 
 	override fun getInsetTargets(): InsetTargetsCollection = InsetTargetsCollection()
@@ -267,6 +294,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	) {
 		if (viewModel.uiState.sessionMode != FlightSessionMode.LIVE) environmentRecorder?.stop()
 		replayMapLayer?.update(trip, sample, showPoints, photos)
+		replayMapLayer?.updateHypothesis(if(viewModel.uiState.sessionMode==FlightSessionMode.LIVE) viewModel.uiState.plan else null,
+			viewModel.uiState.liveState.latest)
 		if (sample == null || viewModel.uiState.page != FlightPage.MAP || !viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
 		mapView.setLatLon(sample.latitude, sample.longitude)
@@ -432,7 +461,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	}
 
 	private fun restartEnvironmentRecorder(recordMicrophone: Boolean) {
-		val recorder = environmentRecorder ?: FlightEnvironmentRecorder(requireContext(), viewModel::updateEnvironment)
+		val recorder = environmentRecorder ?: FlightEnvironmentRecorder(requireContext(), onReading=viewModel::updateEnvironment)
 			.also { environmentRecorder = it }
 		recorder.stop()
 		recorder.start(recordMicrophone)

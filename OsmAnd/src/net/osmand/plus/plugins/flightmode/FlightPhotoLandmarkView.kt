@@ -13,6 +13,10 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     var onMapPoint: (Double, Double) -> Unit = { _, _ -> }
     var onSelectPoint: (Int) -> Unit = {}
     var onRotation: (Float) -> Unit = {}
+    var coverage: List<Pair<TerrainTileId, Int>> = emptyList()
+    var routeOverview: Boolean = false
+    var autoFitRoute: Boolean = false
+    var routePaddingKm: Double = 0.0
     var onStatus: (String) -> Unit = {}
     private var image: Bitmap? = null
     private var calibration = FlightPhotoCalibration()
@@ -65,7 +69,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                     } else {
                         zoom =
                             (zoom + ln(detector.scaleFactor.toDouble()) / ln(2.0)).coerceIn(
-                                3.0,
+                                if(routeOverview)1.0 else 3.0,
                                 23.0,
                             )
                         requestTiles()
@@ -159,6 +163,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         track: FlightTrip?,
         useSatellite: Boolean,
     ) {
+        val routeChanged=routeOverview && data.points!=calibration.points
         image = bitmap
         calibration = data
         rotation = data.pickerRotation
@@ -178,6 +183,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             satellite = useSatellite
             requestedKey = ""
         }
+        if(routeChanged && autoFitRoute) fit()
         if (mode != 0) requestTiles()
         invalidate()
     }
@@ -185,7 +191,20 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     fun fit() {
         val ref = reference ?: return
         requestedKey = "" // Reframe is also an explicit retry of missing map tiles.
-        if (mode == 2 && estimated != null) {
+        if (routeOverview) {
+            zoom=2.0
+            val coordinates = calibration.points.mapNotNull { p -> p.latitude?.let { lat -> p.longitude?.let { lat to it } } }
+            if(coordinates.isNotEmpty()) {
+                latitude=coordinates.map { it.first }.average()
+                val origin=coordinates.first().second
+                val longs=coordinates.map { origin+normalize(it.second-origin) }
+                longitude=normalize((longs.minOrNull()!!+longs.maxOrNull()!!)/2)
+                val dx=((longs.maxOrNull()!!-longs.minOrNull()!!)+2*routePaddingKm/(111*cos(Math.toRadians(latitude)).coerceAtLeast(0.1))).coerceAtLeast(2.0)/360
+                val ys=coordinates.map { FlightTerrainTilePlanner.latitudeToTileY(it.first,0) }
+                val dy=(ys.maxOrNull()!!-ys.minOrNull()!!+2*routePaddingKm/(40_075*cos(Math.toRadians(latitude)).coerceAtLeast(0.1))).coerceAtLeast(0.015)
+                zoom=log2(min(width.coerceAtLeast(300)/(256*dx*1.3),height.coerceAtLeast(250)/(256*dy*1.3))).coerceIn(1.0,14.0)
+            }
+        } else if (mode == 2 && estimated != null) {
             val end = estimated!!
             latitude = (ref.eyeLatitude + end.eyeLatitude) / 2
             longitude =
@@ -397,6 +416,18 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             }
         }
         val path = Path()
+        coverage.forEach { (id, color) ->
+            val top=FlightTerrainTilePlanner.tileYToLatitude(id.y.toDouble(),id.zoom)
+            val bottom=FlightTerrainTilePlanner.tileYToLatitude(id.y+1.0,id.zoom)
+            val left=id.x.toDouble()/(1 shl id.zoom)*360-180
+            val a=project(top,left)
+            val size=(256*2.0.pow(zoom-id.zoom)).toFloat()
+            val b=project(bottom,left)
+            if(a.x+size>=0 && a.x<=width && b.y>=0 && a.y<=height) {
+                paint.color=color
+                canvas.drawRect(a.x,a.y,a.x+size,b.y,paint)
+            }
+        }
         val samples = trip?.samples.orEmpty()
         val stride = max(1, samples.size / 2000)
         samples
