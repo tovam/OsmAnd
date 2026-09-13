@@ -88,13 +88,14 @@ data class FlightPhotoEditorView(
 )
 
 data class FlightPhotoCalibration(
-    val points: List<FlightPhotoControlPoint> = List(5) { FlightPhotoControlPoint() },
+    val points: List<FlightPhotoControlPoint> = emptyList(),
     val imageWidth: Int = 0,
     val imageHeight: Int = 0,
     val fitFocal: Boolean = true,
     val verticalFov: Double = 60.0,
     val fit: FlightPhotoFit? = null,
     val editorView: FlightPhotoEditorView = FlightPhotoEditorView(),
+    val pickerRotation: Float = 0f,
 ) {
     fun toJson(): JSONObject =
         JSONObject().apply {
@@ -103,6 +104,7 @@ data class FlightPhotoCalibration(
             put("height", imageHeight)
             put("fitFocal", fitFocal)
             put("verticalFov", verticalFov)
+            put("pickerRotation", pickerRotation)
             put(
                 "view",
                 JSONObject().apply {
@@ -151,7 +153,6 @@ data class FlightPhotoCalibration(
                     fun number(j: JSONObject, k: String) =
                         j.optDouble(k, Double.NaN).takeIf(Double::isFinite)
                     val arr = json.getJSONArray("points")
-                    require(arr.length() in 1..20)
                     val points =
                         List(arr.length()) { i ->
                             val p = arr.getJSONObject(i)
@@ -176,7 +177,8 @@ data class FlightPhotoCalibration(
                                     val errors = list("errors")
                                     require(
                                         params.size == 7 &&
-                                            errors.size in 5..20 &&
+                                            errors.size >= 4 &&
+                                            errors.size <= points.size &&
                                             errors.all { it >= 0 }
                                     )
                                     require(f.getDouble("originLat") in -85.0..85.0)
@@ -218,6 +220,8 @@ data class FlightPhotoCalibration(
                             safe("zoom", 1.0, 0.3, 8.0),
                             safe("opacity", 0.5, 0.0, 1.0),
                         ),
+                        json.optDouble("pickerRotation", 0.0).takeIf(Double::isFinite)?.toFloat()
+                            ?: 0f,
                     )
                 }
                 .getOrDefault(FlightPhotoCalibration())
@@ -234,9 +238,9 @@ suspend fun solveFlightPhotoCalibration(
     require(
         calibration.points.count {
             it.x != null && it.y != null && it.latitude != null && it.longitude != null
-        } >= 5
+        } >= 4
     ) {
-        "Five pairs required"
+        "Four pairs required"
     }
     val points =
         calibration.points.map { p ->

@@ -11,6 +11,8 @@ import net.osmand.plus.OsmandApplication
 class FlightPhotoLandmarkView(context: Context) : View(context) {
     var onImagePoint: (Double, Double) -> Unit = { _, _ -> }
     var onMapPoint: (Double, Double) -> Unit = { _, _ -> }
+    var onSelectPoint: (Int) -> Unit = {}
+    var onRotation: (Float) -> Unit = {}
     var onStatus: (String) -> Unit = {}
     private var image: Bitmap? = null
     private var calibration = FlightPhotoCalibration()
@@ -25,6 +27,9 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     private var imageScale = 1f
     private var imagePanX = 0f
     private var imagePanY = 0f
+    private var rotation = 0f
+    private var previousAngle: Float? = null
+    private var multiTouch = false
     private var satellite = true
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -45,7 +50,11 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                 override fun onScale(detector: ScaleGestureDetector): Boolean {
                     if (mode == 0) {
                         val old = imageScale
-                        imageScale = net.osmand.util.PhotoCalibrationInput.scalePhoto(imageScale, detector.scaleFactor)
+                        imageScale =
+                            net.osmand.util.PhotoCalibrationInput.scalePhoto(
+                                imageScale,
+                                detector.scaleFactor,
+                            )
                         val ratio = imageScale / old
                         imagePanX =
                             (imagePanX - (detector.focusX - width / 2f)) * ratio +
@@ -68,62 +77,77 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         )
     private val gestures =
         GestureDetector(
-            context,
-            object : GestureDetector.SimpleOnGestureListener() {
-                override fun onDown(e: MotionEvent) = true
+                context,
+                object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(e: MotionEvent) = true
 
-                override fun onScroll(
-                    first: MotionEvent?,
-                    event: MotionEvent,
-                    dx: Float,
-                    dy: Float,
-                ): Boolean {
-                    if (scale.isInProgress) return true
-                    if (mode == 0) {
-                        imagePanX -= dx
-                        imagePanY -= dy
-                    } else {
-                        val size = 256 * 2.0.pow(zoom)
-                        longitude = normalize(longitude + dx / size * 360)
-                        latitude =
-                            FlightTerrainTilePlanner.tileYToLatitude(
-                                    FlightTerrainTilePlanner.latitudeToTileY(latitude, 0) +
-                                        dy / size,
-                                    0,
-                                )
-                                .coerceIn(-85.0, 85.0)
-                        requestTiles()
+                    override fun onScroll(
+                        first: MotionEvent?,
+                        event: MotionEvent,
+                        dx: Float,
+                        dy: Float,
+                    ): Boolean {
+                        if (scale.isInProgress) return true
+                        if (mode == 0) {
+                            imagePanX -= dx
+                            imagePanY -= dy
+                        } else {
+                            val size = 256 * 2.0.pow(zoom)
+                            longitude = normalize(longitude + dx / size * 360)
+                            latitude =
+                                FlightTerrainTilePlanner.tileYToLatitude(
+                                        FlightTerrainTilePlanner.latitudeToTileY(latitude, 0) +
+                                            dy / size,
+                                        0,
+                                    )
+                                    .coerceIn(-85.0, 85.0)
+                            requestTiles()
+                        }
+                        invalidate()
+                        return true
                     }
-                    invalidate()
-                    return true
-                }
 
-                override fun onSingleTapUp(e: MotionEvent): Boolean {
-                    if (mode == 0) {
-                        if (image == null) return false
-                        val rect = imageRect()
-                        val x = (e.x - rect.left) / rect.width()
-                        val y = (e.y - rect.top) / rect.height()
-                        if (x in 0f..1f && y in 0f..1f) onImagePoint(x.toDouble(), y.toDouble())
-                    } else if (mode == 1) {
-                        val size = 256 * 2.0.pow(zoom)
-                        onMapPoint(
-                            FlightTerrainTilePlanner.tileYToLatitude(
-                                    FlightTerrainTilePlanner.latitudeToTileY(latitude, 0) +
-                                        (e.y - height / 2) / size,
-                                    0,
+                    override fun onSingleTapUp(e: MotionEvent): Boolean {
+                        val hit = hitPoint(e.x, e.y)
+                        if (hit >= 0 && mode <= 1) {
+                            onSelectPoint(hit)
+                            return true
+                        }
+                        if (mode == 0) {
+                            if (image == null) return false
+                            val rect = imageRect()
+                            val at =
+                                net.osmand.util.PhotoLandmarkGeometry.rotate(
+                                    e.x.toDouble(),
+                                    e.y.toDouble(),
+                                    rect.centerX().toDouble(),
+                                    rect.centerY().toDouble(),
+                                    -rotation.toDouble(),
                                 )
-                                .coerceIn(-85.0, 85.0),
-                            normalize(longitude + (e.x - width / 2) / size * 360),
-                        )
+                            val x = (at[0] - rect.left) / rect.width()
+                            val y = (at[1] - rect.top) / rect.height()
+                            if (x in 0.0..1.0 && y in 0.0..1.0) onImagePoint(x, y)
+                        } else if (mode == 1) {
+                            val size = 256 * 2.0.pow(zoom)
+                            onMapPoint(
+                                FlightTerrainTilePlanner.tileYToLatitude(
+                                        FlightTerrainTilePlanner.latitudeToTileY(latitude, 0) +
+                                            (e.y - height / 2) / size,
+                                        0,
+                                    )
+                                    .coerceIn(-85.0, 85.0),
+                                normalize(longitude + (e.x - width / 2) / size * 360),
+                            )
+                        }
+                        return true
                     }
-                    return true
-                }
-            },
-        ).apply {
-            // Each tap places one landmark immediately; two quick taps are not a double-tap command.
-            setOnDoubleTapListener(null)
-        }
+                },
+            )
+            .apply {
+                // Each tap places one landmark immediately; two quick taps are not a double-tap
+                // command.
+                setOnDoubleTapListener(null)
+            }
 
     fun update(
         bitmap: Bitmap?,
@@ -137,6 +161,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     ) {
         image = bitmap
         calibration = data
+        rotation = data.pickerRotation
         selected = index
         reference = original
         estimated = result
@@ -181,7 +206,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             val point = calibration.points.getOrNull(selected)
             latitude = point?.latitude ?: ref.eyeLatitude
             longitude = point?.longitude ?: ref.eyeLongitude
-            zoom = if (point?.latitude != null) 13.0 else 9.0
+            zoom = 14.0
         }
         requestTiles()
         invalidate()
@@ -193,9 +218,80 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         parent?.requestDisallowInterceptTouchEvent(true)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) multiTouch = false
+        if (event.pointerCount >= 2) {
+            multiTouch = true
+            val angle =
+                Math.toDegrees(
+                        atan2(
+                            (event.getY(1) - event.getY(0)).toDouble(),
+                            (event.getX(1) - event.getX(0)).toDouble(),
+                        )
+                    )
+                    .toFloat()
+            if (mode == 0 && event.actionMasked == MotionEvent.ACTION_MOVE) {
+                previousAngle?.let { before ->
+                    val delta = ((angle - before + 540f) % 360f) - 180f
+                    val rect = imageRect()
+                    val focusX = (event.getX(0) + event.getX(1)) / 2
+                    val focusY = (event.getY(0) + event.getY(1)) / 2
+                    val center =
+                        net.osmand.util.PhotoLandmarkGeometry.rotate(
+                            rect.centerX().toDouble(),
+                            rect.centerY().toDouble(),
+                            focusX.toDouble(),
+                            focusY.toDouble(),
+                            delta.toDouble(),
+                        )
+                    imagePanX += (center[0] - rect.centerX()).toFloat()
+                    imagePanY += (center[1] - rect.centerY()).toFloat()
+                    rotation = ((rotation + delta + 540f) % 360f) - 180f
+                    onRotation(rotation)
+                    invalidate()
+                }
+            }
+            previousAngle = angle
+        } else previousAngle = null
         scale.onTouchEvent(event)
-        gestures.onTouchEvent(event)
+        if (!multiTouch) gestures.onTouchEvent(event)
+        else if (
+            event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
+            val cancel = MotionEvent.obtain(event)
+            cancel.action = MotionEvent.ACTION_CANCEL
+            gestures.onTouchEvent(cancel)
+            cancel.recycle()
+        }
         return true
+    }
+
+    private fun hitPoint(x: Float, y: Float): Int {
+        val rect = imageRect()
+        val positions =
+            calibration.points
+                .map { p ->
+                    if (mode == 0 && p.x != null && p.y != null)
+                        net.osmand.util.PhotoLandmarkGeometry.rotate(
+                            rect.left + p.x * rect.width(),
+                            rect.top + p.y * rect.height(),
+                            rect.centerX().toDouble(),
+                            rect.centerY().toDouble(),
+                            rotation.toDouble(),
+                        )
+                    else if (mode == 1 && p.latitude != null && p.longitude != null)
+                        project(p.latitude, p.longitude).let {
+                            doubleArrayOf(it.x.toDouble(), it.y.toDouble())
+                        }
+                    else null
+                }
+                .toTypedArray()
+        return net.osmand.util.PhotoLandmarkGeometry.hit(
+            positions,
+            x.toDouble(),
+            y.toDouble(),
+            24.0 * resources.displayMetrics.density,
+        )
     }
 
     private fun imageRect(): RectF {
@@ -216,6 +312,8 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         canvas.drawColor(Color.rgb(12, 18, 24))
         if (mode == 0) {
             val rect = imageRect()
+            canvas.save()
+            canvas.rotate(rotation, rect.centerX(), rect.centerY())
             image?.let {
                 paint.color = Color.WHITE
                 canvas.drawBitmap(it, null, rect, paint)
@@ -269,6 +367,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                     }
                 }
             }
+            canvas.restore()
         } else drawMap(canvas)
     }
 

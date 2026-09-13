@@ -20,7 +20,7 @@ public final class PhotoCalibrationInput {
 		if (!imageLoaded) return Readiness.IMAGE_MISSING;
 		if (!associated) return Readiness.ASSOCIATION_MISSING;
 		if (!altitudeKnown) return Readiness.ALTITUDE_MISSING;
-		return completePairs >= 5 ? Readiness.READY : Readiness.PAIRS_MISSING;
+		return completePairs >= 4 ? Readiness.READY : Readiness.PAIRS_MISSING;
 	}
 
 	/** Photo Plus follows finger separation directly. Hublot retains its separate damped gesture. */

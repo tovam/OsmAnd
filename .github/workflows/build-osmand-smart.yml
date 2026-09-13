@@ -89,6 +89,20 @@ jobs:
             android/OsmAnd/test/native/FlightTubeMeshTest.cpp -o "${RUNNER_TEMP}/flight-tube-test"
           "${RUNNER_TEMP}/flight-tube-test"
 
+      - name: Test photo landmark input and pose solver
+        run: |
+          mkdir -p "${RUNNER_TEMP}/flight-photo-tests"
+          javac --release 8 -d "${RUNNER_TEMP}/flight-photo-tests" \
+            android/OsmAnd-java/src/main/java/net/osmand/util/PhotoCalibrationInput.java \
+            android/OsmAnd-java/src/main/java/net/osmand/util/PhotoLandmarkGeometry.java \
+            android/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseSolver.java \
+            android/OsmAnd/test/standalone/PhotoCalibrationInputTest.java \
+            android/OsmAnd/test/standalone/PhotoLandmarkGeometryTest.java \
+            android/OsmAnd/test/standalone/PhotoPoseSolverTest.java
+          java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoCalibrationInputTest
+          java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoLandmarkGeometryTest
+          java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoPoseSolverTest
+
       - name: Resolve patched core cache identity
         id: patched-core-identity
         run: |

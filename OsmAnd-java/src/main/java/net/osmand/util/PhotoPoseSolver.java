@@ -35,8 +35,8 @@ public final class PhotoPoseSolver {
 
     public static Result solve(double[][] world, double[][] image, double[] initial,
             int width, int height, boolean fitFocal) {
-        if (world.length < 5 || world.length != image.length || width <= 0 || height <= 0
-                || initial.length != 7) throw new IllegalArgumentException("Five complete pairs required");
+        if (world.length < 4 || world.length != image.length || width <= 0 || height <= 0
+                || initial.length != 7) throw new IllegalArgumentException("Four complete pairs required");
         for (int i = 0; i < world.length; i++) {
             if (world[i].length != 3 || image[i].length != 2) throw new IllegalArgumentException("Invalid point dimensions");
             for (double v : world[i]) if (!Double.isFinite(v)) throw new IllegalArgumentException("Invalid terrain point");
@@ -71,7 +71,7 @@ public final class PhotoPoseSolver {
         double[] scale = new double[normal.length];
         for (int k = 0; k < scale.length; k++) scale[k] = Math.sqrt(Math.max(1e-30, normal[k][k]));
         for (int k = 0; k < scale.length; k++) for (int l = 0; l < scale.length; l++) normal[k][l] /= scale[k] * scale[l];
-        boolean weak = eigenRatio(normal) < 1e-6 || Math.hypot(best[0]-initial[0], best[2]-initial[2]) > 99
+        boolean weak = world.length == 4 || eigenRatio(normal) < 1e-6 || Math.hypot(best[0]-initial[0], best[2]-initial[2]) > 99
                 || best[1] <= -0.49 || best[1] >= 29.99;
         return new Result(best, errors, weak);
     }

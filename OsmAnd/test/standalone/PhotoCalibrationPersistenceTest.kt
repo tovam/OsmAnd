@@ -51,6 +51,7 @@ fun main() {
                     false,
                 ),
             editorView = FlightPhotoEditorView(1, 45f, -30f, 2f, 0.3f),
+            pickerRotation = -32.4f,
         )
     check(FlightPhotoCalibration.fromJson(JSONObject(data.toJson().toString())) == data)
     check(FlightPhotoCalibration.fromJson(null) == FlightPhotoCalibration())
@@ -62,6 +63,9 @@ fun main() {
             points = listOf(FlightPhotoControlPoint(0.2, 0.4), FlightPhotoControlPoint())
         )
     check(FlightPhotoCalibration.fromJson(JSONObject(partial.toJson().toString())) == partial)
+    val many = data.copy(points = List(100) { FlightPhotoControlPoint(0.2, 0.4) }, fit = null)
+    check(FlightPhotoCalibration.fromJson(many.toJson()) == many)
+    check(FlightPhotoCalibration.fromJson(FlightPhotoCalibration().toJson()) == FlightPhotoCalibration())
     val brokenFit =
         data.toJson().apply { getJSONObject("fit").put("parameters", org.json.JSONArray()) }
     check(FlightPhotoCalibration.fromJson(brokenFit).points == data.points)

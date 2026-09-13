@@ -12,6 +12,9 @@ public class PhotoPoseSolverTest {
             for(int k=0;k<3;k++)if(Math.abs(r.parameters[k]-truth[k])>0.001)throw new AssertionError("Camera position");
         }
         double[] wrongFocal=initial.clone();wrongFocal[6]=Math.log(0.7);
+        PhotoPoseSolver.Result four=PhotoPoseSolver.solve(java.util.Arrays.copyOf(points,4),
+                java.util.Arrays.copyOf(image,4),initial,1500,1000,true);
+        if(four.rmsPixels>0.02 || !four.weakGeometry) throw new AssertionError("Four-point fit must work but warn about ambiguity");
         PhotoPoseSolver.Result five=PhotoPoseSolver.solve(java.util.Arrays.copyOf(points,5),
                 java.util.Arrays.copyOf(image,5),wrongFocal,1500,1000,true);
         if(five.rmsPixels>0.02 || Math.abs(five.parameters[6]-truth[6])>0.001) throw new AssertionError("Five-point unknown focal fit");
