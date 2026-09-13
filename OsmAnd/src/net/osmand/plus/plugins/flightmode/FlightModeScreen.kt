@@ -966,6 +966,11 @@ private fun WindowScreen(
 	val overlayPhoto = state.windowPhotoOverlay.photoId?.let { photoId ->
 		(state.photos + state.pendingPhotos).firstOrNull { it.id == photoId }
 	}
+	val photoProgress = remember(state.trip, state.photos, state.pendingPhotos) {
+		(state.photos + state.pendingPhotos).mapNotNull { photo ->
+			FlightSampleInterpolator.progressAt(state.trip, photo.matchedSamplePosition)
+		}.filter(Float::isFinite).distinct().sorted()
+	}
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_window), state.sessionMode, onClose)
 		Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -1013,6 +1018,7 @@ private fun WindowScreen(
 						profile = state.profile,
 						progress = state.replayProgress,
 						flightSpans = state.flightSpans,
+						photoProgress = photoProgress,
 						modifier = Modifier.fillMaxWidth().height(66.dp).background(FlightPanelStrong)
 							.padding(horizontal = 7.dp, vertical = 3.dp)
 					)
@@ -2896,6 +2902,7 @@ private fun FlightProfileView(
 	progress: Float?,
 	flightSpans: List<FlightSpan> = emptyList(),
 	pendingStartProgress: Float? = null,
+	photoProgress: List<Float> = emptyList(),
 	modifier: Modifier = Modifier
 ) {
 	val density = LocalDensity.current
@@ -2948,6 +2955,11 @@ private fun FlightProfileView(
 				drawCircle(FlightWarning, radius = 3.dp.toPx(), center = Offset(stopX, bottom))
 			}
 			}
+		photoProgress.forEach { position ->
+			val x = left + (right - left) * position.coerceIn(0f, 1f)
+			drawLine(FlightGreen.copy(alpha = 0.8f), Offset(x, top), Offset(x, bottom), 1.dp.toPx())
+			drawCircle(FlightGreen, radius = 2.dp.toPx(), center = Offset(x, top))
+		}
 		progress?.let {
 			val x = left + (right - left) * it.coerceIn(0f, 1f)
 			drawLine(FlightGreen, Offset(x, top), Offset(x, bottom), 2.dp.toPx())
