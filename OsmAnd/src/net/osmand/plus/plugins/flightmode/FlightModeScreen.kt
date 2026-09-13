@@ -3129,7 +3129,7 @@ private fun FlightWindowScene(
 		if (!placement.cabinHidden) {
 			FlightCabinWindowOverlay(placement, look, Modifier.fillMaxSize())
 		}
-		FlightCompassOverlay(placement, look, sample, Modifier.fillMaxSize())
+		FlightCompassOverlay(placement, look, sample, altitudeOverrideMeters, Modifier.fillMaxSize())
 		FlightAircraftForwardOverlay(placement, look, sample, Modifier.fillMaxSize())
 		WindowQuickControls(
 			placement = placement,
@@ -3483,8 +3483,11 @@ private fun FlightCompassOverlay(
 	placement: FlightWindowPlacement,
 	look: FlightWindowLook,
 	sample: FlightSample?,
+	altitudeOverrideMeters: Float?,
 	modifier: Modifier = Modifier
 ) {
+	val altitudeLabel = stringResource(R.string.flight_mode_altitude_short)
+	val altitude = (altitudeOverrideMeters ?: sample?.altitudeMeters?.toFloat())?.takeIf(Float::isFinite)
 	Canvas(modifier) {
 		val radius = 39.dp.toPx()
 		val center = Offset(50.dp.toPx(), 49.dp.toPx())
@@ -3527,6 +3530,10 @@ private fun FlightCompassOverlay(
 				center.x,
 				center.y + radius + 10.dp.toPx(),
 				labelPaint
+			)
+			composeCanvas.nativeCanvas.drawText(
+				"$altitudeLabel ${altitude?.let { "${it.roundToInt()} m" } ?: "—"}",
+				center.x, center.y + radius + 21.dp.toPx(), labelPaint
 			)
 		}
 	}
