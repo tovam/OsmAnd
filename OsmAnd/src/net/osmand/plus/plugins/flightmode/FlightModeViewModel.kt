@@ -36,6 +36,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var journeyListJob: Job? = null
 	private var citySearchJob: Job? = null
 	private var photoPersistenceJob: Job? = null
+	private var pendingCaptureSensors: FlightPhotoCapture? = null
 	private val liveSamples = mutableListOf<FlightSample>()
 	private var liveDistanceMeters = 0.0
 	private var liveSequence = 0
@@ -1196,6 +1197,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				pendingPhotos = (uiState.pendingPhotos + photos).sortedWith(PHOTO_TIME_COMPARATOR),
 				selectedPhotoId = photos.firstOrNull()?.id ?: uiState.selectedPhotoId,
 				journeyMessage = if (photos.isEmpty()) "Aucune photo lisible" else "${photos.size} photo(s) à valider"
+		pendingCaptureSensors = null
 			)
 		}
 	}
@@ -1203,13 +1205,23 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun validatePendingPhotos() {
 		if (uiState.pendingPhotos.isEmpty()) return
 		val accepted = uiState.pendingPhotos.sortedWith(PHOTO_TIME_COMPARATOR)
+	fun recordPhotoShutter(capture: FlightPhotoCapture) {
+		if (pendingCaptureFile == null) return
+		pendingCaptureSensors = capture
+		pendingCaptureTimestampMillis = capture.shutterMillis
+	}
+
 		uiState = uiState.copy(
 			photos = (uiState.photos + accepted).sortedWith(PHOTO_TIME_COMPARATOR),
 			pendingPhotos = emptyList(),
 			selectedPhotoId = accepted.first().id,
 			journeyDirty = true,
 			journeyMessage = "Photos associées par leur heure"
-		)
+		).let { photo -> pendingCaptureSensors?.let { capture -> photo.copy(
+			timestampMillis=capture.shutterMillis, timestampSource=FlightPhotoTimestampSource.LIVE_CAPTURE,
+			matchedSamplePosition=journeyStore.matchPhotoPosition(uiState.trip,capture.shutterMillis), capture=capture
+		) } ?: photo }
+		pendingCaptureSensors = null
 		refreshStorageUsage()
 		schedulePhotoPersistence()
 	}

@@ -375,7 +375,20 @@ data class FlightPhotoAttachment(
 	val includeMap: Boolean = true,
 	val includeScene3d: Boolean = true,
 	val windowAlignment: FlightPhotoWindowAlignment? = null,
-	val calibration: FlightPhotoCalibration = FlightPhotoCalibration()
+	val calibration: FlightPhotoCalibration = FlightPhotoCalibration(),
+	val capture: FlightPhotoCapture? = null
+)
+
+/** Last measured GPS and sensor readings at CameraX's exposure-start callback, with their ages. */
+data class FlightPhotoCapture(
+	val shutterMillis: Long,
+	val shutterElapsedNanos: Long,
+	val fix: FlightSample?,
+	val magneticMicroTesla: List<Float>? = null,
+	val magneticElapsedNanos: Long? = null,
+	val magneticAccuracy: Int? = null,
+	val rotationVector: List<Float>? = null,
+	val rotationElapsedNanos: Long? = null
 )
 
 /** Non-destructive colour adjustments stored beside the original photo. */

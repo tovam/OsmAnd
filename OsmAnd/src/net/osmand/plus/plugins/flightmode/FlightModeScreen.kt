@@ -1879,6 +1879,19 @@ internal fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSam
 				stringResource(R.string.flight_mode_photo_position),
 				stringResource(R.string.flight_mode_photo_not_matched),
 				warning = true
+		photo.capture?.let { capture ->
+			Text(stringResource(R.string.flight_photo_capture_sensors), color=FlightBlue, fontSize=12.sp)
+			capture.fix?.let { fix ->
+				Text("%.6f, %.6f · %s m".format(Locale.ROOT,fix.latitude,fix.longitude,
+					fix.altitudeMeters?.let { "%.0f".format(it) } ?: "—"), color=FlightText,fontSize=12.sp)
+				Text(stringResource(R.string.flight_photo_fix_age)+" : %.2f s".format(
+					(capture.shutterMillis-fix.timestampMillis).coerceAtLeast(0)/1000.0),color=FlightMuted,fontSize=11.sp)
+			}
+			capture.magneticMicroTesla?.let { values ->
+					Text(stringResource(R.string.flight_photo_magnetic),color=FlightMuted,fontSize=11.sp)
+					Text(values.joinToString(" / ") { "%.1f".format(it) },color=FlightText,fontSize=12.sp)
+			}
+		}
 			)
 		} else {
 			val progress = FlightSampleInterpolator.progressAt(trip, photo.matchedSamplePosition)

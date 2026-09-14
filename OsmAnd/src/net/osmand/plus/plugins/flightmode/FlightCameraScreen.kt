@@ -38,8 +38,16 @@ internal fun FlightCameraScreen(
     onClose: () -> Unit,
     onPrepareFile: () -> File,
     onCaptured: (Boolean) -> Unit,
+    onShutter: (FlightPhotoCapture) -> Unit,
 ) {
     val context = LocalContext.current
+    val sensors = remember(context) { FlightCaptureSensors(context) }
+    val latestFix by rememberUpdatedState(fix)
+    val latestShutter by rememberUpdatedState(onShutter)
+    DisposableEffect(sensors) {
+        sensors.start()
+        onDispose { sensors.stop() }
+    }
     val executor = remember(context) { ContextCompat.getMainExecutor(context) }
     val previewView =
         remember(context) {
@@ -287,6 +295,10 @@ internal fun FlightCameraScreen(
                                 output,
                                 executor,
                                 object : ImageCapture.OnImageSavedCallback {
+                                    override fun onCaptureStarted() {
+                                        latestShutter(sensors.snapshot(latestFix))
+                                    }
+
                                     override fun onImageSaved(
                                         results: ImageCapture.OutputFileResults
                                     ) {

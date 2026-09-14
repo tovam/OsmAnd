@@ -198,7 +198,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onToggleLiveMicrophone = ::toggleLiveMicrophone
 				)
 				if(showFlightCamera) FlightCameraScreen(viewLifecycleOwner,viewModel.uiState.liveState.latest,
-					onClose={showFlightCamera=false},onPrepareFile=viewModel::preparePhotoCapture,onCaptured=viewModel::finishPhotoCapture)
+					onClose={showFlightCamera=false},onPrepareFile=viewModel::preparePhotoCapture,onCaptured=viewModel::finishPhotoCapture,
+					onShutter=viewModel::recordPhotoShutter)
 			}
 		}
 	}
