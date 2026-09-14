@@ -729,8 +729,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	companion object {
 		private const val MAXIMUM_NATIVE_POINTS = 1_200
 		private const val MAXIMUM_ROUTE_POINTS = 4_000
-		private const val TUBE_SLEEVE_WIDTH_DP = 2.1
-		private const val TUBE_CORE_WIDTH_DP = 2.1 // One quarter of the visible 8.4 dp point diameter.
+		private const val TUBE_SLEEVE_WIDTH_DP = 3.2
+		private const val TUBE_CORE_WIDTH_DP = 3.2
 		private const val POINT_BITMAP_DP = 10f
 		private const val AIRCRAFT_FALLBACK_BITMAP_ASSET = "flightmode/aircraft/flight_airliner_black.png"
 		private const val AIRCRAFT_MINIMUM_ZOOM = 3.0
@@ -741,7 +741,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val AIRCRAFT_MINIMUM_BITMAP_PIXELS = 16
 		private const val AIRCRAFT_MODEL_DIRECTION_OFFSET_DEGREES = -90f
 		private const val AIRCRAFT_VECTOR_UPDATE_INTERVAL_MILLIS = 200L
-		private const val TETHER_WIDTH_DP = 2.7
+		private const val TETHER_WIDTH_DP = 4.1
 		private const val TETHER_SLEEVE_EXTRA_WIDTH_DP = 2.2
 		private const val TETHER_HORIZONTAL_OFFSET_METERS = 0.10
 		private const val TETHER_GROUND_CLEARANCE_METERS = 1.5f
