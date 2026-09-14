@@ -9,6 +9,10 @@ import net.osmand.plus.OsmandApplication
 
 /** Isolated top-down map / full-image picker. It never takes over OsmAnd's main map. */
 class FlightPhotoLandmarkView(context: Context) : View(context) {
+    init {
+        outlineProvider = ViewOutlineProvider.BOUNDS
+        clipToOutline = true
+    }
     var onImagePoint: (Double, Double) -> Unit = { _, _ -> }
     var onMapPoint: (Double, Double) -> Unit = { _, _ -> }
     var onRotation: (Float) -> Unit = {}
@@ -352,6 +356,10 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // AndroidView does NOT clip its Canvas to its Compose layout bounds. In particular
+        // drawColor and a zoomed/rotated bitmap used to paint over the entire editor toolbar.
+        val viewportSave = canvas.save()
+        canvas.clipRect(0, 0, width, height)
         canvas.drawColor(Color.rgb(12, 18, 24))
         if (mode == 0) {
             val rect = imageRect()
@@ -374,6 +382,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             canvas.restore()
         } else drawMap(canvas)
         placementPreview?.let { mark(canvas, it.x, it.y, selected + 1, Color.YELLOW) }
+        canvas.restoreToCount(viewportSave)
     }
 
     private fun drawMap(canvas: Canvas) {

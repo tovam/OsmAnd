@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -56,7 +57,7 @@ internal fun FlightPhotoEditor(
     }
     DisposableEffect(repository) { onDispose { repository.close() } }
     var data by remember(photo.id) { mutableStateOf(photo.calibration) }
-    var selected by remember(photo.id) { mutableStateOf(0) }
+    var selected by remember(photo.id) { mutableStateOf(-1) }
     var action by remember(photo.id) { mutableStateOf(Action.EXPLORE) }
     var clearAllConfirmation by remember(photo.id) { mutableStateOf(false) }
     var associationAction by remember(photo.id) { mutableStateOf<PhotoAssociationAction?>(null) }
@@ -199,7 +200,7 @@ internal fun FlightPhotoEditor(
                 TextButton(
                     onClick = {
                         save(data.copy(points = emptyList(), fit = null))
-                        selected = 0
+                        selected = -1
                         action = Action.EXPLORE
                         clearAllConfirmation = false
                     }
@@ -348,7 +349,7 @@ internal fun FlightPhotoEditor(
                         ),
                         { action = Action.MOVE },
                         selected = action == Action.MOVE,
-                        enabled = data.points.isNotEmpty(),
+                        enabled = selected in data.points.indices,
                     )
                     EditorAction(
                         stringResource(R.string.flight_cal_delete),
@@ -359,10 +360,10 @@ internal fun FlightPhotoEditor(
                                     fit = null,
                                 )
                             )
-                            selected = selected.coerceAtMost(data.points.lastIndex).coerceAtLeast(0)
+                            selected = -1
                             action = Action.EXPLORE
                         },
-                        enabled = data.points.isNotEmpty(),
+                        enabled = selected in data.points.indices,
                     )
                     EditorAction(
                         stringResource(R.string.flight_cal_delete_all),
@@ -430,10 +431,10 @@ internal fun FlightPhotoEditor(
                 }
             }
             if (tab <= 1) CalculationActions()
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                 AndroidView(
                     factory = { mapView },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().clipToBounds(),
                     update = { v ->
                         v.visibility =
                             if (tab < 3) android.view.View.VISIBLE else android.view.View.INVISIBLE
