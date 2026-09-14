@@ -141,6 +141,7 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onSaveWindowPlacement = viewModel::saveWindowPlacement,
 					onSetWindowSide = viewModel::setWindowSide,
 					onMoveWindowLook = viewModel::moveWindowLook,
+					onSetMapCenterLocked = viewModel::setMapCenterLocked,
 					onRecenterWindowLook = viewModel::recenterWindowLook,
 					onSetWindowZoom = viewModel::setWindowZoom,
 					onChangeWindowZoom = viewModel::changeWindowZoom,
@@ -313,7 +314,10 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 			viewModel.uiState.liveState.latest)
 		if (sample == null || viewModel.uiState.page != FlightPage.MAP || !viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
-		mapView.setLatLon(sample.latitude, sample.longitude)
+		if (viewModel.uiState.mapCenterLocked) {
+			mapView.setTarget31(net.osmand.util.MapUtils.get31TileNumberX(sample.longitude),
+				net.osmand.util.MapUtils.get31TileNumberY(sample.latitude))
+		} else mapView.setLatLon(sample.latitude, sample.longitude)
 		if (!flightMapViewInitialized) {
 			mapView.setElevationAngle(55f)
 			flightMapViewInitialized = true

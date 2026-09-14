@@ -186,6 +186,7 @@ fun FlightModeScreen(
 	onTerrainRendererError: (String) -> Unit,
 	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
+	onSetMapCenterLocked: (Boolean) -> Unit = {},
 	onShowTrackPoints: (Boolean) -> Unit,
 	onMarkFlightStart: () -> Unit,
 	onMarkFlightEnd: () -> Unit,
@@ -258,7 +259,8 @@ fun FlightModeScreen(
 			state.photos,
 			state.pendingPhotos,
 			state.page,
-			state.mapFollowing
+			state.mapFollowing,
+			state.mapCenterLocked
 		) {
 			onMapState(
 				state.trip,
@@ -322,6 +324,8 @@ fun FlightModeScreen(
 				FlightPage.WINDOW -> WindowScreen(
 					state = state,
 					onClose = onClose,
+					onSetMapCenterLocked = onSetMapCenterLocked,
+					onShowTrackPoints = onShowTrackPoints,
 					onPageChange = onPageChange,
 					onSetAltitudeOverride = onSetWindowAltitudeOverride,
 					onSeekReplay = onSeekReplay,
@@ -371,7 +375,6 @@ fun FlightModeScreen(
 					state = state,
 					onClose = onClose,
 					onPageChange = onPageChange,
-					onShowTrackPoints = onShowTrackPoints,
 					onSetPolicy = onSetRecordingPolicy
 				)
 				FlightPage.PHOTO -> PhotoScreen(
@@ -675,6 +678,8 @@ private fun MapScreen(
 	val targetScalePixels = with(density) { 96.dp.toPx() }
 	var mapScale by remember(mapView) { mutableStateOf<FlightMapScale?>(null) }
 	var mapRotation by remember(mapView) { mutableStateOf(mapView?.rotate ?: 0f) }
+	onSetMapCenterLocked: (Boolean) -> Unit,
+	onShowTrackPoints: (Boolean) -> Unit,
 	var mapElevation by remember(mapView) { mutableStateOf(mapView?.elevationAngle ?: 90f) }
 	var openGlRendererAttached by remember(mapView) { mutableStateOf(mapView?.hasMapRenderer() == true) }
 	LaunchedEffect(mapView, targetScalePixels) {
@@ -716,6 +721,7 @@ private fun MapScreen(
 
 		Row(
 			modifier = Modifier
+					proxy.lockedCenter = sample.takeIf { state.mapCenterLocked }
 				.align(Alignment.TopEnd)
 				.padding(top = 122.dp, end = 2.dp)
 				.height(44.dp),
@@ -734,6 +740,12 @@ private fun MapScreen(
 				icon = R.drawable.ic_action_center_on_track,
 				tint = if (state.mapFollowing) FlightGreen else FlightOrange,
 				contentDescription = if (state.mapFollowing) {
+			FlightMapRoundButton(
+				icon = if (state.mapCenterLocked) R.drawable.ic_action_lock else R.drawable.ic_action_lock_open,
+				tint = if (state.mapCenterLocked) FlightGreen else FlightMuted,
+				contentDescription = stringResource(if (state.mapCenterLocked) R.string.flight_map_center_unlock else R.string.flight_map_center_lock),
+				onClick = { onSetMapCenterLocked(!state.mapCenterLocked) }
+			)
 					stringResource(R.string.flight_mode_map_free)
 				} else {
 					stringResource(R.string.flight_mode_map_following)
@@ -761,6 +773,10 @@ private fun MapScreen(
 			}
 			FlightProfileView(
 				profile = state.profile,
+			Row(Modifier.fillMaxWidth().background(FlightHudPanel)) {
+				CompactAction(stringResource(R.string.flight_map_points_short),
+					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
+			}
 				progress = state.replayProgress.takeIf { state.sessionMode == FlightSessionMode.REPLAY },
 				flightSpans = state.flightSpans,
 				pendingStartProgress = state.pendingFlightStartProgress,
@@ -1577,7 +1593,6 @@ private fun SensorsScreen(
 	state: FlightUiState,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
-	onShowTrackPoints: (Boolean) -> Unit,
 	onSetPolicy: (FlightRecordingPolicy) -> Unit
 ) {
 	val sample = state.snapshot?.sample
@@ -1650,11 +1665,6 @@ private fun SensorsScreen(
 						modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
 					)
 				}
-				CompactToggleRow(
-					title = stringResource(R.string.flight_mode_show_points),
-					checked = state.showTrackPoints,
-					onChecked = onShowTrackPoints
-				)
 			}
 		}
 		FlightBottomNavigation(FlightPage.SENSORS, onPageChange)

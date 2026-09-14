@@ -796,6 +796,7 @@ data class FlightUiState(
 	val flightSpans: List<FlightSpan> = emptyList(),
 	val pendingFlightStartProgress: Float? = null,
 	val journeyId: String? = null,
+	val mapCenterLocked: Boolean = false,
 	val journeyName: String = "",
 	val journeyCreatedAtMillis: Long? = null,
 	val journeyDirty: Boolean = false,

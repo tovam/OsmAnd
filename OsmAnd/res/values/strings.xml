@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_map_center_lock">Verrouiller le centre sur l’avion</string>
+    <string name="flight_map_center_unlock">Libérer le centre de la carte</string>
+    <string name="flight_map_points_short">Points GPS</string>
     <string name="flight_photo_capture_sensors">Capteurs au déclenchement</string>
     <string name="flight_photo_magnetic">Champ magnétique X / Y / Z (µT)</string>
     <string name="flight_photo_fix_age">Âge de la position au déclenchement</string>

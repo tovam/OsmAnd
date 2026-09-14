@@ -954,6 +954,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		setWindowPlacement(uiState.windowPlacement.copy(zoom = zoom), persist = false)
 	}
 
+	fun setMapCenterLocked(locked: Boolean) {
+		uiState = uiState.copy(mapCenterLocked=locked, mapFollowing=locked || uiState.mapFollowing)
+	}
+
 	fun changeWindowZoom(factor: Float) {
 		setWindowZoom(
 			uiState.windowPlacement.zoom * dampedFlightPinchFactor(factor).coerceIn(0.75f, 1.35f)
@@ -977,7 +981,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun setMapFollowing(following: Boolean) {
 		if (uiState.mapFollowing != following) {
-			uiState = uiState.copy(mapFollowing = following)
+			uiState = uiState.copy(mapFollowing = following, mapCenterLocked = uiState.mapCenterLocked && following)
 		}
 	}
 

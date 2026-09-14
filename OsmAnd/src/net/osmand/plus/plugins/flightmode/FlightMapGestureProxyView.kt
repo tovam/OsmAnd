@@ -6,6 +6,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import net.osmand.plus.views.OsmandMapTileView
+import net.osmand.util.MapUtils
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -20,6 +21,8 @@ class FlightMapGestureProxyView(
 	private var target: OsmandMapTileView,
 	private var onExplorationGesture: () -> Unit
 ) : View(context) {
+	/** Lock only translation; native pinch, bearing and tilt are still forwarded. */
+	var lockedCenter: FlightSample? = null
 
 	private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 	private val touchSlopSquared = touchSlop * touchSlop
@@ -55,6 +58,7 @@ class FlightMapGestureProxyView(
 		var reportExploration = false
 		when (event.actionMasked) {
 			MotionEvent.ACTION_DOWN -> {
+				if (lockedCenter != null) target.animatedDraggingThread.stopAnimatingSync()
 				gestureTargetView = target.view
 				targetGestureActive = true
 				tiltCandidate = false
@@ -95,15 +99,19 @@ class FlightMapGestureProxyView(
 			return true
 		}
 		if (handleTiltOverride(event, targetView)) {
-			if (reportExploration) onExplorationGesture()
+			enforceCenter()
+			if (reportExploration && lockedCenter == null) onExplorationGesture()
 			finishGestureIfNeeded(event)
 			return true
 		}
 
-		dispatchToMap(targetView, event)
+		// Prevent the stock fling from translating a locked centre after release.
+		dispatchToMap(targetView, event,
+			if (lockedCenter != null && event.actionMasked == MotionEvent.ACTION_UP) MotionEvent.ACTION_CANCEL else null)
+		enforceCenter()
 		// Changing follow mode causes a Compose update. Do it only after OsmAnd has
 		// received the current event, never halfway through forwarding that event.
-		if (reportExploration) onExplorationGesture()
+		if (reportExploration && lockedCenter == null) onExplorationGesture()
 		finishGestureIfNeeded(event)
 		return true
 	}
@@ -118,6 +126,12 @@ class FlightMapGestureProxyView(
 		tiltStartElevation = target.elevationAngle
 		lastTiltRefreshMillis = 0L
 		tiltCandidate = tiltStartDistance > 0f
+	}
+
+	private fun enforceCenter() {
+		// setLatLon stops the map animation thread, including the pinch's zoom settling.
+		// Re-anchor only the geographic target; leave all other camera degrees of freedom intact.
+		lockedCenter?.let { target.setTarget31(MapUtils.get31TileNumberX(it.longitude), MapUtils.get31TileNumberY(it.latitude)) }
 	}
 
 	private fun handleTiltOverride(event: MotionEvent, targetView: View): Boolean {
