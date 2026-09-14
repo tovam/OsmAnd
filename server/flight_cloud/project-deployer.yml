@@ -1,0 +1,77 @@
+use:
+  - remote.ssh-sudo-opt
+  - package.tar-config-on-server
+  - docker.remote-web
+  - exposure.korz-sidecar
+
+project:
+  name: osmand-flight
+  tech: python
+
+# Only this Python service is uploaded, never the Android repository or local data.
+package:
+  exclude:
+    - .git
+    - .project-deployer
+    - .venv
+    - .work
+    - __pycache__
+    - '*.pyc'
+    - .DS_Store
+    - data
+    - config.json
+    - access-token.txt
+    - config.yml
+    - env
+    - .env
+    - secrets
+
+local:
+  endpoints:
+    app:
+      port: 58743
+
+runtime:
+  user:
+    uid: 10001
+    gid: 10001
+  ports:
+    app:
+      host: 58743
+  security:
+    read_only_rootfs: true
+    no_new_privileges: true
+    cap_drop: [ALL]
+    tmpfs:
+      /run: rw,nosuid,nodev,noexec,size=32m,mode=0700,uid=10001,gid=10001
+
+# docker.remote-web mounts /opt/osmand-flight/data at /app/data (store "app").
+healthcheck:
+  type: http
+  url: http://127.0.0.1:58743/readyz
+
+preflight:
+  enabled: true
+  type: docker-http
+  readonly_data: true
+  path: /preflightz
+
+exposure:
+  korz:
+    public_name: osmand-flight
+    local_port: 58743
+
+operations:
+  show-token:
+    description: Show the account token in the operator terminal, not the application log.
+    interactive: true
+    remote: sudo docker exec -it osmand-flight python /app/deployment.py show-token
+
+workflow:
+  deploy:
+    - upload
+    - build
+    - preflight
+    - start
+    - healthcheck
+    - restart-exposure
