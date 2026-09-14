@@ -98,7 +98,7 @@ public final class PhotoPoseSolver {
                     && next[1] >= -0.5 && next[1] <= 30
                     && Math.abs(next[4]) < Math.PI * 0.499
                     && next[6] > Math.log(0.5 / Math.tan(Math.toRadians(85)))
-                    && next[6] < Math.log(0.5 / Math.tan(Math.toRadians(4)));
+                    && next[6] < Math.log(0.5 / Math.tan(Math.toRadians(0.5)));
             double nextCost = bounded ? cost(residuals(w, im, next, aspect)) : Double.POSITIVE_INFINITY;
             double current = cost(r);
             if (nextCost < current) {

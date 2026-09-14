@@ -494,8 +494,8 @@ class FlightJourneyStore(private val context: Context) {
 						?.toFloat()
 						?.takeIf { it.isFinite() }
 						?.coerceIn(
-							FlightWindowPlacement.MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
-							FlightWindowPlacement.MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
+							FlightPhotoSpatialPose.MIN_FIELD_OF_VIEW_DEGREES,
+							FlightPhotoSpatialPose.MAX_FIELD_OF_VIEW_DEGREES
 						),
 					rotationDegrees = normalizePhotoRotation(json.optDouble("rotationDegrees", 0.0).toFloat()),
 					imageAdjustments = photoImageAdjustmentsFromJson(json.optJSONObject("imageAdjustments")),

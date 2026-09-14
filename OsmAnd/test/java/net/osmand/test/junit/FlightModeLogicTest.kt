@@ -390,7 +390,7 @@ class FlightModeLogicTest {
 		val placement = FlightWindowPlacement(
 			forwardOffsetMeters = 2f,
 			verticalOffsetMeters = -2f,
-			zoom = 12f
+			zoom = FlightWindowPlacement.MAX_ZOOM + 10f
 		).clamped()
 		assertEquals(FlightWindowPlacement.MAX_FORWARD_OFFSET_METERS, placement.forwardOffsetMeters, 0f)
 		assertEquals(FlightWindowPlacement.MIN_VERTICAL_OFFSET_METERS, placement.verticalOffsetMeters, 0f)
@@ -434,7 +434,7 @@ class FlightModeLogicTest {
 				side = FlightCabinSide.RIGHT,
 				forwardOffsetMeters = 4f,
 				verticalOffsetMeters = -4f,
-				zoom = 12f,
+				zoom = FlightWindowPlacement.MAX_ZOOM + 10f,
 				cabinTransparent = true,
 				cabinHidden = true
 			),

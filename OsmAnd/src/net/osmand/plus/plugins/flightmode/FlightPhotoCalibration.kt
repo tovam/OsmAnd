@@ -186,7 +186,7 @@ data class FlightPhotoCalibration(
                                     require(
                                         f.getDouble("rms").isFinite() && f.getDouble("rms") >= 0
                                     )
-                                    require(params[6] in -3.0..3.0)
+                                    require(params[6] in -3.0..4.1)
                                     FlightPhotoFit(
                                         f.getDouble("originLat"),
                                         f.getDouble("originLon"),
@@ -210,7 +210,7 @@ data class FlightPhotoCalibration(
                         json.optInt("height").coerceIn(0, 100000),
                         json.optBoolean("fitFocal", true),
                         json.optDouble("verticalFov", 60.0).takeIf {
-                            it.isFinite() && it in 8.0..170.0
+                            it.isFinite() && it in 1.0..170.0
                         } ?: 60.0,
                         fit,
                         FlightPhotoEditorView(

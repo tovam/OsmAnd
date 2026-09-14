@@ -107,7 +107,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		this.trip = trip
 		this.sample = sample
 		this.viewAzimuthDegrees = viewAzimuthDegrees
-		this.viewConeDegrees = viewConeDegrees.coerceIn(8f, 170f)
+		this.viewConeDegrees = viewConeDegrees.coerceIn(0.25f, 170f)
 		this.quality = quality
 		this.baseZoom = baseZoom
 		if (this.cacheKey != cacheKey) {

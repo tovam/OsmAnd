@@ -24,6 +24,23 @@ public class PhotoPoseSolverTest {
         double[][] line={{0.1,0.1},{0.2,0.2},{0.3,0.3},{0.4,0.4},{0.5,0.5},{0.6,0.6},{0.7,0.7}};
         try { PhotoPoseSolver.solve(points,line,initial,1500,1000,true); throw new AssertionError("Collinear accepted"); }
         catch(IllegalArgumentException expected) { }
+        // Telephoto cases previously saturated at 8 degrees. Ordinary photos use the same solver.
+        for (double fov : new double[]{2, 5, 14.5, 60}) {
+            double focal = 0.5 / Math.tan(Math.toRadians(fov / 2));
+            double[] camera = {0, 10, 0, 0, 0, 0, Math.log(focal)};
+            double[][] pixels = {{.15,.2},{.7,.18},{.35,.7},{.82,.82},{.5,.4},{.2,.85},{.9,.5},{.6,.65}};
+            double[][] world = new double[pixels.length][3];
+            for (int i=0;i<pixels.length;i++) {
+                double depth = 20 + i*3;
+                world[i] = new double[]{(pixels[i][0]-.5)*depth*1.5/focal,
+                        10-(pixels[i][1]-.5)*depth/focal, -depth};
+            }
+            double[] guess = camera.clone(); guess[0] += .02; guess[1] -= .03;
+            guess[6] = Math.log(0.5 / Math.tan(Math.toRadians(Math.max(fov,14) / 2)));
+            PhotoPoseSolver.Result fit = PhotoPoseSolver.solve(world,pixels,guess,1500,1000,true);
+            if (fit.rmsPixels > .02 || Math.abs(fit.parameters[6]-camera[6]) > .001)
+                throw new AssertionError("Telephoto FOV " + fov + ": " + fit.rmsPixels);
+        }
         System.out.println("Photo resection: exact, noisy, fixed/free focal and degenerate fixtures passed");
     }
 }

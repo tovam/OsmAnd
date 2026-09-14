@@ -3668,9 +3668,9 @@ private fun WindowViewControls(
 		Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
 			Text(stringResource(R.string.flight_mode_zoom).uppercase(), color = FlightMuted, fontSize = 9.sp, modifier = Modifier.width(48.dp))
 			Slider(
-				value = placement.zoom,
-				onValueChange = onSetZoom,
-				valueRange = FlightWindowPlacement.MIN_ZOOM..FlightWindowPlacement.MAX_ZOOM,
+				value = kotlin.math.ln(placement.zoom),
+				onValueChange = { onSetZoom(kotlin.math.exp(it)) },
+				valueRange = kotlin.math.ln(FlightWindowPlacement.MIN_ZOOM)..kotlin.math.ln(FlightWindowPlacement.MAX_ZOOM),
 				modifier = Modifier.weight(1f)
 			)
 			Text("×%.1f".format(placement.zoom), color = FlightText, fontSize = 11.sp, modifier = Modifier.width(42.dp), textAlign = TextAlign.End)

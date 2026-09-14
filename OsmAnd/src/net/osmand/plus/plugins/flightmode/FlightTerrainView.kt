@@ -425,7 +425,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			val view = DirectionalViewMatrix.create(camera, viewDirection, cameraUp)
 			val projection = windowProjection(currentWindowPlacement, currentScene.radiusKm)
 			inspection?.camera?.let { pose ->
-				Matrix.perspectiveM(projection, 0, pose.verticalFieldOfViewDegrees.coerceIn(8f,170f),
+				Matrix.perspectiveM(projection, 0, pose.verticalFieldOfViewDegrees.coerceIn(1f,170f),
 					surfaceWidth.toFloat()/surfaceHeight, NEAR_PLANE_METERS,
 					max(MINIMUM_FAR_PLANE_METERS,currentScene.radiusKm*2200f))
 			}

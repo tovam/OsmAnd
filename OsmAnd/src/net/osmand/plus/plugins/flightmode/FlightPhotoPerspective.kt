@@ -44,8 +44,8 @@ object FlightPhotoPerspective {
 		val equivalentSensorHeightMm = fullFrameDiagonalMm / sqrt(aspect * aspect + 1.0)
 		val verticalFov = Math.toDegrees(2.0 * atan(equivalentSensorHeightMm / (2.0 * focalLength35mm)))
 		return verticalFov.toFloat().takeIf(Float::isFinite)?.coerceIn(
-			FlightWindowPlacement.MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
-			FlightWindowPlacement.MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
+			FlightPhotoSpatialPose.MIN_FIELD_OF_VIEW_DEGREES,
+			FlightPhotoSpatialPose.MAX_FIELD_OF_VIEW_DEGREES
 		)
 	}
 

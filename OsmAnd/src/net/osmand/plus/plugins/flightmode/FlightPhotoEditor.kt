@@ -488,7 +488,7 @@ internal fun FlightPhotoEditor(
                             viewElevationDegrees =
                                 (base.viewElevationDegrees + pitch).coerceIn(-89f, 89f),
                             verticalFieldOfViewDegrees =
-                                (base.verticalFieldOfViewDegrees / zoom).coerceIn(8f, 150f),
+                                (base.verticalFieldOfViewDegrees / zoom).coerceIn(1f, 170f),
                         )
                     val latestCamera by rememberUpdatedState(camera)
                     val latestBase by rememberUpdatedState(base)
@@ -659,9 +659,13 @@ internal fun FlightPhotoEditor(
                         fontSize = 10.sp,
                     )
                     Slider(
-                        data.verticalFov.toFloat(),
-                        { save(data.copy(verticalFov = it.toDouble(), fit = null)) },
-                        valueRange = 15f..120f,
+                        kotlin.math.ln(data.verticalFov.toFloat()),
+                        {
+                            save(
+                                data.copy(verticalFov = kotlin.math.exp(it).toDouble(), fit = null)
+                            )
+                        },
+                        valueRange = 0f..kotlin.math.ln(170f),
                         modifier = Modifier.weight(1f),
                     )
                 }

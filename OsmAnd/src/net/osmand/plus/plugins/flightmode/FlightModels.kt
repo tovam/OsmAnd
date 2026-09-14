@@ -60,14 +60,15 @@ data class FlightWindowPlacement(
 		const val WINDOW_DIAMETER_METERS = 0.25f
 		const val WALL_DISTANCE_METERS = 0.35f
 		const val DEFAULT_VERTICAL_FIELD_OF_VIEW_DEGREES = 58f
-		const val MIN_VERTICAL_FIELD_OF_VIEW_DEGREES = 14f
+		const val MIN_VERTICAL_FIELD_OF_VIEW_DEGREES = 1f
 		const val MAX_VERTICAL_FIELD_OF_VIEW_DEGREES = 145f
 		const val MIN_FORWARD_OFFSET_METERS = -0.90f
 		const val MAX_FORWARD_OFFSET_METERS = 1.10f
 		const val MIN_VERTICAL_OFFSET_METERS = -0.55f
 		const val MAX_VERTICAL_OFFSET_METERS = 0.55f
 		const val MIN_ZOOM = 0.36f
-		const val MAX_ZOOM = 4f
+		// Extend the existing mapping without changing any previously valid saved zoom.
+		const val MAX_ZOOM = 58f
 	}
 }
 
@@ -80,7 +81,7 @@ fun FlightWindowPlacement.verticalFieldOfViewDegrees(): Float =
 fun FlightWindowPlacement.horizontalFieldOfViewDegrees(viewAspectRatio: Float): Float {
 	val verticalRadians = Math.toRadians(verticalFieldOfViewDegrees().toDouble())
 	val horizontalRadians = 2.0 * atan(tan(verticalRadians / 2.0) * viewAspectRatio.coerceIn(0.25f, 4f))
-	return Math.toDegrees(horizontalRadians).toFloat().coerceIn(8f, 170f)
+	return Math.toDegrees(horizontalRadians).toFloat().coerceIn(0.25f, 170f)
 }
 
 data class FlightWindowLook(
@@ -638,8 +639,8 @@ data class FlightPhotoSpatialPose(
 			viewAzimuthDegrees = normalizeDegrees(viewAzimuthDegrees),
 			viewElevationDegrees = viewElevationDegrees.coerceIn(-90f, 90f),
 			verticalFieldOfViewDegrees = verticalFieldOfViewDegrees.coerceIn(
-				FlightWindowPlacement.MIN_VERTICAL_FIELD_OF_VIEW_DEGREES,
-				FlightWindowPlacement.MAX_VERTICAL_FIELD_OF_VIEW_DEGREES
+				MIN_FIELD_OF_VIEW_DEGREES,
+				MAX_FIELD_OF_VIEW_DEGREES
 			)
 		)
 	}
@@ -657,6 +658,8 @@ data class FlightPhotoSpatialPose(
 	}
 
 	companion object {
+		const val MIN_FIELD_OF_VIEW_DEGREES = 1f
+		const val MAX_FIELD_OF_VIEW_DEGREES = 170f
 		private const val MAXIMUM_PHOTO_EYE_ALTITUDE_METERS = 100_000f
 	}
 }
