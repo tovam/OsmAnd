@@ -246,6 +246,8 @@ fun FlightModeScreen(
 		)
 	) {
 		val safeDrawingInsets = WindowInsets.safeDrawing
+		var showCloudLibrary by remember { mutableStateOf(false) }
+		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney)
 		LaunchedEffect(state.replayPlaying, state.replaySpeed) {
 			while (state.replayPlaying) {
 				delay(100)
@@ -304,7 +306,7 @@ fun FlightModeScreen(
 		) {
 			when (state.page) {
 				FlightPage.HOME, FlightPage.PLANS -> FlightWorkspaceHome(state, onPageChange,
-					onOpenJourney, onNewPreparation, onClose)
+					onOpenJourney, onNewPreparation, onClose, onCloud = { showCloudLibrary = true })
 				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
 					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction) }
 					FlightBottomNavigation(state, onPageChange)
@@ -414,7 +416,8 @@ fun FlightModeScreen(
 					onUpdateName = onUpdateJourneyName,
 					onSave = onSaveJourney,
 					onExport = onExportJourney,
-					onOpen = onOpenJourney
+					onOpen = onOpenJourney,
+					onCloud = { showCloudLibrary = true }
 				)
 			}
 
@@ -2037,7 +2040,8 @@ private fun JourneysScreen(
 	onUpdateName: (String) -> Unit,
 	onSave: () -> Unit,
 	onExport: () -> Unit,
-	onOpen: (String) -> Unit
+	onOpen: (String) -> Unit,
+	onCloud: () -> Unit
 ) {
 	val pastJourneys = state.savedJourneys.filter { it.sampleCount > 0 &&
 		!(state.activeRecording.running && it.id == state.activeRecording.journeyId) }
@@ -2045,6 +2049,7 @@ private fun JourneysScreen(
 		FlightTopBar(stringResource(R.string.flight_workspace_past), FlightSessionMode.REPLAY, onClose)
 		Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
 			PlanAction(stringResource(R.string.flight_workspace_home), { onPageChange(FlightPage.HOME) })
+			PlanAction(stringResource(R.string.flight_cloud_library), onCloud)
 			PlanAction(stringResource(R.string.flight_mode_load_osmand_track), onSelectInternalTrack)
 			PlanAction(stringResource(R.string.flight_mode_load_gpx_file), onImport)
 		}

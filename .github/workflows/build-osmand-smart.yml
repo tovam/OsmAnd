@@ -190,7 +190,7 @@ jobs:
           echo "Building update-compatible versionCode ${APK_NUMBER_VERSION}"
           ./gradlew --build-cache -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
 
-      - name: Test flight preparation and interrupted recording recovery
+      - name: Test flight logic, cloud archives and server
         working-directory: android
         run: |
           mkdir -p .flight-test-tools
@@ -200,6 +200,7 @@ jobs:
           curl --fail --silent --show-error https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar -o .flight-test-tools/junit.jar
           curl --fail --silent --show-error https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar -o .flight-test-tools/hamcrest.jar
           bash OsmAnd/test/standalone/check-flight-preparation.sh .flight-test-tools
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s server/flight_cloud -p 'test_*.py'
 
       - name: Verify patched native core is packaged
         run: |

@@ -21,11 +21,13 @@ internal fun FlightWorkspaceHome(
     onOpen: (String) -> Unit,
     onNew: (Boolean) -> Unit,
     onClose: () -> Unit,
+    onCloud: () -> Unit = {},
 ) {
     val planned = state.page == FlightPage.PLANS
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth()) {
             PlanAction(stringResource(R.string.flight_workspace_home), { onPage(FlightPage.HOME) })
+            PlanAction(stringResource(R.string.flight_cloud_library), onCloud)
             Spacer(Modifier.weight(1f))
             PlanAction(stringResource(R.string.flight_mode_close), onClose)
         }

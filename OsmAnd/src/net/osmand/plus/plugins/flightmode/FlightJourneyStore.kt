@@ -382,6 +382,8 @@ class FlightJourneyStore(private val context: Context) {
 		FlightPhotoPerspective.detectVerticalFieldOfViewDegrees(File(photo.localPath))
 
 	fun createCaptureFile(): File = File(mediaDirectory, "${UUID.randomUUID()}.jpg")
+	internal fun createCloudPhotoFile(extension: String): File =
+		File(mediaDirectory, "${UUID.randomUUID()}.$extension")
 
 	fun capturedPhoto(
 		file: File,
@@ -422,7 +424,7 @@ class FlightJourneyStore(private val context: Context) {
 		}
 	}
 
-	private fun journeyToJson(
+	internal fun journeyToJson(
 		journey: FlightJourney,
 		photoStorageNames: Map<String, String> = emptyMap()
 	): JSONObject = JSONObject().apply {
@@ -466,7 +468,7 @@ class FlightJourneyStore(private val context: Context) {
 		})
 	}
 
-	private fun journeyFromJson(root: JSONObject, photoPath: (String) -> String): FlightJourney {
+	internal fun journeyFromJson(root: JSONObject, photoPath: (String) -> String): FlightJourney {
 		if (root.optInt("schemaVersion") !in 1..SCHEMA_VERSION) throw IOException("Version de voyage incompatible")
 		val trip = tripFromJson(root.getJSONObject("trip"))
 		val photosJson = root.optJSONArray("photos") ?: JSONArray()
@@ -818,7 +820,7 @@ class FlightJourneyStore(private val context: Context) {
 		)
 	}
 
-	private fun buildGpx(journey: FlightJourney): String {
+	internal fun buildGpx(journey: FlightJourney): String {
 		val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
 			timeZone = TimeZone.getTimeZone("UTC")
 		}
