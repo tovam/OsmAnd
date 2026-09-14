@@ -11,6 +11,68 @@ import org.junit.Test
 class FlightWorkspaceTest {
     private val time = 1_800_000_000_000L
 
+    @Test
+    fun savedNormalPhotoZoomsKeepExactlyTheSameProjection() {
+        for (zoom in listOf(0.36f, 0.4f, 1f, 1.4f, 2f, 4f)) {
+            val saved = FlightWindowPlacement(zoom = zoom)
+            assertEquals(saved, saved.clamped())
+            assertEquals((58f / zoom).coerceIn(14f, 145f), saved.verticalFieldOfViewDegrees(), 0f)
+        }
+        val telephoto = FlightWindowPlacement(zoom = 58f / 3f)
+        assertEquals(3f, telephoto.verticalFieldOfViewDegrees(), 0.00001f)
+        val pose = FlightPhotoSpatialPose(2.5, time, 45.0, 10.0, 11000f, 80f, 180f, -15f, 3f, 1.5f)
+        assertEquals(pose, pose.clampedOrNull())
+    }
+
+    @Test
+    fun simulatedWaypointsNeverBecomeLandingsAndKeepOneTimeline() {
+        val plan =
+            FlightPlan(
+                listOf(
+                    FlightStop("A", 45.0, 0.0),
+                    FlightStop("via", 46.0, 5.0),
+                    FlightStop("B", 45.0, 10.0),
+                ),
+                preparation =
+                    FlightPreparation(departureMillis = time, arrivalMillis = time + 3_600_000),
+            )
+        val trip = FlightOfflinePreparation.simulation(plan)
+        val engine = FlightReplayEngine(trip)
+        assertEquals(time, trip.samples.first().timestampMillis)
+        assertEquals(time + 3_600_000, trip.samples.last().timestampMillis)
+        for (percent in 20..80) {
+            val sample = engine.snapshotAt(percent / 100f).sample
+            assertTrue(sample.altitudeMeters!! > 1000)
+            assertEquals(0, sample.legIndex)
+        }
+        val nearVia =
+            trip.samples.minOf {
+                FlightTerrainTilePlanner.distanceKm(it.latitude, it.longitude, 46.0, 5.0)
+            }
+        assertTrue(nearVia < 5)
+        assertEquals(
+            FlightOfflinePreparation.simulationInput(plan),
+            FlightOfflinePreparation.simulationInput(
+                plan.copy(satelliteQuality = FlightSatelliteQuality.ULTRA_PLUS_PLUS_PLUS)
+            ),
+        )
+    }
+
+    @Test
+    fun largeOfflineManifestIsNotRebuiltOrTraversedForUiStatistics() {
+        val requests =
+            List(50000) { i ->
+                FlightOfflineRequest(TerrainTileId(14, i % 16384, i / 16384), i % 2 == 0, 0)
+            }
+        val quote = FlightOfflineQuote(requests, emptyList(), listOf(FlightOfflineBand(50, 14, 14)))
+        assertSame(quote.assets, quote.assets)
+        assertEquals(25000, quote.satelliteCount)
+        assertEquals(25000, quote.terrainCount)
+        assertEquals(3_875_000_000L, quote.estimatedBytes)
+        assertTrue(quote.preview(true, listOf(1)).size <= 8192)
+        assertTrue(quote.preview(false, listOf(1)).size <= 8192)
+    }
+
     private fun fix(t: Long, altitude: Double = 12000.0) =
         FlightSample(
             0,

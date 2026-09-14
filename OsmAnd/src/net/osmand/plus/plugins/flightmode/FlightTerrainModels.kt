@@ -5,6 +5,7 @@ enum class FlightTerrainPhase {
 	PLANNING,
 	DOWNLOADING,
 	BUILDING,
+	PAUSED,
 	READY,
 	ERROR
 }

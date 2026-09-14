@@ -1,5 +1,29 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_plan_saving">Enregistrement en cours…</string>
+    <string name="flight_plan_disarm">Désactiver le départ automatique</string>
+    <string name="flight_plan_unsaved">Modifications non enregistrées</string>
+    <string name="flight_plan_saved_short">✓ Enregistré sur ce téléphone</string>
+    <string name="flight_plan_leave_warning">Cette préparation contient des modifications non enregistrées. Enregistre-la avant de quitter pour la retrouver dans Vols prévus.</string>
+    <string name="flight_plan_leave_unsaved">Quitter sans enregistrer</string>
+    <string name="flight_plan_pick_date">Choisir la date</string>
+    <string name="flight_plan_pick_time">Choisir l’heure</string>
+    <string name="flight_plan_permission_ok">✓ %1$s : OK</string>
+    <string name="flight_plan_permission_missing">○ %1$s : à autoriser</string>
+    <string name="flight_plan_permission_gps">Position précise</string>
+    <string name="flight_plan_permission_background">Position en arrière-plan</string>
+    <string name="flight_plan_permission_alarm">Alarmes exactes</string>
+    <string name="flight_plan_permission_notifications">Notifications</string>
+    <string name="flight_plan_remove_via">Supprimer ce passage</string>
+    <string name="flight_plan_pause_label">En pause</string>
+    <string name="flight_plan_missing_explanation">Un échec = fichier non récupéré ou illisible (réseau, réponse du fournisseur…). Les fichiers restants ne sont pas encore traités. Reprendre vérifie le cache et retente les absents ; les fichiers valides sont conservés. Des échecs persistants empêchent l’état Complet.</string>
+    <string name="flight_plan_tile_failure">Dernier échec %1$s z/x/y %2$s : %3$s</string>
+    <string name="flight_plan_display_quality">Qualité de la vue Hublot</string>
+    <string name="flight_plan_display_fine">Relief proche Z</string>
+    <string name="flight_plan_display_middle">Relief moyen Z</string>
+    <string name="flight_plan_display_quality_hint">Ces réglages sont les mêmes que dans Hublot et restent enregistrés avec ce trajet. Les bandes ci-dessous définissent les fichiers à télécharger, pas le zoom de la caméra. Prévois des sources assez fines pour la qualité affichée.</string>
+    <string name="flight_plan_start_now">Commencer le suivi GPS maintenant</string>
+    <string name="flight_plan_actions_hint">Explorer la simulation : aperçu théorique, sans enregistrement GPS. Départ automatique : programme le suivi à l’heure prévue moins l’avance choisie. Commencer le suivi GPS maintenant : démarre réellement le suivi, à utiliser le jour du vol.</string>
     <string name="flight_workspace_home">Vols</string>
     <string name="flight_workspace_past">Vols passés</string>
     <string name="flight_workspace_past_hint">Ouvrir un journal, importer une trace, associer des photos</string>
@@ -20,7 +44,7 @@
     <string name="flight_photo_fix_age">Âge de la position au déclenchement</string>
 	<string name="flight_cal_place">Placer</string>
 	<string name="flight_cal_explore">Explorer</string>
-	<string name="flight_plan_repeat_completed">Ce journal est terminé. Utilise « Répéter ce trajet » pour programmer un nouveau vol sans effacer le précédent.</string>
+	<string name="flight_plan_repeat_completed">Ce journal est terminé. Utilise « Dupliquer le trajet » pour programmer un nouveau vol sans effacer le précédent.</string>
 	<string name="flight_plan_low_space">Incomplet : moins de 256 Mio libres. Les fichiers terminés sont conservés ; libère de la place puis reprends.</string>
 	<string name="flight_plan_free_space">Espace libre sur le téléphone : %1$.2f Gio. Une réserve de 256 Mio est conservée.</string>
 	<string name="flight_camera_hint">Pince pour zoomer sans filtre · touche pour la mise au point · la trace GPS continue.</string>
@@ -78,7 +102,7 @@
 	<string name="flight_plan_cached_estimate">Déjà présents : %1$d fichiers, %2$.2f Gio. À ajouter ≈ %3$.2f Gio. Les fichiers existants seront vérifiés, pas dupliqués.</string>
 	<string name="flight_plan_dates_invalid">Dates invalides : l’arrivée doit être après le départ.</string>
 	<string name="flight_plan_departure">Départ</string>
-	<string name="flight_plan_download">Télécharger / vérifier / reprendre</string>
+	<string name="flight_plan_download">Télécharger les fichiers manquants / reprendre</string>
 	<string name="flight_plan_edit_map">Modifier le trajet</string>
 	<string name="flight_plan_estimate">%1$d images satellite + %2$d tuiles relief · environ %3$.2f Gio</string>
 	<string name="flight_plan_estimate_hint">Estimation avant téléchargement : 45 ko par image, 110 ko par tuile relief, tailles variables. Tous les niveaux grossiers intermédiaires sont inclus. Aucun niveau demandé n’est abaissé en cachette.</string>
@@ -95,12 +119,12 @@
 	<string name="flight_plan_preview_hint">Les couleurs montrent les niveaux demandés, pas la progression. Les bords sont arrondis aux tuiles dans cet aperçu. Les points intermédiaires sont des passages, pas des escales.</string>
 	<string name="flight_plan_preview_sat">Bandes satellite</string>
 	<string name="flight_plan_quality_hint">Z satellite = finesse des pixels de la photo au sol. Z relief = finesse des altitudes source, indépendante du maillage 3D. +1 double la précision linéaire et multiplie environ par 4 le nombre de tuiles à surface égale. Un pixel source n’est pas une précision géométrique garantie.</string>
-	<string name="flight_plan_rehearse">Simuler le voyage</string>
+	<string name="flight_plan_rehearse">Explorer la simulation (sans GPS)</string>
 	<string name="flight_plan_resolution">À cette latitude : satellite ≈ %1$.0f m/pixel · relief ≈ %2$.0f m/pixel</string>
 	<string name="flight_plan_route_hint">Place le départ, l’arrivée et les passages facultatifs. Les segments suivent le plus court chemin autour de la Terre. Les positions mesurées resteront distinctes de ce trajet prévu.</string>
 	<string name="flight_plan_satellite_z">Satellite Z</string>
-	<string name="flight_plan_save">Enregistrer sans armer</string>
-	<string name="flight_plan_saved">Préparation enregistrée. Départ automatique désarmé.</string>
+	<string name="flight_plan_save">Enregistrer le trajet</string>
+	<string name="flight_plan_saved">Préparation enregistrée sur ce téléphone, accessible dans Vols prévus.</string>
 	<string name="flight_plan_simulation">SIMULATION · trajet et altitudes hypothétiques, jamais enregistrés comme mesures.</string>
 	<string name="flight_plan_stop_minutes">Durée lente (min)</string>
 	<string name="flight_plan_stop_speed">Vitesse lente (km/h)</string>
@@ -109,8 +133,8 @@
 	<string name="flight_plan_time_hint">Date : année-mois-jour heure:minute. UTC +02:00 = heure locale en avance de 2 heures sur UTC. Indique le décalage applicable à cette date pour chaque aéroport, y compris l’heure d’été.</string>
 	<string name="flight_plan_via">Passage</string>
 	<string name="flight_plan_new">Nouveau trajet</string>
-	<string name="flight_plan_repeat">Répéter ce trajet</string>
-	<string name="flight_plan_missing_tiles">%1$d / %2$d fichiers vérifiés · %3$d manquants</string>
+	<string name="flight_plan_repeat">Dupliquer le trajet</string>
+	<string name="flight_plan_missing_tiles">%1$d / %2$d fichiers valides · %3$d échecs · %4$d restants</string>
 	<string name="flight_plan_ready">Complet</string>
 	<string name="flight_plan_partial">Incomplet</string>
 	<string name="flight_plan_downloading">En cours</string>

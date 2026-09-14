@@ -6,25 +6,54 @@ import kotlinx.coroutines.ensureActive
 
 data class FlightOfflineRequest(val tile: TerrainTileId, val satellite: Boolean, val band: Int)
 
-data class FlightOfflineQuote(
+// Identity equality is deliberate: Compose must not hash a 250,000-entry manifest every frame.
+class FlightOfflineQuote(
     val requests: List<FlightOfflineRequest>,
     val route: List<Pair<Double, Double>>,
     val bands: List<FlightOfflineBand>,
 ) {
-    val estimatedBytes: Long
-        get() = requests.sumOf { if (it.satellite) 45_000L else 110_000L }
+    val satelliteCount = requests.count { it.satellite }
+    val terrainCount = requests.size - satelliteCount
+    val estimatedBytes = satelliteCount * 45_000L + terrainCount * 110_000L
 
-    val assets
-        get() =
-            FlightOfflineAssets(
-                requests.filter { !it.satellite }.map { it.tile },
-                requests.filter { it.satellite }.map { it.tile },
-            )
+    val assets =
+        FlightOfflineAssets(
+            requests.filter { !it.satellite }.map { it.tile },
+            requests.filter { it.satellite }.map { it.tile },
+        )
+
+    /** Bounded overview, constructed once off the UI thread, not once per progress notification. */
+    fun preview(satellite: Boolean, colors: List<Int>): List<Pair<TerrainTileId, Int>> {
+        for (maximumZoom in 8 downTo 3) {
+            val cells = linkedMapOf<TerrainTileId, Int>()
+            requests
+                .asSequence()
+                .filter { it.band >= 0 && it.satellite == satellite }
+                .forEach { r ->
+                    val z = min(r.tile.zoom, maximumZoom)
+                    val shift = r.tile.zoom - z
+                    val id = TerrainTileId(z, r.tile.x shr shift, r.tile.y shr shift)
+                    cells[id] = minOf(cells[id] ?: r.band, r.band)
+                }
+            if (cells.size <= 8192 || maximumZoom == 3)
+                return cells.entries
+                    .sortedByDescending { it.value }
+                    .map { it.key to colors[it.value % colors.size] }
+        }
+        return emptyList()
+    }
 }
 
 /** Conservative spherical corridor cover. Requested zooms are never silently lowered. */
 object FlightOfflinePreparation {
     const val MAX_REQUESTS = 250_000
+
+    fun simulationInput(plan: FlightPlan) =
+        Triple(
+            plan.stops.map { it.latitude to it.longitude },
+            plan.preparation?.departureMillis ?: 0L,
+            plan.preparation?.arrivalMillis ?: 0L,
+        )
 
     suspend fun quote(plan: FlightPlan): FlightOfflineQuote {
         val stops =
@@ -87,6 +116,7 @@ object FlightOfflinePreparation {
         // All ancestors guarantee a usable low-resolution fallback at every intermediate zoom.
         val fine = requests.values.toList()
         for (request in fine) {
+            coroutineContext.ensureActive()
             for (z in 3 until request.tile.zoom) {
                 val shift = request.tile.zoom - z
                 val tile = TerrainTileId(z, request.tile.x shr shift, request.tile.y shr shift)

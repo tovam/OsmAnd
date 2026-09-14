@@ -19,8 +19,14 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     var dragToPlace: Boolean = false
     private var placementPreview: PointF? = null
     var coverage: List<Pair<TerrainTileId, Int>> = emptyList()
+        set(value) {
+            if (field === value) return
+            field = value
+            invalidate()
+        }
     var routeOverview: Boolean = false
     var autoFitRoute: Boolean = false
+    var gesturesEnabled: Boolean = true
     var routePaddingKm: Double = 0.0
     var onStatus: (String) -> Unit = {}
     private var image: Bitmap? = null
@@ -68,6 +74,8 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         track: FlightTrip?,
         useSatellite: Boolean,
     ) {
+        val changed = image !== bitmap || calibration != data || selected != index || mode != newMode ||
+            reference != original || estimated != result || trip !== track || satellite != useSatellite
         val routeChanged = routeOverview && data.points != calibration.points
         image = bitmap
         calibration = data
@@ -101,8 +109,10 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             requestedKey = ""
         }
         if (routeChanged && autoFitRoute) fit()
-        if (mode != 0) requestTiles()
-        invalidate()
+        if (changed) {
+            if (mode != 0) requestTiles()
+            invalidate()
+        }
     }
 
     fun fit() {
@@ -173,6 +183,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!gesturesEnabled) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
@@ -419,15 +430,16 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                 )
             else null
         coverage.forEach { (id, color) ->
-            val top = FlightTerrainTilePlanner.tileYToLatitude(id.y.toDouble(), id.zoom)
-            val bottom = FlightTerrainTilePlanner.tileYToLatitude(id.y + 1.0, id.zoom)
-            val left = id.x.toDouble() / (1 shl id.zoom) * 360 - 180
-            val a = project(top, left)
+            // Mercator tile coordinates are already projected. Avoid inverse + forward trig per cell.
             val size = (256 * 2.0.pow(zoom - id.zoom)).toFloat()
-            val b = project(bottom, left)
-            if (a.x + size >= 0 && a.x <= width && b.y >= 0 && a.y <= height) {
+            val n = (1 shl id.zoom).toDouble()
+            val dx = id.x - FlightTerrainTilePlanner.longitudeToTileX(longitude, id.zoom)
+            val wrappedDx = dx - kotlin.math.floor(dx/n + 0.5)*n
+            val x = width/2f + (wrappedDx*size).toFloat()
+            val y = height/2f + ((id.y-FlightTerrainTilePlanner.latitudeToTileY(latitude,id.zoom))*size).toFloat()
+            if (x + size >= 0 && x <= width && y + size >= 0 && y <= height) {
                 paint.color = color or 0xFF000000.toInt()
-                canvas.drawRect(a.x, a.y, a.x + size, b.y, paint)
+                canvas.drawRect(x, y, x + size, y + size, paint)
             }
         }
         coverageLayer?.let { canvas.restoreToCount(it) }

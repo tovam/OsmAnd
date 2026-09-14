@@ -1297,7 +1297,7 @@ private fun SatelliteScreen(
 }
 
 @Composable
-private fun SatelliteQualitySelector(
+internal fun SatelliteQualitySelector(
 	quality: FlightSatelliteQuality,
 	radiusKm: Int,
 	baseZoom: Int?,
@@ -4016,6 +4016,7 @@ private fun terrainStatusText(status: FlightTerrainStatus): String = when (statu
 		if (status.bytesDownloaded > 0L) append(" · ${formatDataSize(status.bytesDownloaded)}")
 	}
 	FlightTerrainPhase.BUILDING -> status.message ?: "Construction du maillage GPU…"
+	FlightTerrainPhase.PAUSED -> status.message ?: "En pause"
 	FlightTerrainPhase.READY -> status.message ?: "Relief disponible hors ligne"
 	FlightTerrainPhase.ERROR -> status.message ?: "Relief indisponible"
 }

@@ -9,12 +9,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.findViewTreeLifecycleOwner
+import java.util.Calendar
+import java.util.SimpleTimeZone
 import kotlin.math.*
 import kotlinx.coroutines.*
 import net.osmand.plus.R
@@ -44,6 +50,7 @@ internal fun FlightPlanningScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var mapEditor by remember { mutableStateOf(false) }
     var confirmStart by remember { mutableStateOf(false) }
+    var confirmLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
     var selected by remember { mutableStateOf(0) }
     var source by remember { mutableStateOf(false) }
     var existing by remember { mutableStateOf<Pair<Int, Long>?>(null) }
@@ -67,7 +74,8 @@ internal fun FlightPlanningScreen(
             0x80F45F8E.toInt(),
             0x80FFFFFF.toInt(),
         )
-    val planKey = state.plan.stops to prep.bands
+    // Names and schedules do not change the geographic download manifest.
+    val planKey = state.plan.stops.map { it.latitude to it.longitude } to prep.bands
     LaunchedEffect(planKey) {
         quote = null
         error = null
@@ -89,31 +97,39 @@ internal fun FlightPlanningScreen(
     val coverage by
         produceState<List<Pair<TerrainTileId, Int>>>(emptyList(), quote, source) {
             value =
-                withContext(Dispatchers.Default) {
-                    quote
-                        ?.requests
-                        ?.filter { it.band >= 0 && it.satellite == !source }
-                        ?.sortedByDescending { it.band }
-                        ?.map { r ->
-                            // Overview aggregation bounds Canvas work; download counts use the full
-                            // exact
-                            // manifest.
-                            val z = min(r.tile.zoom, 8)
-                            val shift = r.tile.zoom - z
-                            TerrainTileId(z, r.tile.x shr shift, r.tile.y shr shift) to
-                                palette[r.band % palette.size]
-                        }
-                        ?.distinct() ?: emptyList()
-                }
+                withContext(Dispatchers.Default) { quote?.preview(!source, palette) ?: emptyList() }
         }
     fun change(next: FlightPreparation) = onUpdate(state.plan.copy(preparation = next))
+    fun leave(action: () -> Unit) {
+        if (state.journeyDirty) confirmLeave = action else action()
+    }
+    fun addVia() {
+        val stops = state.plan.stops.toMutableList()
+        stops.add(stops.lastIndex, FlightStop(context.getString(R.string.flight_plan_via)))
+        selected = stops.lastIndex - 1
+        onUpdate(state.plan.copy(stops = stops, preparation = prep))
+        mapEditor = true
+    }
+    val backAction by rememberUpdatedState<() -> Unit> { leave(onClose) }
+    val dispatcher =
+        (context as? androidx.activity.OnBackPressedDispatcherOwner)?.onBackPressedDispatcher
+    DisposableEffect(dispatcher, mapEditor) {
+        val callback =
+            object : androidx.activity.OnBackPressedCallback(!mapEditor) {
+                override fun handleOnBackPressed() {
+                    backAction()
+                }
+            }
+        dispatcher?.addCallback(callback)
+        onDispose { callback.remove() }
+    }
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            PlanAction(stringResource(R.string.flight_workspace_future), onJournals)
+            PlanAction(stringResource(R.string.flight_workspace_future), { leave(onJournals) })
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            PlanAction(stringResource(R.string.flight_plan_new), { onNew(false) })
-            PlanAction(stringResource(R.string.flight_plan_repeat), { onNew(true) })
+            PlanAction(stringResource(R.string.flight_plan_new), { leave { onNew(false) } })
+            PlanAction(stringResource(R.string.flight_plan_repeat), { leave { onNew(true) } })
         }
         Row(Modifier.fillMaxWidth()) {
             Text(
@@ -122,7 +138,29 @@ internal fun FlightPlanningScreen(
                 fontSize = 17.sp,
                 modifier = Modifier.weight(1f).padding(8.dp),
             )
-            PlanAction(stringResource(R.string.flight_mode_close), onClose)
+            PlanAction(stringResource(R.string.flight_mode_close), { leave(onClose) })
+        }
+        Row(Modifier.fillMaxWidth()) {
+            PlanAction(
+                stringResource(R.string.flight_plan_save),
+                { onSave(false) },
+                enabled = !state.savingPreparation,
+            )
+            Text(
+                stringResource(
+                    when {
+                        state.savingPreparation -> R.string.flight_plan_saving
+                        state.journeyDirty || state.journeyId == null ->
+                            R.string.flight_plan_unsaved
+                        else -> R.string.flight_plan_saved_short
+                    }
+                ),
+                color =
+                    if (state.journeyDirty || state.journeyId == null) Color(0xFFFFBD39)
+                    else Color(0xFF2CDBBE),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(8.dp),
+            )
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             item {
@@ -137,7 +175,11 @@ internal fun FlightPlanningScreen(
                             OutlinedTextField(
                                 value = stop.name,
                                 onValueChange = { onUpdateStop(i, it) },
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                                textStyle =
+                                    androidx.compose.ui.text.TextStyle(
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                    ),
                                 singleLine = true,
                                 label = {
                                     Text("${i + 1}${if (stop.latitude != null) " ✓" else ""}")
@@ -184,19 +226,7 @@ internal fun FlightPlanningScreen(
                             )
                         }
                     }
-                    PlanAction(
-                        stringResource(R.string.flight_plan_add_via),
-                        {
-                            val stops = state.plan.stops.toMutableList()
-                            stops.add(
-                                stops.lastIndex,
-                                FlightStop(context.getString(R.string.flight_plan_via)),
-                            )
-                            selected = stops.lastIndex - 1
-                            onUpdate(state.plan.copy(stops = stops, preparation = prep))
-                            mapEditor = true
-                        },
-                    )
+                    PlanAction(stringResource(R.string.flight_plan_add_via), { addVia() })
                     FlightDateField(
                         stringResource(R.string.flight_plan_departure),
                         prep.departureMillis,
@@ -215,6 +245,55 @@ internal fun FlightPlanningScreen(
                         stringResource(R.string.flight_plan_time_hint),
                         color = Color.LightGray,
                         fontSize = 10.sp,
+                    )
+                }
+            }
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    Text(
+                        stringResource(R.string.flight_plan_display_quality),
+                        color = Color.White,
+                        fontSize = 14.sp,
+                    )
+                    SatelliteQualitySelector(
+                        state.plan.satelliteQuality,
+                        state.plan.terrainCorridorKm,
+                        state.terrainScene?.zoom,
+                        state.plan.stops.firstOrNull()?.latitude,
+                        { onUpdate(state.plan.copy(satelliteQuality = it)) },
+                    )
+                    Row {
+                        PlanNumber(
+                            stringResource(R.string.flight_plan_display_fine),
+                            state.plan.terrainFineZoom,
+                            9..14,
+                            Modifier.weight(1f),
+                        ) { z ->
+                            onUpdate(
+                                state.plan.copy(
+                                    terrainFineZoom = z,
+                                    terrainMiddleZoom = minOf(z, state.plan.terrainMiddleZoom),
+                                )
+                            )
+                        }
+                        PlanNumber(
+                            stringResource(R.string.flight_plan_display_middle),
+                            state.plan.terrainMiddleZoom,
+                            9..14,
+                            Modifier.weight(1f),
+                        ) { z ->
+                            onUpdate(
+                                state.plan.copy(
+                                    terrainMiddleZoom = z,
+                                    terrainFineZoom = maxOf(z, state.plan.terrainFineZoom),
+                                )
+                            )
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.flight_plan_display_quality_hint),
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
                     )
                     Text(
                         stringResource(R.string.flight_plan_bands),
@@ -311,6 +390,7 @@ internal fun FlightPlanningScreen(
                             stringResource(R.string.flight_plan_edit_map),
                             { mapEditor = true },
                         )
+                        PlanAction(stringResource(R.string.flight_plan_add_via), { addVia() })
                     }
                     FlightPlanMap(
                         state.plan,
@@ -332,8 +412,8 @@ internal fun FlightPlanningScreen(
                         Text(
                             stringResource(
                                 R.string.flight_plan_estimate,
-                                q.requests.count { it.satellite },
-                                q.requests.count { !it.satellite },
+                                q.satelliteCount,
+                                q.terrainCount,
                                 q.estimatedBytes / 1_073_741_824.0,
                             ),
                             color = Color.White,
@@ -382,6 +462,7 @@ internal fun FlightPlanningScreen(
                         Text(
                             "${stringResource(when(offline.phase) { FlightTerrainPhase.READY -> R.string.flight_plan_ready
                         FlightTerrainPhase.ERROR -> R.string.flight_plan_partial
+                        FlightTerrainPhase.PAUSED -> R.string.flight_plan_pause_label
                         else -> R.string.flight_plan_downloading })} · ${offline.message?:""} · %.1f MB · %.1f MB/s"
                                 .format(
                                     offline.bytesDownloaded / 1e6,
@@ -394,6 +475,11 @@ internal fun FlightPlanningScreen(
                         )
                         if (offline.phase == FlightTerrainPhase.DOWNLOADING)
                             PlanAction(stringResource(R.string.flight_plan_pause), onCancelPreload)
+                        Text(
+                            stringResource(R.string.flight_plan_missing_explanation),
+                            color = Color.LightGray,
+                            fontSize = 11.sp,
+                        )
                     }
                     Text(
                         stringResource(R.string.flight_plan_horizon),
@@ -455,26 +541,32 @@ internal fun FlightPlanningScreen(
                             change(prep.copy(stopMinutes = it))
                         }
                     }
+                    FlightPermissionChecklist()
                     PlanAction(stringResource(R.string.flight_plan_permissions), onPermissions)
+                    if (prep.automatic)
+                        PlanAction(
+                            stringResource(R.string.flight_plan_disarm),
+                            {
+                                change(prep.copy(automatic = false))
+                                onSave(false)
+                            },
+                            enabled = !state.savingPreparation,
+                        )
                     state.journeyMessage?.let {
                         Text(it, color = Color(0xFFFFBD39), fontSize = 12.sp)
                     }
                     Row {
                         PlanAction(
                             stringResource(R.string.flight_plan_save),
-                            {
-                                change(prep.copy(automatic = false))
-                                onSave(false)
-                            },
+                            { onSave(false) },
+                            enabled = !state.savingPreparation,
                         )
                         PlanAction(
                             stringResource(R.string.flight_plan_arm),
-                            {
-                                change(prep.copy(automatic = true))
-                                onSave(true)
-                            },
+                            { onSave(true) },
                             enabled =
-                                prep.departureMillis > 0 &&
+                                !state.savingPreparation &&
+                                    prep.departureMillis > 0 &&
                                     prep.arrivalMillis > prep.departureMillis &&
                                     state.plan.stops.all {
                                         it.latitude != null && it.longitude != null
@@ -488,11 +580,52 @@ internal fun FlightPlanningScreen(
                             state.plan.stops.size >= 2 &&
                                 state.plan.stops.all { it.latitude != null && it.longitude != null },
                     )
+                    Text(
+                        stringResource(R.string.flight_plan_actions_hint),
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                    )
                 }
             }
         }
-        PlanAction(stringResource(R.string.flight_mode_start_live), { confirmStart = true })
+        PlanAction(
+            stringResource(R.string.flight_plan_start_now),
+            { confirmStart = true },
+            enabled =
+                state.plan.stops.size >= 2 &&
+                    state.plan.stops.all { it.latitude != null && it.longitude != null },
+        )
         bottomNavigation()
+    }
+    confirmLeave?.let { action ->
+        AlertDialog(
+            onDismissRequest = { confirmLeave = null },
+            text = { Text(stringResource(R.string.flight_plan_leave_warning)) },
+            confirmButton = {
+                PlanAction(
+                    stringResource(R.string.flight_plan_save),
+                    {
+                        onSave(false)
+                        confirmLeave = null
+                    },
+                )
+            },
+            dismissButton = {
+                Row {
+                    PlanAction(
+                        stringResource(R.string.shared_string_cancel),
+                        { confirmLeave = null },
+                    )
+                    PlanAction(
+                        stringResource(R.string.flight_plan_leave_unsaved),
+                        {
+                            confirmLeave = null
+                            action()
+                        },
+                    )
+                }
+            },
+        )
     }
     if (confirmStart)
         AlertDialog(
@@ -525,6 +658,20 @@ internal fun FlightPlanningScreen(
                     state.plan.stops.forEachIndexed { i, s ->
                         PlanAction("${i+1} ${s.name}", { selected = i }, selected == i)
                     }
+                    PlanAction(stringResource(R.string.flight_plan_add_via), { addVia() })
+                    if (selected > 0 && selected < state.plan.stops.lastIndex)
+                        PlanAction(
+                            stringResource(R.string.flight_plan_remove_via),
+                            {
+                                onUpdate(
+                                    state.plan.copy(
+                                        stops =
+                                            state.plan.stops.filterIndexed { i, _ -> i != selected }
+                                    )
+                                )
+                                selected = (selected - 1).coerceAtLeast(0)
+                            },
+                        )
                 }
                 Text(
                     stringResource(R.string.flight_plan_map_hint, selected + 1),
@@ -604,6 +751,7 @@ private fun FlightPlanMap(
         modifier = modifier.clipToBounds(),
         update = { v ->
             v.routeOverview = true
+            v.gesturesEnabled = editable
             v.autoFitRoute = !editable
             v.routePaddingKm =
                 (plan.preparation?.bands?.maxOfOrNull { it.radiusKm } ?: 300).toDouble()
@@ -675,37 +823,99 @@ private fun FlightDateField(
     offset: Int,
     onChange: (Long, Int) -> Unit,
 ) {
-    var text by remember { mutableStateOf(FlightPreparation.dateText(millis, offset)) }
-    var zone by remember { mutableStateOf(FlightPreparation.offsetText(offset)) }
+    val context = LocalContext.current
+    var zone by remember(offset) { mutableStateOf(FlightPreparation.offsetText(offset)) }
+    fun calendar() =
+        Calendar.getInstance(SimpleTimeZone(offset * 60_000, "flight-offset")).apply {
+            timeInMillis = millis.takeIf { it > 0 } ?: System.currentTimeMillis()
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+    val date = FlightPreparation.dateText(millis, offset)
+    Text(label, color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
     Row {
-        OutlinedTextField(
-            text,
+        PlanAction(
+            date.takeIf { it.isNotBlank() }?.substringBefore(' ')
+                ?: stringResource(R.string.flight_plan_pick_date),
             {
-                text = it
-                onChange(FlightPreparation.parseDate(it, offset) ?: 0, offset)
+                val c = calendar()
+                android.app
+                    .DatePickerDialog(
+                        context,
+                        { _, y, m, d ->
+                            c.set(Calendar.YEAR, y)
+                            c.set(Calendar.MONTH, m)
+                            c.set(Calendar.DAY_OF_MONTH, d)
+                            onChange(c.timeInMillis, offset)
+                        },
+                        c.get(Calendar.YEAR),
+                        c.get(Calendar.MONTH),
+                        c.get(Calendar.DAY_OF_MONTH),
+                    )
+                    .show()
             },
-            label = { Text(label, fontSize = 10.sp) },
-            placeholder = { Text("yyyy-MM-dd HH:mm", fontSize = 10.sp) },
-            singleLine = true,
-            modifier = Modifier.weight(2f).padding(2.dp),
-            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
-            isError = text.isNotBlank() && FlightPreparation.parseDate(text, offset) == null,
+        )
+        PlanAction(
+            date.takeIf { it.isNotBlank() }?.substringAfter(' ')
+                ?: stringResource(R.string.flight_plan_pick_time),
+            {
+                val c = calendar()
+                android.app
+                    .TimePickerDialog(
+                        context,
+                        { _, h, m ->
+                            c.set(Calendar.HOUR_OF_DAY, h)
+                            c.set(Calendar.MINUTE, m)
+                            onChange(c.timeInMillis, offset)
+                        },
+                        c.get(Calendar.HOUR_OF_DAY),
+                        c.get(Calendar.MINUTE),
+                        true,
+                    )
+                    .show()
+            },
         )
         OutlinedTextField(
             zone,
             {
                 zone = it
                 val o = FlightPreparation.parseOffset(it)
-                onChange(
-                    if (o == null) 0 else FlightPreparation.parseDate(text, o) ?: 0,
-                    o ?: offset,
-                )
+                // An incomplete edit must never erase the stored schedule or reset its simulation.
+                if (o != null) onChange(FlightPreparation.parseDate(date, o) ?: millis, o)
             },
             label = { Text("UTC ±HH:mm", fontSize = 10.sp) },
             singleLine = true,
             modifier = Modifier.weight(1f).padding(2.dp),
             textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
             isError = FlightPreparation.parseOffset(zone) == null,
+        )
+    }
+}
+
+@Composable
+private fun FlightPermissionChecklist() {
+    val context = LocalContext.current
+    val view = LocalView.current
+    var statuses by remember { mutableStateOf(FlightScheduleManager.permissionStatuses(context)) }
+    DisposableEffect(view, context) {
+        val lifecycle = view.findViewTreeLifecycleOwner()?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME)
+                statuses = FlightScheduleManager.permissionStatuses(context)
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+    statuses.forEach { status ->
+        Text(
+            stringResource(
+                if (status.granted) R.string.flight_plan_permission_ok
+                else R.string.flight_plan_permission_missing,
+                stringResource(status.label),
+            ),
+            color = if (status.granted) Color(0xFF2CDBBE) else Color(0xFFFFBD39),
+            fontSize = 12.sp,
+            modifier = Modifier.padding(vertical = 3.dp),
         )
     }
 }

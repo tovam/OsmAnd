@@ -16,6 +16,35 @@ internal object FlightScheduleManager {
     private const val PREFS = "flight-schedules"
     const val START = "flight.scheduled.start"
 
+    data class PermissionStatus(val label: Int, val granted: Boolean)
+
+    fun permissionStatuses(context: Context): List<PermissionStatus> {
+        fun granted(permission: String) =
+            ContextCompat.checkSelfPermission(context, permission) ==
+                PackageManager.PERMISSION_GRANTED
+        return listOf(
+            PermissionStatus(
+                R.string.flight_plan_permission_gps,
+                granted(Manifest.permission.ACCESS_FINE_LOCATION),
+            ),
+            PermissionStatus(
+                R.string.flight_plan_permission_background,
+                Build.VERSION.SDK_INT < 29 ||
+                    granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+            ),
+            PermissionStatus(
+                R.string.flight_plan_permission_alarm,
+                Build.VERSION.SDK_INT < 31 ||
+                    (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager)
+                        .canScheduleExactAlarms(),
+            ),
+            PermissionStatus(
+                R.string.flight_plan_permission_notifications,
+                Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS),
+            ),
+        )
+    }
+
     fun missingPermissions(context: Context): List<String> = buildList {
         if (
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=

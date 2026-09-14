@@ -265,9 +265,16 @@ class FlightModeFragment : BaseFullScreenFragment() {
 
 	private fun showPreparationPermissions() {
 		val context=requireContext()
-		val missing=FlightScheduleManager.missingPermissions(context)
+		val statusText=android.text.SpannableStringBuilder()
+		FlightScheduleManager.permissionStatuses(context).forEach { status ->
+			val start=statusText.length
+			statusText.append(getString(if(status.granted) R.string.flight_plan_permission_ok else R.string.flight_plan_permission_missing,
+				getString(status.label))).append("\n")
+			statusText.setSpan(android.text.style.ForegroundColorSpan(if(status.granted) android.graphics.Color.rgb(30,165,95)
+				else android.graphics.Color.rgb(210,120,30)),start,statusText.length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+		}
 		androidx.appcompat.app.AlertDialog.Builder(context).setTitle(R.string.flight_plan_permissions)
-			.setMessage(getString(R.string.flight_plan_permission_explanation)+"\n\n"+missing.joinToString("\n"))
+			.setMessage(android.text.SpannableStringBuilder(getString(R.string.flight_plan_permission_explanation)+"\n\n").append(statusText))
 			.setPositiveButton(R.string.flight_plan_open_settings) { _,_ ->
 				val alarm=context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
 				val action=if(android.os.Build.VERSION.SDK_INT>=31 && !alarm.canScheduleExactAlarms())

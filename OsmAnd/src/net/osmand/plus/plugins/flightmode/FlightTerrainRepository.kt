@@ -15,6 +15,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -36,6 +37,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 
 class FlightTerrainRepository(private val app: OsmandApplication) {
+	private val preparationCancellation = ThreadLocal<FlightDownloadCancellation>()
 
 	private val terrainDirectory = File(app.filesDir, TERRAIN_DIRECTORY)
 	private val satelliteDirectory = File(app.filesDir, FlightSatelliteSource.CACHE_DIRECTORY)
@@ -1015,21 +1017,39 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	}
 
 	/** Verify each expected source independently, including cached files, before declaring readiness. */
-	suspend fun preloadPrepared(quote: FlightOfflineQuote, onStatus: suspend (FlightTerrainStatus) -> Unit): FlightTerrainStatus {
+	suspend fun preloadPrepared(quote: FlightOfflineQuote, onStatus: suspend (FlightTerrainStatus) -> Unit): FlightTerrainStatus = coroutineScope {
+		val cancellation = FlightDownloadCancellation()
+		// Thread interruption alone does not reliably unblock HttpURLConnection on Android.
+		val watcher = launch(Dispatchers.IO, start=kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+			try { awaitCancellation() } finally { cancellation.cancel() }
+		}
+		try { preloadPreparedFiles(quote, cancellation, onStatus) } finally { watcher.cancel() }
+	}
+
+	private suspend fun preloadPreparedFiles(quote: FlightOfflineQuote, cancellation: FlightDownloadCancellation,
+		onStatus: suspend (FlightTerrainStatus) -> Unit): FlightTerrainStatus {
 		var terrain=0; var satellite=0; var failedTerrain=0; var failedSatellite=0; var downloaded=0
 		var bytes=0L
 		val started=android.os.SystemClock.elapsedRealtime()
+		var lastPublished = 0L
+		var lastFailure: String? = null
 		val terrainCount=quote.requests.count { !it.satellite }
 		fun status(phase:FlightTerrainPhase)=FlightTerrainStatus(phase=phase,requestedTiles=terrainCount,
 			availableTiles=terrain,failedTiles=failedTerrain,satelliteTiles=satellite,satelliteFailedTiles=failedSatellite,
 			downloadedTiles=downloaded,bytesDownloaded=bytes,
 			bytesPerSecond=bytes*1000/(android.os.SystemClock.elapsedRealtime()-started).coerceAtLeast(1),
-			message=app.getString(net.osmand.plus.R.string.flight_plan_missing_tiles,terrain+satellite,quote.requests.size,failedTerrain+failedSatellite))
-		for(chunk in quote.requests.chunked(PARALLEL_DOWNLOADS)) {
-			if(app.filesDir.usableSpace<256L*1024*1024 && chunk.any {
-				!(if(it.satellite) satelliteFile(it.tile) else tileFile(it.tile)).isFile })
+			message=app.getString(net.osmand.plus.R.string.flight_plan_missing_tiles,terrain+satellite,quote.requests.size,failedTerrain+failedSatellite,
+				quote.requests.size-terrain-satellite-failedTerrain-failedSatellite) +
+				(lastFailure?.let { "\n$it" } ?: ""))
+		for (offset in quote.requests.indices step PARALLEL_DOWNLOADS) {
+			currentCoroutineContext().ensureActive()
+			val chunk = quote.requests.subList(offset, minOf(offset + PARALLEL_DOWNLOADS, quote.requests.size))
+			if(withContext(Dispatchers.IO) { app.filesDir.usableSpace<256L*1024*1024 && chunk.any {
+				!(if(it.satellite) satelliteFile(it.tile) else tileFile(it.tile)).isFile } })
 				return status(FlightTerrainPhase.ERROR).copy(message=app.getString(net.osmand.plus.R.string.flight_plan_low_space))
-			val results=coroutineScope { chunk.map { request -> async(Dispatchers.IO) {
+			val results=coroutineScope { chunk.map { request -> async {
+				runInterruptible(Dispatchers.IO) {
+				preparationCancellation.set(cancellation)
 				try {
 					var cached=if(request.satellite) ensureSatelliteSourceFile(request.tile,true)
 						else ensureTerrainFile(request.tile)
@@ -1043,15 +1063,27 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					}
 					Result.success(cached)
 				} catch(e:CancellationException) { throw e } catch(e:Exception) { Result.failure<CachedAsset>(e) }
-			} }.awaitAll() }
+				finally { preparationCancellation.remove() }
+			} } }.awaitAll() }
+			currentCoroutineContext().ensureActive()
 			results.forEachIndexed { i,result ->
 				result.onSuccess {
 					if(chunk[i].satellite) satellite++ else terrain++
 					if(it.downloaded) downloaded++
 					bytes+=it.downloadedBytes
-				}.onFailure { if(chunk[i].satellite) failedSatellite++ else failedTerrain++ }
+				}.onFailure { error ->
+					if(chunk[i].satellite) failedSatellite++ else failedTerrain++
+					val tile=chunk[i].tile
+					lastFailure=app.getString(net.osmand.plus.R.string.flight_plan_tile_failure,
+						if(chunk[i].satellite) "Satellite" else "Relief", "${tile.zoom}/${tile.x}/${tile.y}",
+						error.message ?: error.javaClass.simpleName)
+				}
 			}
-			onStatus(status(FlightTerrainPhase.DOWNLOADING))
+			val now = android.os.SystemClock.elapsedRealtime()
+			if (now - lastPublished >= 250 || offset + chunk.size == quote.requests.size) {
+				onStatus(status(FlightTerrainPhase.DOWNLOADING))
+				lastPublished = now
+			}
 		}
 		return status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR)
 	}
@@ -1325,7 +1357,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val partial = File(parent, destination.name + PARTIAL_SUFFIX)
 		if (partial.exists() && !partial.delete()) throw IOException("Téléchargement temporaire verrouillé")
 		val connection = NetworkUtils.getHttpURLConnection(url)
+		val cancellation = preparationCancellation.get()
 		try {
+			cancellation?.attach(connection)
 			connection.requestMethod = "GET"
 			connection.connectTimeout = connectTimeoutMillis
 			connection.readTimeout = readTimeoutMillis
@@ -1350,6 +1384,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					}
 				}
 			}
+			ensureWorkActive()
 			if (total == 0L) throw IOException("Réponse $sourceName vide")
 			if (!partial.renameTo(destination)) {
 				throw IOException("Impossible de finaliser la tuile $sourceName")
@@ -1362,6 +1397,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				networkRequests = 1
 			)
 		} finally {
+			cancellation?.detach(connection)
 			connection.disconnect()
 			if (partial.exists()) partial.delete()
 		}

@@ -808,6 +808,7 @@ data class FlightUiState(
 	val journeyName: String = "",
 	val journeyCreatedAtMillis: Long? = null,
 	val journeyDirty: Boolean = false,
+	val savingPreparation: Boolean = false,
 	val savedJourneys: List<FlightJourneySummary> = emptyList(),
 	val savedJourneysLoading: Boolean = false,
 	val photos: List<FlightPhotoAttachment> = emptyList(),
