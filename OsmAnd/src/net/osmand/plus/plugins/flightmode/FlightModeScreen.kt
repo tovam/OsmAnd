@@ -187,6 +187,7 @@ fun FlightModeScreen(
 	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
 	onSetMapCenterLocked: (Boolean) -> Unit = {},
+	onReturnLive: () -> Unit = {},
 	onShowTrackPoints: (Boolean) -> Unit,
 	onMarkFlightStart: () -> Unit,
 	onMarkFlightEnd: () -> Unit,
@@ -302,11 +303,18 @@ fun FlightModeScreen(
 				.windowInsetsPadding(safeDrawingInsets)
 		) {
 			when (state.page) {
-				FlightPage.LIVE -> FlightLiveScreen(state,onPageChange,onStartLive,onStopLive,onToggleLiveMicrophone,onPhotoAction)
+				FlightPage.HOME, FlightPage.PLANS -> FlightWorkspaceHome(state, onPageChange,
+					onOpenJourney, onNewPreparation, onClose)
+				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
+					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction) }
+					FlightBottomNavigation(state, onPageChange)
+				}
 				FlightPage.PREPARE -> key(state.journeyId) { FlightPlanningScreen(state,onClose,onUpdatePlan,
 					onSavePreparation,onPreloadPreparation,onCancelPreparationDownload,onRehearsePreparation,
-					onStartLive,onPreparationPermissions,onImportTrip,onSelectInternalTrack,onOpenJourney,onNewPreparation,
-					{ onPageChange(FlightPage.JOURNEYS) }) }
+					onStartLive,onPreparationPermissions,onNewPreparation,
+					{ onPageChange(FlightPage.PLANS) },
+					onUpdateStop, onSelectCity, onDismissCitySuggestions,
+					{ FlightBottomNavigation(state, onPageChange) }) }
 				FlightPage.MAP -> MapScreen(
 					state = state,
 					mapView = mapView,
@@ -316,6 +324,9 @@ fun FlightModeScreen(
 					onSetReplayTimelineWindowFraction = onSetReplayTimelineWindowFraction,
 					onToggleReplay = onToggleReplay,
 					onSetMapFollowing = onSetMapFollowing,
+					onSetMapCenterLocked = onSetMapCenterLocked,
+					onShowTrackPoints = onShowTrackPoints,
+					onReturnLive = onReturnLive,
 					onMarkFlightStart = onMarkFlightStart,
 					onMarkFlightEnd = onMarkFlightEnd,
 					onCancelFlightStart = onCancelFlightStart,
@@ -324,13 +335,12 @@ fun FlightModeScreen(
 				FlightPage.WINDOW -> WindowScreen(
 					state = state,
 					onClose = onClose,
-					onSetMapCenterLocked = onSetMapCenterLocked,
-					onShowTrackPoints = onShowTrackPoints,
 					onPageChange = onPageChange,
 					onSetAltitudeOverride = onSetWindowAltitudeOverride,
 					onSeekReplay = onSeekReplay,
 					onSetReplayTimelineWindowFraction = onSetReplayTimelineWindowFraction,
 					onToggleReplay = onToggleReplay,
+					onReturnLive = onReturnLive,
 					onSetSide = onSetWindowSide,
 					onMoveLook = onMoveWindowLook,
 					onRecenterLook = onRecenterWindowLook,
@@ -668,6 +678,9 @@ private fun MapScreen(
 	onSetReplayTimelineWindowFraction: (Float) -> Unit,
 	onToggleReplay: () -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
+	onSetMapCenterLocked: (Boolean) -> Unit,
+	onShowTrackPoints: (Boolean) -> Unit,
+	onReturnLive: () -> Unit,
 	onMarkFlightStart: () -> Unit,
 	onMarkFlightEnd: () -> Unit,
 	onCancelFlightStart: () -> Unit,
@@ -678,8 +691,6 @@ private fun MapScreen(
 	val targetScalePixels = with(density) { 96.dp.toPx() }
 	var mapScale by remember(mapView) { mutableStateOf<FlightMapScale?>(null) }
 	var mapRotation by remember(mapView) { mutableStateOf(mapView?.rotate ?: 0f) }
-	onSetMapCenterLocked: (Boolean) -> Unit,
-	onShowTrackPoints: (Boolean) -> Unit,
 	var mapElevation by remember(mapView) { mutableStateOf(mapView?.elevationAngle ?: 90f) }
 	var openGlRendererAttached by remember(mapView) { mutableStateOf(mapView?.hasMapRenderer() == true) }
 	LaunchedEffect(mapView, targetScalePixels) {
@@ -710,6 +721,7 @@ private fun MapScreen(
 					FlightMapGestureProxyView(context, mapView) { onSetMapFollowing(false) }
 				},
 				update = { proxy ->
+					proxy.lockedCenter = sample.takeIf { state.mapCenterLocked }
 					proxy.update(mapView) { onSetMapFollowing(false) }
 				}
 			)
@@ -721,7 +733,6 @@ private fun MapScreen(
 
 		Row(
 			modifier = Modifier
-					proxy.lockedCenter = sample.takeIf { state.mapCenterLocked }
 				.align(Alignment.TopEnd)
 				.padding(top = 122.dp, end = 2.dp)
 				.height(44.dp),
@@ -729,6 +740,12 @@ private fun MapScreen(
 			horizontalArrangement = Arrangement.spacedBy(2.dp)
 		) {
 			FlightMapRendererBadge(openGlRendererAttached, mapElevation)
+			FlightMapRoundButton(
+				icon = if (state.mapCenterLocked) R.drawable.ic_action_lock else R.drawable.ic_action_lock_open,
+				tint = if (state.mapCenterLocked) FlightGreen else FlightMuted,
+				contentDescription = stringResource(if (state.mapCenterLocked) R.string.flight_map_center_unlock else R.string.flight_map_center_lock),
+				onClick = { onSetMapCenterLocked(!state.mapCenterLocked) }
+			)
 			FlightMapRoundButton(
 				icon = R.drawable.ic_action_compass_north,
 				tint = if (abs(mapRotation) < 0.5f) FlightMuted else FlightBlue,
@@ -740,12 +757,6 @@ private fun MapScreen(
 				icon = R.drawable.ic_action_center_on_track,
 				tint = if (state.mapFollowing) FlightGreen else FlightOrange,
 				contentDescription = if (state.mapFollowing) {
-			FlightMapRoundButton(
-				icon = if (state.mapCenterLocked) R.drawable.ic_action_lock else R.drawable.ic_action_lock_open,
-				tint = if (state.mapCenterLocked) FlightGreen else FlightMuted,
-				contentDescription = stringResource(if (state.mapCenterLocked) R.string.flight_map_center_unlock else R.string.flight_map_center_lock),
-				onClick = { onSetMapCenterLocked(!state.mapCenterLocked) }
-			)
 					stringResource(R.string.flight_mode_map_free)
 				} else {
 					stringResource(R.string.flight_mode_map_following)
@@ -762,6 +773,11 @@ private fun MapScreen(
 		}
 
 		Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+			Row(Modifier.fillMaxWidth().background(FlightHudPanel)) {
+				CompactAction(stringResource(R.string.flight_map_points_short),
+					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
+				if (state.sessionMode == FlightSessionMode.LIVE) LiveTimelineAction(state, onReturnLive)
+			}
 			if (state.snapshot?.dataGap == true) {
 				Text(
 					stringResource(R.string.flight_mode_gap),
@@ -773,11 +789,7 @@ private fun MapScreen(
 			}
 			FlightProfileView(
 				profile = state.profile,
-			Row(Modifier.fillMaxWidth().background(FlightHudPanel)) {
-				CompactAction(stringResource(R.string.flight_map_points_short),
-					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
-			}
-				progress = state.replayProgress.takeIf { state.sessionMode == FlightSessionMode.REPLAY },
+				progress = state.replayProgress,
 				flightSpans = state.flightSpans,
 				pendingStartProgress = state.pendingFlightStartProgress,
 				modifier = Modifier.fillMaxWidth().height(122.dp).background(FlightHudPanel).padding(horizontal = 8.dp, vertical = 4.dp)
@@ -790,9 +802,10 @@ private fun MapScreen(
 					onCancelStart = onCancelFlightStart,
 					onRemoveSpan = onRemoveFlightSpan
 				)
-				ReplayBar(state, onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
 			}
-			FlightBottomNavigation(FlightPage.MAP, onPageChange, overlay = true)
+			if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty())
+				ReplayBar(state.copy(trip = state.liveTimeline ?: state.trip), onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
+			FlightBottomNavigation(state, onPageChange, overlay = true)
 		}
 	}
 }
@@ -954,6 +967,19 @@ private fun CompactAction(text: String, color: Color, onClick: () -> Unit, modif
 }
 
 @Composable
+private fun LiveTimelineAction(state: FlightUiState, onReturnLive: () -> Unit) {
+	Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+		val future = (state.snapshot?.sample?.timestampMillis ?: 0L) >
+			(state.liveState.latest?.timestampMillis ?: Long.MAX_VALUE)
+		Text(stringResource(if (!state.browsingLiveTimeline) R.string.flight_mode_live
+			else if (future) R.string.flight_timeline_hypothesis else R.string.flight_timeline_actual),
+			color = if (future) FlightWarning else FlightGreen, fontSize = 10.sp,
+			modifier = Modifier.weight(1f).padding(horizontal = 6.dp))
+		CompactAction(stringResource(R.string.flight_return_live), FlightGreen, onReturnLive)
+	}
+}
+
+@Composable
 private fun WindowScreen(
 	state: FlightUiState,
 	onClose: () -> Unit,
@@ -962,6 +988,7 @@ private fun WindowScreen(
 	onSeekReplay: (Float) -> Unit,
 	onSetReplayTimelineWindowFraction: (Float) -> Unit,
 	onToggleReplay: () -> Unit,
+	onReturnLive: () -> Unit,
 	onSetSide: (FlightCabinSide) -> Unit,
 	onMoveLook: (Float, Float) -> Unit,
 	onRecenterLook: () -> Unit,
@@ -1038,10 +1065,11 @@ private fun WindowScreen(
 				modifier = Modifier.fillMaxSize()
 			)
 		}
+		if (state.sessionMode == FlightSessionMode.LIVE) LiveTimelineAction(state, onReturnLive)
 		WindowPanelSelector(panel = panel, onSelect = { panel = it })
 		when (panel) {
 			WindowPanel.FLIGHT -> {
-				if (state.sessionMode == FlightSessionMode.REPLAY) {
+				if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty()) {
 					FlightProfileView(
 						profile = state.profile,
 						progress = state.replayProgress,
@@ -1050,7 +1078,7 @@ private fun WindowScreen(
 						modifier = Modifier.fillMaxWidth().height(66.dp).background(FlightPanelStrong)
 							.padding(horizontal = 7.dp, vertical = 3.dp)
 					)
-					ReplayBar(state, onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
+					ReplayBar(state.copy(trip = state.liveTimeline ?: state.trip), onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
 				} else {
 					CompactInstrumentStrip(state.snapshot?.sample)
 				}
@@ -1111,7 +1139,7 @@ private fun WindowScreen(
 				}
 			}
 		}
-		FlightBottomNavigation(FlightPage.WINDOW, onPageChange)
+		FlightBottomNavigation(state, onPageChange)
 	}
 }
 
@@ -1264,7 +1292,7 @@ private fun SatelliteScreen(
 				modifier = Modifier.weight(1f)
 			)
 		}
-		FlightBottomNavigation(FlightPage.SATELLITE, onPageChange)
+		FlightBottomNavigation(state, onPageChange)
 	}
 }
 
@@ -1667,7 +1695,7 @@ private fun SensorsScreen(
 				}
 			}
 		}
-		FlightBottomNavigation(FlightPage.SENSORS, onPageChange)
+		FlightBottomNavigation(state, onPageChange)
 	}
 }
 
@@ -1733,7 +1761,7 @@ private fun PhotoScreen(
 				PhotoLibraryEntry(photo, state.trip) { editorId = photo.id; onSelectPhoto(photo.id) }
 			}
 		}
-		FlightBottomNavigation(FlightPage.PHOTO, onPageChange)
+		FlightBottomNavigation(state, onPageChange)
 	}
 	all.firstOrNull { it.id == editorId }?.let { photo ->
 		if (fullScreenPhoto == null) FlightPhotoEditor(photo, state, { editorId = null },
@@ -1851,6 +1879,19 @@ internal fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSam
 			modifier = Modifier.padding(vertical = 4.dp)
 		)
 		PhotoMetadataLine(stringResource(R.string.flight_mode_photo_file), photo.fileName)
+		photo.capture?.let { capture ->
+			Text(stringResource(R.string.flight_photo_capture_sensors), color=FlightBlue, fontSize=12.sp)
+			capture.fix?.let { fix ->
+				Text("%.6f, %.6f · %s m".format(Locale.ROOT,fix.latitude,fix.longitude,
+					fix.altitudeMeters?.let { "%.0f".format(it) } ?: "—"), color=FlightText,fontSize=12.sp)
+				Text(stringResource(R.string.flight_photo_fix_age)+" : %.2f s".format(
+					(capture.shutterMillis-fix.timestampMillis).coerceAtLeast(0)/1000.0),color=FlightMuted,fontSize=11.sp)
+			}
+			capture.magneticMicroTesla?.let { values ->
+					Text(stringResource(R.string.flight_photo_magnetic),color=FlightMuted,fontSize=11.sp)
+					Text(values.joinToString(" / ") { "%.1f".format(it) },color=FlightText,fontSize=12.sp)
+			}
+		}
 		PhotoMetadataLine(
 			stringResource(R.string.flight_mode_photo_date),
 			when {
@@ -1889,19 +1930,6 @@ internal fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSam
 				stringResource(R.string.flight_mode_photo_position),
 				stringResource(R.string.flight_mode_photo_not_matched),
 				warning = true
-		photo.capture?.let { capture ->
-			Text(stringResource(R.string.flight_photo_capture_sensors), color=FlightBlue, fontSize=12.sp)
-			capture.fix?.let { fix ->
-				Text("%.6f, %.6f · %s m".format(Locale.ROOT,fix.latitude,fix.longitude,
-					fix.altitudeMeters?.let { "%.0f".format(it) } ?: "—"), color=FlightText,fontSize=12.sp)
-				Text(stringResource(R.string.flight_photo_fix_age)+" : %.2f s".format(
-					(capture.shutterMillis-fix.timestampMillis).coerceAtLeast(0)/1000.0),color=FlightMuted,fontSize=11.sp)
-			}
-			capture.magneticMicroTesla?.let { values ->
-					Text(stringResource(R.string.flight_photo_magnetic),color=FlightMuted,fontSize=11.sp)
-					Text(values.joinToString(" / ") { "%.1f".format(it) },color=FlightText,fontSize=12.sp)
-			}
-		}
 			)
 		} else {
 			val progress = FlightSampleInterpolator.progressAt(trip, photo.matchedSamplePosition)
@@ -2011,26 +2039,28 @@ private fun JourneysScreen(
 	onExport: () -> Unit,
 	onOpen: (String) -> Unit
 ) {
+	val pastJourneys = state.savedJourneys.filter { it.sampleCount > 0 &&
+		!(state.activeRecording.running && it.id == state.activeRecording.journeyId) }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
-		FlightTopBar(stringResource(R.string.flight_mode_journeys), state.sessionMode, onClose)
+		FlightTopBar(stringResource(R.string.flight_workspace_past), FlightSessionMode.REPLAY, onClose)
 		Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-			PlanAction(stringResource(R.string.flight_plan_title), { onPageChange(FlightPage.PREPARE) })
-			PlanAction(stringResource(R.string.flight_live_title), { onPageChange(FlightPage.LIVE) })
+			PlanAction(stringResource(R.string.flight_workspace_home), { onPageChange(FlightPage.HOME) })
 			PlanAction(stringResource(R.string.flight_mode_load_osmand_track), onSelectInternalTrack)
 			PlanAction(stringResource(R.string.flight_mode_load_gpx_file), onImport)
 		}
 		LazyColumn(Modifier.weight(1f)) {
-			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, state.savedJourneys.size)) }
+			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, pastJourneys.size)) }
 			if (state.savedJourneysLoading) {
 				item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
 			}
-			if (state.savedJourneys.isEmpty() && !state.savedJourneysLoading) {
+			if (pastJourneys.isEmpty() && !state.savedJourneysLoading) {
 				item { Text(stringResource(R.string.flight_mode_no_saved_journey), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
 			} else {
-				itemsIndexed(state.savedJourneys) { _, journey ->
+				itemsIndexed(pastJourneys) { _, journey ->
 					SavedJourneyRow(journey = journey, onOpen = onOpen)
 				}
 			}
+			if (state.sessionMode == FlightSessionMode.REPLAY && state.trip != null) {
 			item { SectionTitle(stringResource(R.string.flight_mode_current_journey)) }
 			item {
 				BasicTextField(
@@ -2099,6 +2129,7 @@ private fun JourneysScreen(
 					)
 				}
 			}
+			}
 			state.journeyMessage?.let { message ->
 				item { Text(message, color = FlightGreen, fontSize = 11.sp, modifier = Modifier.padding(12.dp)) }
 			}
@@ -2120,7 +2151,8 @@ private fun JourneysScreen(
 			}
 
 		}
-		FlightBottomNavigation(FlightPage.JOURNEYS, onPageChange)
+		if (state.sessionMode == FlightSessionMode.REPLAY && state.trip != null)
+			FlightBottomNavigation(state, onPageChange)
 	}
 }
 
@@ -2241,7 +2273,7 @@ private fun FlightTopBar(title: String, mode: FlightSessionMode, onClose: () -> 
 			text = when (mode) {
 				FlightSessionMode.LIVE -> stringResource(R.string.flight_mode_live).uppercase()
 				FlightSessionMode.REPLAY -> stringResource(R.string.flight_mode_replay).uppercase()
-				FlightSessionMode.PREPARE -> "PRÉVOL"
+				FlightSessionMode.PREPARE -> stringResource(R.string.flight_workspace_plan).uppercase()
 			},
 			color = when (mode) {
 				FlightSessionMode.LIVE -> FlightGreen
@@ -2499,16 +2531,21 @@ private fun ReplayStepButton(text: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage) -> Unit, overlay: Boolean = false) {
-	val pages = listOf(
-		FlightPage.LIVE to stringResource(R.string.flight_live_title),
-		FlightPage.MAP to stringResource(R.string.flight_mode_map),
-		FlightPage.WINDOW to stringResource(R.string.flight_mode_window),
-		FlightPage.SATELLITE to stringResource(R.string.flight_mode_cached_tiles_short),
-		FlightPage.SENSORS to stringResource(R.string.flight_mode_sensors),
-		FlightPage.PHOTO to stringResource(R.string.flight_mode_photo),
-		FlightPage.JOURNEYS to stringResource(R.string.flight_mode_journeys)
-	)
+internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPage) -> Unit, overlay: Boolean = false) {
+	val selected = state.page
+	val pages = FlightWorkspaceNavigation.pages(state.sessionMode).map { page ->
+		page to stringResource(when (page) {
+			FlightPage.HOME -> R.string.flight_workspace_home
+			FlightPage.PREPARE -> R.string.flight_workspace_plan
+			FlightPage.LIVE -> R.string.flight_live_title
+			FlightPage.MAP -> R.string.flight_mode_map
+			FlightPage.WINDOW -> R.string.flight_mode_window
+			FlightPage.SATELLITE -> R.string.flight_mode_cached_tiles_short
+			FlightPage.SENSORS -> R.string.flight_mode_sensors
+			FlightPage.PHOTO -> R.string.flight_mode_photo
+			else -> R.string.flight_mode_journeys
+		})
+	}
 	Row(
 		Modifier.fillMaxWidth().height(48.dp)
 			.background(if (overlay) FlightHudPanel else FlightPanelStrong)
@@ -2516,7 +2553,9 @@ private fun FlightBottomNavigation(selected: FlightPage, onSelected: (FlightPage
 	) {
 		pages.forEach { (page, label) ->
 			Box(
-				modifier = Modifier.weight(1f).fillMaxHeight().clickable { onSelected(page) },
+				modifier = Modifier.weight(1f).fillMaxHeight().clickable(
+					enabled = page !in listOf(FlightPage.MAP, FlightPage.WINDOW) || state.snapshot != null
+				) { onSelected(page) },
 				contentAlignment = Alignment.Center
 			) {
 				if (selected == page) Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp).background(FlightOrange))

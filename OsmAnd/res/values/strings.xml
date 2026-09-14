@@ -1,8 +1,20 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_workspace_home">Vols</string>
+    <string name="flight_workspace_past">Vols passés</string>
+    <string name="flight_workspace_past_hint">Ouvrir un journal, importer une trace, associer des photos</string>
+    <string name="flight_workspace_future">Vols prévus</string>
+    <string name="flight_workspace_future_hint">Préparer, simuler et télécharger avant le départ</string>
+    <string name="flight_workspace_current">Vol en cours</string>
+    <string name="flight_workspace_current_hint">Disponible lorsqu’un enregistrement est en cours</string>
+    <string name="flight_workspace_plan">Préparation</string>
     <string name="flight_map_center_lock">Verrouiller le centre sur l’avion</string>
     <string name="flight_map_center_unlock">Libérer le centre de la carte</string>
     <string name="flight_map_points_short">Points GPS</string>
+    <string name="flight_return_live">Revenir au direct</string>
+    <string name="flight_timeline_actual">Passé enregistré</string>
+    <string name="flight_timeline_hypothesis">Futur théorique</string>
+    <string name="flight_start_confirm">Démarrer ce vol maintenant et activer l’enregistrement GPS ?</string>
     <string name="flight_photo_capture_sensors">Capteurs au déclenchement</string>
     <string name="flight_photo_magnetic">Champ magnétique X / Y / Z (µT)</string>
     <string name="flight_photo_fix_age">Âge de la position au déclenchement</string>

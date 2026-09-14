@@ -22,8 +22,6 @@ import net.osmand.plus.R
 @Composable
 internal fun FlightLiveScreen(
     state: FlightUiState,
-    onPage: (FlightPage) -> Unit,
-    onStart: () -> Unit,
     onStop: () -> Unit,
     onMicrophone: () -> Unit,
     onPhoto: () -> Unit,
@@ -49,9 +47,6 @@ internal fun FlightLiveScreen(
         }
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13)).padding(horizontal = 8.dp)) {
         Row {
-            PlanAction(stringResource(R.string.flight_live_title), {})
-            PlanAction(stringResource(R.string.flight_mode_map), { onPage(FlightPage.MAP) })
-            PlanAction(stringResource(R.string.flight_mode_window), { onPage(FlightPage.WINDOW) })
             PlanAction(stringResource(R.string.flight_live_camera), onPhoto, enabled = live.running)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -146,10 +141,6 @@ internal fun FlightLiveScreen(
                     onMicrophone,
                     enabled = live.running,
                 )
-                PlanAction(
-                    stringResource(R.string.flight_plan_title),
-                    { onPage(FlightPage.PREPARE) },
-                )
             }
             if (live.running)
                 Text(
@@ -160,7 +151,6 @@ internal fun FlightLiveScreen(
         }
         if (live.running)
             PlanAction(stringResource(R.string.flight_live_stop), { confirmStop = true })
-        else PlanAction(stringResource(R.string.flight_mode_start_live), onStart)
     }
     if (confirmStop)
         AlertDialog(

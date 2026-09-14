@@ -17,10 +17,13 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$sources/FlightRouteHypothesis.kt" "$sources/FlightTerrainTilePlanner.kt" \
   "$sources/FlightTerrainModels.kt" "$sources/FlightProfilePlanner.kt" "$sources/FlightTrackMath.kt" \
   "$sources/FlightRecordingLines.kt" \
+  "$sources/FlightWorkspaceNavigation.kt" "$sources/FlightLiveTimeline.kt" "$sources/FlightPhotoCaptureJson.kt" \
+  "$sources/FlightSampleInterpolator.kt" "$sources/FlightReplayEngine.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightPreparationNonSubjectFixtures.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightRecordingLinesTest.kt" \
-  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPreparationLogicTest.kt"
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPreparationLogicTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightWorkspaceTest.kt"
 cd "$repo_root"
 java -cp "$test_output:$classpath" org.junit.runner.JUnitCore \
-  net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest
+  net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest
 echo "Flight logic check classes: $test_output"

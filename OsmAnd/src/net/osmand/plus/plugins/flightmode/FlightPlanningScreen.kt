@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -29,11 +30,12 @@ internal fun FlightPlanningScreen(
     onSimulate: () -> Unit,
     onStart: () -> Unit,
     onPermissions: () -> Unit,
-    onImport: () -> Unit,
-    onInternal: () -> Unit,
-    onOpen: (String) -> Unit,
     onNew: (Boolean) -> Unit,
     onJournals: () -> Unit,
+    onUpdateStop: (Int, String) -> Unit,
+    onSelectCity: (Int, FlightCitySuggestion) -> Unit,
+    onDismissCity: (Int) -> Unit,
+    bottomNavigation: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
     val prep = state.plan.preparation ?: FlightPreparation()
@@ -41,6 +43,7 @@ internal fun FlightPlanningScreen(
     var quoting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var mapEditor by remember { mutableStateOf(false) }
+    var confirmStart by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(0) }
     var source by remember { mutableStateOf(false) }
     var existing by remember { mutableStateOf<Pair<Int, Long>?>(null) }
@@ -106,9 +109,7 @@ internal fun FlightPlanningScreen(
     fun change(next: FlightPreparation) = onUpdate(state.plan.copy(preparation = next))
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            PlanAction(stringResource(R.string.flight_mode_journeys), onJournals)
-            PlanAction(stringResource(R.string.flight_mode_load_gpx_file), onImport)
-            PlanAction(stringResource(R.string.flight_mode_load_osmand_track), onInternal)
+            PlanAction(stringResource(R.string.flight_workspace_future), onJournals)
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             PlanAction(stringResource(R.string.flight_plan_new), { onNew(false) })
@@ -133,11 +134,15 @@ internal fun FlightPlanningScreen(
                     )
                     state.plan.stops.forEachIndexed { i, stop ->
                         Row {
-                            Text(
-                                "${i+1} · ${stop.name}  ${stop.latitude?.let { "%.3f".format(it) }?:"—"}, ${stop.longitude?.let { "%.3f".format(it) }?:"—"}",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                modifier = Modifier.weight(1f).padding(vertical = 7.dp),
+                            OutlinedTextField(
+                                value = stop.name,
+                                onValueChange = { onUpdateStop(i, it) },
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                                singleLine = true,
+                                label = {
+                                    Text("${i + 1}${if (stop.latitude != null) " ✓" else ""}")
+                                },
+                                modifier = Modifier.weight(1f),
                             )
                             PlanAction(
                                 stringResource(R.string.flight_plan_place),
@@ -163,6 +168,20 @@ internal fun FlightPlanningScreen(
                                         )
                                     },
                                 )
+                        }
+                    }
+                    if (state.citySearchStopIndex != null) {
+                        val stopIndex = state.citySearchStopIndex
+                        if (state.citySearchLoading)
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                        state.citySuggestions.forEach { city ->
+                            PlanAction(
+                                city.name,
+                                {
+                                    onSelectCity(stopIndex, city)
+                                    onDismissCity(stopIndex)
+                                },
+                            )
                         }
                     }
                     PlanAction(
@@ -465,30 +484,33 @@ internal fun FlightPlanningScreen(
                     PlanAction(
                         stringResource(R.string.flight_plan_rehearse),
                         onSimulate,
-                        enabled = quote != null,
+                        enabled =
+                            state.plan.stops.size >= 2 &&
+                                state.plan.stops.all { it.latitude != null && it.longitude != null },
                     )
-                    if (state.savedJourneys.isNotEmpty())
-                        Text(
-                            stringResource(
-                                R.string.flight_mode_saved_journeys,
-                                state.savedJourneys.size,
-                            ),
-                            color = Color.White,
-                            fontSize = 13.sp,
-                        )
-                    state.savedJourneys.forEach { j -> PlanAction(j.name, { onOpen(j.id) }) }
-                    Row {
-                        PlanAction(stringResource(R.string.flight_mode_load_gpx_file), onImport)
-                        PlanAction(
-                            stringResource(R.string.flight_mode_load_osmand_track),
-                            onInternal,
-                        )
-                    }
                 }
             }
         }
-        PlanAction(stringResource(R.string.flight_mode_start_live), onStart)
+        PlanAction(stringResource(R.string.flight_mode_start_live), { confirmStart = true })
+        bottomNavigation()
     }
+    if (confirmStart)
+        AlertDialog(
+            onDismissRequest = { confirmStart = false },
+            text = { Text(stringResource(R.string.flight_start_confirm)) },
+            confirmButton = {
+                PlanAction(
+                    stringResource(R.string.flight_mode_start_live),
+                    {
+                        confirmStart = false
+                        onStart()
+                    },
+                )
+            },
+            dismissButton = {
+                PlanAction(stringResource(R.string.shared_string_cancel), { confirmStart = false })
+            },
+        )
     if (mapEditor)
         Dialog(
             onDismissRequest = { mapEditor = false },
@@ -579,7 +601,7 @@ private fun FlightPlanMap(
     DisposableEffect(picker) { onDispose { picker.release() } }
     AndroidView(
         factory = { picker },
-        modifier = modifier,
+        modifier = modifier.clipToBounds(),
         update = { v ->
             v.routeOverview = true
             v.autoFitRoute = !editable

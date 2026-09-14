@@ -136,8 +136,7 @@ internal fun FlightPhotoEditor(
     }
     val sample = FlightSampleInterpolator.sampleAt(state.trip, photo.matchedSamplePosition)
     val associationHerePosition =
-        FlightSampleInterpolator.positionAtProgress(state.trip, state.replayProgress)
-            ?.let(FlightSampleInterpolator::quantizePosition)
+        state.recordedPhotoPositionAtCursor()?.let(FlightSampleInterpolator::quantizePosition)
     val reference =
         sample?.let { s ->
             val existing = photo.windowAlignment?.spatialPose

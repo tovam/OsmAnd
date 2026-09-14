@@ -74,15 +74,13 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		hypothesisCollection?.let { mapRenderer?.removeSymbolsProvider(it) }
 		hypothesisCollection=null; hypothesisDirty=false
 		val plan=hypothesisPlan?:return; val sample=hypothesisSample?:return
-		val route=FlightRouteHypothesis.remaining(plan,sample)
+		val route=FlightLiveTimeline.build(plan,null,sample).samples
 		if(route.size<2)return
 		val points=QVectorPointI().apply { route.forEach { add(point31(it)) } }
 		val collection=VectorLinesCollection(true)
-		VectorLineBuilder().setLineId(9180).setBaseOrder(pointsOrder+3).setPoints(points)
-			.setLineWidth(1.5*GeometryWayDrawer.getVectorLineScale(application))
-			.setFillColor(NativeUtilities.createFColorARGB(Color.rgb(100,150,165)))
-			.setSurfaceLineVisibility(true).setElevatedLineVisibility(false).setApproximationEnabled(false)
-			.buildAndAddToCollection(collection)
+		val heights=QListFloat().apply { route.forEach { add((it.altitudeMeters?:0.0).toFloat()+VISUAL_CLEARANCE_METERS) } }
+		buildNativeStroke(collection,9180,pointsOrder+3,
+			1.5*GeometryWayDrawer.getVectorLineScale(application),Color.rgb(100,150,165),points,heights)
 		hypothesisCollection=collection
 	}
 	private var pointMarkersCollection: MapMarkersCollection? = null

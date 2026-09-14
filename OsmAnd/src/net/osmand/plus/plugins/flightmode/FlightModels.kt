@@ -9,6 +9,8 @@ import kotlin.math.sqrt
 import kotlin.math.tan
 
 enum class FlightPage {
+	HOME,
+	PLANS,
 	PREPARE,
 	LIVE,
 	MAP,
@@ -760,10 +762,13 @@ data class FlightRecordingPolicy(
 }
 
 data class FlightUiState(
+	val activeRecording: FlightLiveState = FlightLiveState(),
+	val liveTimeline: FlightTrip? = null,
+	val browsingLiveTimeline: Boolean = false,
 	val liveState: FlightLiveState = FlightLiveState(),
 	val batteryHistory: List<FlightBatteryPoint> = emptyList(),
 	val previewingPlan: Boolean = false,
-	val page: FlightPage = FlightPage.JOURNEYS,
+	val page: FlightPage = FlightPage.HOME,
 	val sessionMode: FlightSessionMode = FlightSessionMode.PREPARE,
 	val plan: FlightPlan = FlightPlan.preview(),
 	val profile: FlightProfile = FlightProfilePlanner.build(FlightPlan.preview()),
@@ -791,12 +796,12 @@ data class FlightUiState(
 	val showSatelliteQualityOverlay: Boolean = false,
 	val satelliteOpacity: Float = 0.92f,
 	val mapFollowing: Boolean = true,
+	val mapCenterLocked: Boolean = false,
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),
 	val showTrackPoints: Boolean = false,
 	val flightSpans: List<FlightSpan> = emptyList(),
 	val pendingFlightStartProgress: Float? = null,
 	val journeyId: String? = null,
-	val mapCenterLocked: Boolean = false,
 	val journeyName: String = "",
 	val journeyCreatedAtMillis: Long? = null,
 	val journeyDirty: Boolean = false,

@@ -18,8 +18,6 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.ViewModelProvider
-import net.osmand.Location
-import net.osmand.plus.OsmAndLocationProvider.OsmAndLocationListener
 import net.osmand.plus.R
 import net.osmand.plus.Version
 import net.osmand.plus.base.BaseFullScreenFragment
@@ -30,7 +28,7 @@ import net.osmand.plus.utils.InsetTargetsCollection
 import net.osmand.plus.views.layers.base.OsmandMapLayer
 import net.osmand.plus.views.corenative.NativeCoreContext
 
-class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
+class FlightModeFragment : BaseFullScreenFragment() {
 
 	private lateinit var viewModel: FlightModeViewModel
 	private var previousHudVisibility = View.VISIBLE
@@ -40,9 +38,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private var replayMapLayer: FlightReplayMapLayer? = null
 	private var previousGpxObjectsDelegate: OsmandMapLayer.CustomMapObjects<SelectedGpxFile>? = null
 	private var gpxLayerSuppressed = false
-	private var environmentRecorder: FlightEnvironmentRecorder? = null
-	private var locationUpdatesRegistered = false
-	private var externalPhotoCaptureInProgress = false
 	private var showFlightCamera by mutableStateOf(false)
 	private val cameraPermissionLauncher=registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
 		showFlightCamera=granted
@@ -66,10 +61,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	private val openPhotosLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
 		viewModel.stageReplayPhotos(uris)
 	}
-	private val takePhotoLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-		externalPhotoCaptureInProgress = false
-		viewModel.finishPhotoCapture(success)
-	}
 	private val exportJourneyLauncher = registerForActivityResult(
 		ActivityResultContracts.CreateDocument("application/zip")
 	) { uri ->
@@ -89,9 +80,9 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 				}
 				FlightPage.WINDOW, FlightPage.SATELLITE, FlightPage.SENSORS, FlightPage.PHOTO,
 				FlightPage.LIVE -> viewModel.showPage(FlightPage.MAP)
-				FlightPage.PREPARE -> viewModel.showPage(FlightPage.JOURNEYS)
-				FlightPage.JOURNEYS -> if (viewModel.uiState.trip == null) close() else viewModel.showPage(FlightPage.MAP)
-				FlightPage.MAP -> close()
+				FlightPage.PREPARE -> viewModel.showPage(FlightPage.PLANS)
+				FlightPage.JOURNEYS, FlightPage.PLANS, FlightPage.MAP -> viewModel.showPage(FlightPage.HOME)
+				FlightPage.HOME -> close()
 			}
 		}
 	}
@@ -141,7 +132,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onSaveWindowPlacement = viewModel::saveWindowPlacement,
 					onSetWindowSide = viewModel::setWindowSide,
 					onMoveWindowLook = viewModel::moveWindowLook,
-					onSetMapCenterLocked = viewModel::setMapCenterLocked,
 					onRecenterWindowLook = viewModel::recenterWindowLook,
 					onSetWindowZoom = viewModel::setWindowZoom,
 					onChangeWindowZoom = viewModel::changeWindowZoom,
@@ -151,6 +141,8 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 					onTerrainRendererError = viewModel::setTerrainRendererError,
 					onTerrainRenderStats = viewModel::setTerrainRenderStats,
 					onSetMapFollowing = viewModel::setMapFollowing,
+					onSetMapCenterLocked = viewModel::setMapCenterLocked,
+					onReturnLive = viewModel::returnToLive,
 					onShowTrackPoints = viewModel::setShowTrackPoints,
 					onMarkFlightStart = viewModel::markFlightStart,
 					onMarkFlightEnd = viewModel::markFlightEnd,
@@ -240,10 +232,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	override fun onPause() {
 		viewModel.setUiVisible(false)
-		if (!externalPhotoCaptureInProgress) {
-			stopLocationUpdates()
-			environmentRecorder?.stop()
-		}
 		viewModel.saveWindowPlacement()
 		cancelNativeMapGesture()
 		removeMapInteractionGuard()
@@ -267,16 +255,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 		restoreMapState()
 		restoreNativeReliefSetting()
 		super.onDestroyView()
-	}
-
-	override fun onDestroy() {
-		stopLocationUpdates()
-		environmentRecorder?.stop()
-		super.onDestroy()
-	}
-
-	override fun updateLocation(location: Location?) {
-		// Measurements are supplied by FlightRecordingService, independently of this fragment.
 	}
 
 	private fun startLiveWithPermission() {
@@ -308,7 +286,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 	) {
 		// Photo editing must not rebuild the hidden native flight layer on every finger movement.
 		if (viewModel.uiState.page != FlightPage.MAP) return
-		if (viewModel.uiState.sessionMode != FlightSessionMode.LIVE) environmentRecorder?.stop()
 		replayMapLayer?.update(trip, sample, showPoints, photos)
 		replayMapLayer?.updateHypothesis(if(viewModel.uiState.sessionMode==FlightSessionMode.LIVE) viewModel.uiState.plan else null,
 			viewModel.uiState.liveState.latest)
@@ -470,34 +447,6 @@ class FlightModeFragment : BaseFullScreenFragment(), OsmAndLocationListener {
 
 	private fun close() {
 		parentFragmentManager.popBackStack()
-	}
-
-	private fun startEnvironmentRecorder(requestPermission: Boolean) {
-		val granted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) ==
-			PackageManager.PERMISSION_GRANTED
-		restartEnvironmentRecorder(recordMicrophone = granted)
-		if (requestPermission && !granted) microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-	}
-
-	private fun restartEnvironmentRecorder(recordMicrophone: Boolean) {
-		val recorder = environmentRecorder ?: FlightEnvironmentRecorder(requireContext(), onReading=viewModel::updateEnvironment)
-			.also { environmentRecorder = it }
-		recorder.stop()
-		recorder.start(recordMicrophone)
-	}
-
-	private fun startLocationUpdates() {
-		if (!locationUpdatesRegistered) {
-			app.locationProvider.addLocationListener(this)
-			locationUpdatesRegistered = true
-		}
-	}
-
-	private fun stopLocationUpdates() {
-		if (locationUpdatesRegistered) {
-			app.locationProvider.removeLocationListener(this)
-			locationUpdatesRegistered = false
-		}
 	}
 
 	private data class MapState(
