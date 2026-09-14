@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_cal_diagnostics_title">Impact des points</string>
+    <string name="flight_cal_diagnostics_full">Tous les %1$d points : erreur RMS %2$.2f px · erreur cumulée %3$.2f px</string>
+    <string name="flight_cal_diagnostics_units">Écarts dans l’image de calcul (%1$d × %2$d px). RMS = moyenne quadratique des écarts ; erreur cumulée = somme des distances entre points observés et projetés.</string>
+    <string name="flight_cal_diagnostics_largest">Plus grands écarts actuels : %1$s</string>
+    <string name="flight_cal_diagnostics_warning">Un fort gain indique un point à vérifier, pas une preuve qu’il est faux ni une précision géographique. Plusieurs erreurs peuvent se masquer. Aucun point ni la pose principale ne sont modifiés.</string>
+    <string name="flight_cal_diagnostics_full_weak">La solution complète est peu contrainte : interpréter les gains avec prudence.</string>
+    <string name="flight_cal_diagnostics_need_five">Il faut au moins 5 paires complètes pour tester chaque retrait : le calcul en exige encore 4 après exclusion.</string>
+    <string name="flight_cal_diagnostics_recalculate">Ce résultat ancien ne contient pas les tests de retrait. Relance Calculer pour les obtenir.</string>
+    <string name="flight_cal_diagnostics_comparison">Chaque ligne recalcule sans un seul point. Avant et après sont mesurés sur les mêmes points restants. Tri initial : plus forte baisse de RMS en pixels.</string>
+    <string name="flight_cal_diagnostics_sort_impact">Impact du retrait</string>
+    <string name="flight_cal_diagnostics_sort_error">Écart actuel</string>
+    <string name="flight_cal_diagnostics_point">Sans le point #%1$d · écart actuel %2$.2f px</string>
+    <string name="flight_cal_diagnostics_rms">RMS sur les %1$d points restants : %2$.2f → %3$.2f px</string>
+    <string name="flight_cal_diagnostics_sum">Erreur cumulée : %1$.2f → %2$.2f px</string>
+    <string name="flight_cal_diagnostics_gain">Réduction de RMS : %1$+.1f %%</string>
+    <string name="flight_cal_diagnostics_held_out">Point exclu : écart de %1$.2f px face au nouveau modèle</string>
+    <string name="flight_cal_diagnostics_behind">Le point exclu se retrouve derrière la caméra calculée.</string>
+    <string name="flight_cal_diagnostics_subset_weak">Retrait fragile : trop peu de points ou géométrie peu contrainte ; le gain peut être trompeur.</string>
+    <string name="flight_cal_diagnostics_failed">Retrait non calculable : les points restants ne permettent pas une solution visible et suffisamment répartie.</string>
+    <string name="flight_cal_diagnostics_progress">Modélisations terminées : %1$d / %2$d (complète + retraits)</string>
+    <string name="flight_cal_diagnostics_altitudes">Récupération des altitudes des points…</string>
     <string name="flight_plan_saving">Enregistrement en cours…</string>
     <string name="flight_plan_disarm">Désactiver le départ automatique</string>
     <string name="flight_plan_unsaved">Modifications non enregistrées</string>

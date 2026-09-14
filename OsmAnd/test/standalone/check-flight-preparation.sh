@@ -9,10 +9,15 @@ output_parent="$repo_root/OsmAnd/build"
 mkdir -p "$output_parent"
 test_output=$(mktemp -d "$output_parent/flight-logic.XXXXXXXX")
 sources="$repo_root/OsmAnd/src/net/osmand/plus/plugins/flightmode"
-classpath="$test_libs/ktfmt.jar:$test_libs/json.jar:$test_libs/coroutines.jar:$test_libs/junit.jar:$test_libs/hamcrest.jar"
+classpath="$test_output:$test_libs/ktfmt.jar:$test_libs/json.jar:$test_libs/coroutines.jar:$test_libs/junit.jar:$test_libs/hamcrest.jar"
+javac -d "$test_output" "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseSolver.java" \
+  "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseDiagnostics.java"
 java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   -no-stdlib -no-reflect -jvm-target 1.8 -classpath "$classpath" -d "$test_output" \
   "$sources/FlightModels.kt" "$sources/FlightPreparation.kt" "$sources/FlightRecordingData.kt" \
+  "$sources/FlightPhotoCalibration.kt" "$sources/FlightTerrainCoordinates.kt" \
+  "$sources/FlightPhotoFitDiagnostics.kt" \
+  "$sources/FlightDownloadCancellation.kt" \
   "$sources/FlightOfflinePreparation.kt" "$sources/FlightLivePredictor.kt" \
   "$sources/FlightRouteHypothesis.kt" "$sources/FlightTerrainTilePlanner.kt" \
   "$sources/FlightTerrainModels.kt" "$sources/FlightProfilePlanner.kt" "$sources/FlightTrackMath.kt" \
@@ -22,8 +27,11 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightPreparationNonSubjectFixtures.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightRecordingLinesTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPreparationLogicTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoCalibrationPersistenceTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoFitDiagnosticsTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightDownloadCancellationTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightWorkspaceTest.kt"
 cd "$repo_root"
 java -cp "$test_output:$classpath" org.junit.runner.JUnitCore \
-  net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest
+  net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest net.osmand.test.junit.FlightPhotoCalibrationPersistenceTest net.osmand.test.junit.FlightDownloadCancellationTest net.osmand.test.junit.FlightPhotoFitDiagnosticsTest
 echo "Flight logic check classes: $test_output"

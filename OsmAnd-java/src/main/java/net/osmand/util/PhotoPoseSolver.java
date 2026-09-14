@@ -35,6 +35,13 @@ public final class PhotoPoseSolver {
 
     public static Result solve(double[][] world, double[][] image, double[] initial,
             int width, int height, boolean fitFocal) {
+        return solve(world, image, initial, width, height, fitFocal, null);
+    }
+
+    // Diagnostics may also start at the full fit. Bounds and all ordinary seeds
+    // still refer to the original camera, so exclusions have identical constraints.
+    static Result solve(double[][] world, double[][] image, double[] initial,
+            int width, int height, boolean fitFocal, double[] warmStart) {
         if (world.length < 4 || world.length != image.length || width <= 0 || height <= 0
                 || initial.length != 7) throw new IllegalArgumentException("Four complete pairs required");
         for (int i = 0; i < world.length; i++) {
@@ -48,10 +55,12 @@ public final class PhotoPoseSolver {
         double[] best = null; double bestCost = Double.POSITIVE_INFINITY;
         double[] centre = new double[3];
         for (double[] v : world) for (int j = 0; j < 3; j++) centre[j] += v[j] / world.length;
-        for (int seed = 0; seed < 9; seed++) {
+        for (int seed = 0; seed < (warmStart == null ? 9 : 10); seed++) {
             if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
             double[] p = initial.clone();
-            if (seed > 0) {
+            if (seed == 9) {
+                p = warmStart.clone();
+            } else if (seed > 0) {
                 double a = (seed - 1) * Math.PI / 4;
                 p[0] += 2 * Math.cos(a); p[2] += 2 * Math.sin(a);
                 double dx = centre[0] - p[0], dy = centre[1] - p[1], dz = centre[2] - p[2];

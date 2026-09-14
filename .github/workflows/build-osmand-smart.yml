@@ -9,6 +9,7 @@ on:
     paths:
       - .github/workflows/build-osmand-smart.yml
       - OsmAnd/**
+      - OsmAnd-java/**
 
 permissions:
   contents: read
@@ -96,12 +97,15 @@ jobs:
             android/OsmAnd-java/src/main/java/net/osmand/util/PhotoCalibrationInput.java \
             android/OsmAnd-java/src/main/java/net/osmand/util/PhotoLandmarkGeometry.java \
             android/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseSolver.java \
+            android/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseDiagnostics.java \
             android/OsmAnd/test/standalone/PhotoCalibrationInputTest.java \
             android/OsmAnd/test/standalone/PhotoLandmarkGeometryTest.java \
-            android/OsmAnd/test/standalone/PhotoPoseSolverTest.java
+            android/OsmAnd/test/standalone/PhotoPoseSolverTest.java \
+            android/OsmAnd/test/standalone/PhotoPoseDiagnosticsTest.java
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoCalibrationInputTest
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoLandmarkGeometryTest
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoPoseSolverTest
+          java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoPoseDiagnosticsTest
 
       - name: Resolve patched core cache identity
         # Keep the native cache separate from the inexpensive JVM checks below.

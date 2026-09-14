@@ -3,6 +3,7 @@ package net.osmand.plus.plugins.flightmode
 import kotlin.math.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
+import net.osmand.util.PhotoPoseDiagnostics
 import net.osmand.util.PhotoPoseSolver
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,6 +24,8 @@ data class FlightPhotoFit(
     val errors: List<Double>,
     val rms: Double,
     val weak: Boolean,
+    val pointIndices: List<Int> = emptyList(),
+    val influences: List<FlightPhotoPointInfluence>? = null,
 ) {
     fun pose(reference: FlightPhotoSpatialPose, aspect: Float): FlightPhotoSpatialPose {
         val coordinates = FlightTerrainCoordinates(originLatitude, originLongitude)
@@ -141,6 +144,14 @@ data class FlightPhotoCalibration(
                         put("errors", JSONArray(f.errors))
                         put("rms", f.rms)
                         put("weak", f.weak)
+                        if (f.pointIndices.isNotEmpty())
+                            put("pointIndices", JSONArray(f.pointIndices))
+                        f.influences?.let { rows ->
+                            put(
+                                "influences",
+                                JSONArray().apply { rows.forEach { put(it.toJson()) } },
+                            )
+                        }
                     },
                 )
             }
@@ -187,6 +198,24 @@ data class FlightPhotoCalibration(
                                         f.getDouble("rms").isFinite() && f.getDouble("rms") >= 0
                                     )
                                     require(params[6] in -3.0..4.1)
+                                    val indices =
+                                        runCatching {
+                                                f.optJSONArray("pointIndices")?.let { a ->
+                                                    List(a.length()) { a.getInt(it) }
+                                                        .also { values ->
+                                                            require(
+                                                                values.size == errors.size &&
+                                                                    values.distinct().size ==
+                                                                        values.size
+                                                            )
+                                                            require(
+                                                                values.all { it in points.indices }
+                                                            )
+                                                            require(values == values.sorted())
+                                                        }
+                                                } ?: emptyList()
+                                            }
+                                            .getOrDefault(emptyList())
                                     FlightPhotoFit(
                                         f.getDouble("originLat"),
                                         f.getDouble("originLon"),
@@ -194,6 +223,11 @@ data class FlightPhotoCalibration(
                                         errors,
                                         f.getDouble("rms"),
                                         f.optBoolean("weak", true),
+                                        indices,
+                                        FlightPhotoPointInfluence.readReport(
+                                            f.optJSONArray("influences"),
+                                            indices,
+                                        ),
                                     )
                                 }
                                 .getOrNull()
@@ -233,6 +267,21 @@ suspend fun solveFlightPhotoCalibration(
     calibration: FlightPhotoCalibration,
     reference: FlightPhotoSpatialPose,
     terrain: FlightTerrainRepository,
+    onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> },
+): FlightPhotoCalibration =
+    calculateFlightPhotoCalibration(
+        calibration,
+        reference,
+        terrain::calibrationElevation,
+        onProgress,
+    )
+
+/** The numerical pipeline also accepts synthetic elevations, independently of repository I/O. */
+internal suspend fun calculateFlightPhotoCalibration(
+    calibration: FlightPhotoCalibration,
+    reference: FlightPhotoSpatialPose,
+    elevationAt: suspend (latitude: Double, longitude: Double) -> Double,
+    onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> },
 ): FlightPhotoCalibration {
     require(reference.eyeAltitudeMeters != null) { "Recorded camera altitude is missing" }
     require(
@@ -244,18 +293,26 @@ suspend fun solveFlightPhotoCalibration(
     }
     val points =
         calibration.points.map { p ->
-            if (p.latitude != null && p.longitude != null && p.altitude == null)
-                p.copy(altitude = terrain.calibrationElevation(p.latitude, p.longitude))
+            if (
+                p.x != null &&
+                    p.y != null &&
+                    p.latitude != null &&
+                    p.longitude != null &&
+                    p.altitude == null
+            )
+                p.copy(altitude = elevationAt(p.latitude, p.longitude))
             else p
         }
-    val complete =
-        points.filter {
+    val completeIndices =
+        points.indices.filter { i ->
+            val it = points[i]
             it.x != null &&
                 it.y != null &&
                 it.latitude != null &&
                 it.longitude != null &&
                 it.altitude != null
         }
+    val complete = completeIndices.map(points::get)
     val coordinates = FlightTerrainCoordinates(reference.eyeLatitude, reference.eyeLongitude)
     val world =
         complete
@@ -277,6 +334,8 @@ suspend fun solveFlightPhotoCalibration(
             0.0,
             ln(0.5 / tan(Math.toRadians(calibration.verticalFov / 2))),
         )
+    val total = if (complete.size >= 5) complete.size + 1 else 1
+    onProgress(0, total)
     val result =
         runInterruptible(Dispatchers.Default) {
             PhotoPoseSolver.solve(
@@ -288,6 +347,32 @@ suspend fun solveFlightPhotoCalibration(
                 calibration.fitFocal,
             )
         }
+    onProgress(1, total)
+    val influences =
+        if (complete.size >= 5) {
+            complete.indices.map { excluded ->
+                val row =
+                    runInterruptible(Dispatchers.Default) {
+                        PhotoPoseDiagnostics.fitExcluding(
+                            world,
+                            image,
+                            initial,
+                            calibration.imageWidth,
+                            calibration.imageHeight,
+                            calibration.fitFocal,
+                            result,
+                            excluded,
+                        )
+                    }
+                onProgress(excluded + 2, total)
+                FlightPhotoPointInfluence(
+                    completeIndices[excluded],
+                    row.fit?.errorsPixels?.toList(),
+                    row.excludedErrorPixels,
+                    row.fit?.weakGeometry ?: true,
+                )
+            }
+        } else null
     return calibration.copy(
         points = points,
         fit =
@@ -298,6 +383,8 @@ suspend fun solveFlightPhotoCalibration(
                 result.errorsPixels.toList(),
                 result.rmsPixels,
                 result.weakGeometry,
+                completeIndices,
+                influences,
             ),
     )
 }

@@ -43,7 +43,7 @@ The photo and map keep their separate transforms when switching tabs.
 
 The route keeps its original coordinates and absolute heights. A black native
 centreline is created independently of the optional tube mesh, before enabling
-the JNI tube extension. The red vertical tether is 2.7 dp wide (previously 1.7).
+the JNI tube extension. The red vertical tether is 4.1 dp wide; the black centreline is 3.2 dp.
 The centre lock changes only the geographic target; it does not call the API
 that cancels native zoom animations. The GPS-point toggle is on Map, not Sensors.
 
@@ -62,6 +62,53 @@ The directory contains `ktfmt.jar` (with the Kotlin compiler), `json.jar`,
 are in `OsmAnd/test/standalone/Photo*Test.java`.
 
 These checks do not replace an Android build or device rendering validation.
+
+## Preparation responsiveness and telephoto compatibility
+
+### Photo calibration point diagnostics
+
+Each explicit calibration computes the ordinary full fit, then one fit per complete pair with
+that pair excluded (at least five complete pairs are required for exclusions). Fits run off the
+UI thread, sequentially, with progress and cancellation. The complete fit remains the authoritative
+pose; diagnostics never move the camera, delete observations, or recalculate existing saved fits.
+All subsets keep the same original camera bounds and focal setting. They also try the full-fit
+parameters as an extra seed so a worse local optimum is not mistaken for point influence.
+
+The scrolling **Impact des points** report opens after completion and is saved in the photo's
+calibration metadata. It ranks either by RMS reduction or by current point residual. For each
+exclusion, it compares the full model with the refitted model **on the same retained pairs**, using
+both RMS and the sum of Euclidean pixel residuals. The excluded pair is separately projected through
+the new model. Pixel units refer to the decoded calibration image, not metres or location accuracy.
+Weak/degenerate subsets are flagged; a failed subset does not discard the other diagnostics.
+Multiple wrong correspondences may mask each other, so no automatic rejection is performed.
+
+Synthetic checks: `PhotoPoseDiagnosticsTest.java` and `FlightPhotoFitDiagnosticsTest.kt` cover known
+bad/clean pairs, fixed/free focal length, minimum point counts, cancellation, original numbering,
+unchanged full fits, JSON round trips, and malformed/legacy optional reports.
+
+### Planning and telephoto changes
+
+- The offline quote has identity equality and precomputed counts/asset lists. Compose must not
+  traverse the download manifest to hash effect keys or compute statistics on each update.
+- Overview coverage is prepared off-thread and bounded to 8,192 cells, normally at zoom 8.
+  The embedded preview does not intercept vertical scrolling; editing happens in the full-screen map.
+- Editing dates never starts hidden 3D work; opening Map/Window resumes the shared scene.
+  Native date/time dialogs commit complete values. Incomplete UTC-offset text preserves the schedule.
+- Download progress is throttled to four updates per second. Pause cancels the queue, interrupts workers
+  and disconnects only that preparation's HTTP connections. Resume waits for cancellation, verifies
+  cached files and retries missing/corrupt sources. Only a fully verified manifest is complete.
+- Saving has a persistent action/status at the top of Preparation. A stale asynchronous save cannot
+  mark later edits clean. Existing automatic schedules are not silently disabled by ordinary Save.
+- Simulation reopening retains its cursor. Changing image quality does not invalidate an in-flight
+  simulation calculation; its input key contains only route coordinates and departure/arrival times.
+- Display quality is editable in Preparation using the same plan fields as Window. Download source
+  zooms and display quality are labelled separately; source coverage is not a camera zoom setting.
+- Photo focal fitting/persistence and the 3D projection now support vertical fields down to 1 degree.
+  Valid existing zooms retain the exact previous projection formula; no stored fit is recalculated or
+  photograph migrated. Slider spacing is logarithmic so the extended zoom range remains adjustable.
+- Synthetic tests include 2/5-degree focal fitting, ordinary projections, calibration JSON round trips,
+  a 50,000-source manifest and a single continuous flight through an intermediate waypoint.
+
 Device acceptance must verify:
 
 1. With an eight-point synthetic photo, the complete toolbar stays visible while

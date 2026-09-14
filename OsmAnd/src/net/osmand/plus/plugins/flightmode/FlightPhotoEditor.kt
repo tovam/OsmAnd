@@ -65,6 +65,8 @@ internal fun FlightPhotoEditor(
     var status by remember(photo.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var solveJob by remember { mutableStateOf<Job?>(null) }
+    var solveProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var showDiagnostics by remember(photo.id) { mutableStateOf(false) }
     var satellite by remember { mutableStateOf(true) }
     var opacity by remember { mutableStateOf(data.editorView.opacity) }
     var cameraMode by remember { mutableStateOf(data.editorView.mode) }
@@ -245,6 +247,7 @@ internal fun FlightPhotoEditor(
                         val submitted = data
                         busy = true
                         status = ""
+                        solveProgress = null
                         solveJob =
                             scope.launch {
                                 try {
@@ -253,6 +256,9 @@ internal fun FlightPhotoEditor(
                                             submitted,
                                             reference,
                                             repository,
+                                            onProgress = { completed, total ->
+                                                solveProgress = completed to total
+                                            },
                                         )
                                     if (
                                         currentData.points == submitted.points &&
@@ -267,6 +273,7 @@ internal fun FlightPhotoEditor(
                                             )
                                         currentOnSave(data)
                                         changeTab(2)
+                                        showDiagnostics = true
                                     }
                                 } catch (e: CancellationException) {
                                     throw e
@@ -283,6 +290,16 @@ internal fun FlightPhotoEditor(
                     }
                 },
                 enabled = busy || if (tab == 0) photoPointCount >= 4 else canCalculate,
+            )
+        }
+        if (busy) {
+            Text(
+                solveProgress?.let { (completed, total) ->
+                    stringResource(R.string.flight_cal_diagnostics_progress, completed, total)
+                } ?: stringResource(R.string.flight_cal_diagnostics_altitudes),
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 8.dp),
             )
         }
     }
@@ -600,9 +617,14 @@ internal fun FlightPhotoEditor(
                         modifier = Modifier.padding(horizontal = 8.dp),
                     )
                     val completeIndices =
-                        data.points.indices.filter {
-                            val p = data.points[it]
-                            p.x != null && p.y != null && p.latitude != null && p.longitude != null
+                        fit.pointIndices.ifEmpty {
+                            data.points.indices.filter {
+                                val p = data.points[it]
+                                p.x != null &&
+                                    p.y != null &&
+                                    p.latitude != null &&
+                                    p.longitude != null
+                            }
                         }
                     Text(
                         fit.errors
@@ -613,6 +635,10 @@ internal fun FlightPhotoEditor(
                         color = Color.LightGray,
                         fontSize = 9.sp,
                         modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                    EditorAction(
+                        stringResource(R.string.flight_cal_diagnostics_title),
+                        { showDiagnostics = true },
                     )
                 }
             if (status.isNotBlank())
@@ -704,6 +730,19 @@ internal fun FlightPhotoEditor(
                     )
                 }
         }
+        if (showDiagnostics)
+            data.fit?.let { fit ->
+                FlightPhotoFitDiagnosticsScreen(
+                    fit,
+                    data.points.indices.filter { i ->
+                        val p = data.points[i]
+                        p.x != null && p.y != null && p.latitude != null && p.longitude != null
+                    },
+                    data.imageWidth,
+                    data.imageHeight,
+                    onClose = { showDiagnostics = false },
+                )
+            }
         associationAction?.let { action ->
             AlertDialog(
                 onDismissRequest = { associationAction = null },
