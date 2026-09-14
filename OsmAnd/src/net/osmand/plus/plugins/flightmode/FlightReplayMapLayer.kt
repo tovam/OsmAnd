@@ -19,6 +19,7 @@ import net.osmand.core.jni.QVectorPointI
 import net.osmand.core.jni.VectorLine
 import net.osmand.core.jni.VectorLineBuilder
 import net.osmand.core.jni.VectorLinesCollection
+import net.osmand.PlatformUtil
 import net.osmand.data.LatLon
 import net.osmand.data.RotatedTileBox
 import net.osmand.plus.utils.NativeUtilities
@@ -51,6 +52,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	@Volatile
 	private var state = LayerState()
 	private var routeGeometryDirty = true
+	private var tubeBridgeAvailable = true
 	private var pointGeometryDirty = true
 	private var photoGeometryDirty = true
 	private var aircraftDirty = true
@@ -293,12 +295,16 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				heights.add(nativeHeights[index])
 			}
 
+			// Always create the centreline before the optional volume bridge. It uses the
+			// same native path as the visible red tether, with unchanged GPS coordinates.
+			buildNativeStroke(collection, lineId++, pointsOrder + 2,
+				TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
 			// Keep the exact sampled centreline and heights. The native renderer builds a closed
 			// circular mesh around it, using the same zoom-dependent width as the former line.
 			buildNativeStroke(
 				collection = collection,
 				lineId = lineId++,
-				baseOrder = baseOrder,
+				baseOrder = pointsOrder + 1,
 				width = TUBE_CORE_WIDTH_DP * lineScale,
 				color = TUBE_CORE_COLOR,
 				points = points,
@@ -338,7 +344,15 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			.setJointStyle(VectorLine.JointStyle.ROUND.swigValue())
 			.setApproximationEnabled(false)
 			.buildAndAddToCollection(collection)
-		if (volumetric) FlightVectorLineBridge.enableTube(line)
+		if (volumetric && tubeBridgeAvailable) {
+			try {
+				FlightVectorLineBridge.enableTube(line)
+			} catch (error: LinkageError) {
+				// An older native library must not erase every flight line or abort map drawing.
+				tubeBridgeAvailable = false
+				PlatformUtil.getLog(FlightReplayMapLayer::class.java).warn("Flight tube bridge unavailable; retaining native elevated lines", error)
+			}
+		}
 	}
 
 	private fun sampledIndices(range: IntRange, maximumCount: Int): List<Int> {
@@ -729,7 +743,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val AIRCRAFT_MINIMUM_BITMAP_PIXELS = 16
 		private const val AIRCRAFT_MODEL_DIRECTION_OFFSET_DEGREES = -90f
 		private const val AIRCRAFT_VECTOR_UPDATE_INTERVAL_MILLIS = 200L
-		private const val TETHER_WIDTH_DP = 1.7
+		private const val TETHER_WIDTH_DP = 2.7
 		private const val TETHER_SLEEVE_EXTRA_WIDTH_DP = 2.2
 		private const val TETHER_HORIZONTAL_OFFSET_METERS = 0.10
 		private const val TETHER_GROUND_CLEARANCE_METERS = 1.5f
