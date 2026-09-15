@@ -403,17 +403,23 @@ data class FlightPhotoImageAdjustments(
 	val temperature: Float = 0f,
 	/** Green (-1) to magenta (+1). */
 	val tint: Float = 0f,
-	val saturation: Float = 0f
+	val saturation: Float = 0f,
+	val dehaze: Float = 0f,
+	val depthEnabled: Boolean = true,
+	val depthProfile: FlightPhotoDepthProfile? = null
 ) {
 	fun clamped(): FlightPhotoImageAdjustments = copy(
 		brightness = brightness.finiteUnitValue(),
 		contrast = contrast.finiteUnitValue(),
 		temperature = temperature.finiteUnitValue(),
 		tint = tint.finiteUnitValue(),
-		saturation = saturation.finiteUnitValue()
+		saturation = saturation.finiteUnitValue(),
+		dehaze = dehaze.takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 0f
 	)
 
-	fun isNeutral(): Boolean = this == FlightPhotoImageAdjustments()
+	/** Matrix neutrality only: dehazing is applied once, in the bitmap preparation worker. */
+	fun isNeutral(): Boolean = brightness == 0f && contrast == 0f && temperature == 0f &&
+		tint == 0f && saturation == 0f
 
 	private fun Float.finiteUnitValue(): Float = takeIf(Float::isFinite)?.coerceIn(-1f, 1f) ?: 0f
 }

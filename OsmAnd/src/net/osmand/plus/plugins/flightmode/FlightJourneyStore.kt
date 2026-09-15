@@ -591,27 +591,10 @@ class FlightJourneyStore(private val context: Context) {
 		}
 	}
 
-	private fun photoImageAdjustmentsToJson(adjustments: FlightPhotoImageAdjustments): JSONObject {
-		val safe = adjustments.clamped()
-		return JSONObject().apply {
-			put("brightness", safe.brightness)
-			put("contrast", safe.contrast)
-			put("temperature", safe.temperature)
-			put("tint", safe.tint)
-			put("saturation", safe.saturation)
-		}
-	}
+	private fun photoImageAdjustmentsToJson(adjustments: FlightPhotoImageAdjustments) =
+		FlightPhotoTreatmentJson.write(adjustments)
 
-	private fun photoImageAdjustmentsFromJson(json: JSONObject?): FlightPhotoImageAdjustments {
-		if (json == null) return FlightPhotoImageAdjustments()
-		return FlightPhotoImageAdjustments(
-			brightness = json.optDouble("brightness", 0.0).toFloat(),
-			contrast = json.optDouble("contrast", 0.0).toFloat(),
-			temperature = json.optDouble("temperature", 0.0).toFloat(),
-			tint = json.optDouble("tint", 0.0).toFloat(),
-			saturation = json.optDouble("saturation", 0.0).toFloat()
-		).clamped()
-	}
+	private fun photoImageAdjustmentsFromJson(json: JSONObject?) = FlightPhotoTreatmentJson.read(json)
 
 	private fun photoSpatialPoseToJson(pose: FlightPhotoSpatialPose): JSONObject = JSONObject().apply {
 		put("samplePosition", pose.samplePosition)

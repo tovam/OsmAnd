@@ -6,7 +6,6 @@ import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.AttributeSet
-import net.osmand.util.PhotoPlaneGeometry
 import net.osmand.util.DirectionalViewMatrix
 import net.osmand.util.ResourceTransaction
 import net.osmand.util.PreparedResourceQueue
@@ -114,7 +113,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		private var preparation = FlightPreparedAssets(requestFrame)
 		private val imageKeys = HashMap<String, FlightPreparedAssets.ImageKey>()
 		private var preparationGeneration = Long.MIN_VALUE
-		private var preparationPhoto: String? = null
+		private var preparationPhoto: FlightPreparedAssets.ImageKey? = null
 		private var preparationDirty = true
 		fun stopPreparation() { preparation.close() }
 		private var lastReportedStats: FlightTerrainRenderStats? = null
@@ -570,41 +569,20 @@ class FlightTerrainView @JvmOverloads constructor(
 				return
 			}
 			if (photoProgram == 0 || photo.opacity <= 0f) return
-			val texture = ensurePhotoTexture(photo.localPath) ?: return
+			val texture = ensurePhotoTexture(photoImageKey(photo)) ?: return
 			val pose = photo.pose.clampedOrNull() ?: return
 			val coordinates = FlightTerrainCoordinates(
 				scene.coordinateOriginLatitude,
 				scene.coordinateOriginLongitude
 			)
 			val eyeAltitude = pose.eyeAltitudeMeters ?: DEFAULT_FLIGHT_ALTITUDE_METERS
-			val eye = coordinates.toLocal(pose.eyeLatitude, pose.eyeLongitude, eyeAltitude.toDouble())
-			val azimuth = Math.toRadians(pose.viewAzimuthDegrees.toDouble())
-			val elevation = Math.toRadians(pose.viewElevationDegrees.toDouble())
-			val horizontal = cos(elevation)
-			val direction = normalized(
-				coordinates.vectorToLocal(
-					pose.eyeLatitude,
-					pose.eyeLongitude,
-					(sin(azimuth) * horizontal).toFloat(),
-					sin(elevation).toFloat(),
-					(-cos(azimuth) * horizontal).toFloat()
-				)
-			) ?: return
-			val localUp = normalized(
-				coordinates.vectorToLocal(pose.eyeLatitude, pose.eyeLongitude, 0f, 1f, 0f)
-			) ?: return
-			val cameraRight = normalized(cross(direction, localUp)) ?: return
-			val cameraUp = normalized(cross(cameraRight, direction)) ?: return
-
 			val distance = (abs(eyeAltitude) * PHOTO_PLANE_ALTITUDE_FACTOR)
 				.coerceIn(MINIMUM_PHOTO_PLANE_DISTANCE_METERS, MAXIMUM_PHOTO_PLANE_DISTANCE_METERS)
-			val positions = PhotoPlaneGeometry.vertices(
-				eye, direction, cameraRight, cameraUp, distance,
-				pose.verticalFieldOfViewDegrees,
+			val positions = FlightPhotoProjection(
+				pose.copy(eyeAltitudeMeters = eyeAltitude),
 				texture.width.toFloat() / texture.height.coerceAtLeast(1),
-				pose.referenceAspectRatio ?: return,
 				photo.scale, photo.offsetXFraction, photo.offsetYFraction, photo.rotationDegrees
-			)
+			).vertices(coordinates, distance)
 			val positionBuffer = directFloatBuffer(positions)
 			val textureBuffer = directFloatBuffer(
 				floatArrayOf(0f, 0f, 0f, 1f, 1f, 0f, 1f, 1f)
@@ -915,16 +893,23 @@ class FlightTerrainView @JvmOverloads constructor(
 			}
 		}
 
-		private fun ensurePhotoTexture(path: String): UploadedPhotoTexture? {
-			photoTexture?.takeIf { it.path == path }?.let { return it }
-			val uploaded = createPhotoTexture(path) ?: return null
+		private fun photoImageKey(photo: FlightSpatialPhotoOverlay): FlightPreparedAssets.ImageKey {
+			val recipe = FlightPhotoDehaze.recipe(photo.imageAdjustments)
+			// Bound CPU working memory; never run full-size image processing on the GL thread.
+			val edge = if (recipe.amount > 0f) 2048 else MAXIMUM_PHOTO_TEXTURE_EDGE
+			return FlightPreparedAssets.ImageKey(photo.localPath, min(maximumTextureEdge, edge), true, recipe)
+		}
+
+		private fun ensurePhotoTexture(key: FlightPreparedAssets.ImageKey): UploadedPhotoTexture? {
+			photoTexture?.takeIf { it.key == key }?.let { return it }
+			// Keep the previous rendering visible while the worker prepares its replacement.
+			val uploaded = createPhotoTexture(key) ?: return photoTexture?.takeIf { it.key.path == key.path }
 			releasePhotoTexture()
 			photoTexture = uploaded
 			return uploaded
 		}
 
-		private fun createPhotoTexture(path: String): UploadedPhotoTexture? {
-			val key = FlightPreparedAssets.ImageKey(path, min(maximumTextureEdge, MAXIMUM_PHOTO_TEXTURE_EDGE), true)
+		private fun createPhotoTexture(key: FlightPreparedAssets.ImageKey): UploadedPhotoTexture? {
 			val oriented = preparation.takeImage(key)?.bitmap ?: return null
 			preparationDirty = true
 			try {
@@ -943,7 +928,7 @@ class FlightTerrainView @JvmOverloads constructor(
 					return null
 				}
 				GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-				return UploadedPhotoTexture(textureId, path, oriented.width, oriented.height)
+				return UploadedPhotoTexture(textureId, key, oriented.width, oriented.height)
 			} finally {
 				oriented.recycle()
 			}
@@ -969,10 +954,11 @@ class FlightTerrainView @JvmOverloads constructor(
 		}
 
 		private fun reconcilePreparation(scene: FlightTerrainScene, photo: FlightSpatialPhotoOverlay?) {
-			if (!preparationDirty && preparationGeneration == scene.generation && preparationPhoto == photo?.localPath) return
+			val photoKey = photo?.let(::photoImageKey)
+			if (!preparationDirty && preparationGeneration == scene.generation && preparationPhoto == photoKey) return
 			preparationDirty = false
 			preparationGeneration = scene.generation
-			preparationPhoto = photo?.localPath
+			preparationPhoto = photoKey
 			val requests = ArrayList<PreparedResourceQueue.Request<FlightPreparedAssets.Key, FlightPreparedAssets.Asset>>()
 			// Coarse shapes are first, independently of the requested satellite quality.
 			scene.meshes.forEach { mesh ->
@@ -980,10 +966,8 @@ class FlightTerrainView @JvmOverloads constructor(
 					requests += preparation.geometryRequest(mesh)
 				}
 			}
-			if (photo != null && photoTexture?.path != photo.localPath) {
-				requests += preparation.imageRequest(FlightPreparedAssets.ImageKey(
-					photo.localPath, min(maximumTextureEdge, MAXIMUM_PHOTO_TEXTURE_EDGE), true
-				))
+			if (photoKey != null && photoTexture?.key != photoKey) {
+				requests += preparation.imageRequest(photoKey)
 			}
 			val wanted = linkedMapOf<String, Int>()
 			fun want(path: String?, edge: Int) {
@@ -1252,7 +1236,7 @@ class FlightTerrainView @JvmOverloads constructor(
 
 		private data class UploadedPhotoTexture(
 			val id: Int,
-			val path: String,
+			val key: FlightPreparedAssets.ImageKey,
 			val width: Int,
 			val height: Int
 		)

@@ -83,6 +83,8 @@ internal fun FlightPhotoEditor(
     var yaw by remember { mutableStateOf(data.editorView.yaw) }
     var pitch by remember { mutableStateOf(data.editorView.pitch) }
     var zoom by remember { mutableStateOf(data.editorView.zoom) }
+    var showOriginal by remember(photo.id) { mutableStateOf(false) }
+    var depthRetry by remember(photo.id) { mutableStateOf(0) }
     LaunchedEffect(photo.id, selected) {
         if (selected in data.points.indices) pointListState.animateScrollToItem(selected)
     }
@@ -113,6 +115,16 @@ internal fun FlightPhotoEditor(
                 }
             imageLoading = false
         }
+    val processingPhoto = photo.copy(calibration = data)
+    val effectiveAdjustments = processingPhoto.effectiveImageAdjustments()
+    val corrected = rememberDehazedPhoto(bitmap, effectiveAdjustments)
+    val depthBusy =
+        rememberPhotoDepthGuidance(
+            processingPhoto,
+            state.terrainScene,
+            depthRetry,
+            onSetImageAdjustments,
+        )
     fun save(next: FlightPhotoCalibration) {
         solveJob?.cancel()
         busy = false
@@ -494,9 +506,9 @@ internal fun FlightPhotoEditor(
                                     data = data.copy(pickerRotation = it)
                                     currentOnSave(data)
                                 }
-                                v.imageAdjustments = photo.imageAdjustments
+                                v.imageAdjustments = effectiveAdjustments
                                 v.update(
-                                    bitmap,
+                                    corrected.bitmap,
                                     data,
                                     selected,
                                     0,
@@ -584,7 +596,7 @@ internal fun FlightPhotoEditor(
                     },
                 )
                 if (tab == 5) {
-                    bitmap?.let { preview ->
+                    (if (showOriginal) bitmap else corrected.bitmap)?.let { preview ->
                         Image(
                             preview.asImageBitmap(),
                             photo.fileName,
@@ -593,7 +605,8 @@ internal fun FlightPhotoEditor(
                                     rotationZ = photo.rotationDegrees
                                 },
                             contentScale = ContentScale.Fit,
-                            colorFilter = photoColorFilter(photo.imageAdjustments),
+                            colorFilter =
+                                if (showOriginal) null else photoColorFilter(effectiveAdjustments),
                         )
                     }
                         ?: Text(
@@ -624,6 +637,19 @@ internal fun FlightPhotoEditor(
                     val latestCamera by rememberUpdatedState(camera)
                     val latestBase by rememberUpdatedState(base)
                     val overlayPose = estimate ?: reference
+                    val overlayProjection =
+                        FlightPhotoProjection(
+                            overlayPose,
+                            data.imageWidth.toFloat() / data.imageHeight.coerceAtLeast(1),
+                            rotation = data.fit?.imageRotationDegrees() ?: photo.rotationDegrees,
+                        )
+                    val overlayAdjustments =
+                        effectiveAdjustments.copy(
+                            depthProfile =
+                                effectiveAdjustments.depthProfile?.takeIf {
+                                    it.signature == overlayProjection.signature()
+                                }
+                        )
                     FlightTerrainSurface(
                         state.terrainScene,
                         sample,
@@ -645,7 +671,7 @@ internal fun FlightPhotoEditor(
                             0f,
                             0f,
                             data.fit?.imageRotationDegrees() ?: photo.rotationDegrees,
-                            photo.imageAdjustments,
+                            overlayAdjustments,
                         ),
                         { status = it },
                         {},
@@ -694,7 +720,19 @@ internal fun FlightPhotoEditor(
                     )
                 }
             }
-            if (tab == 5) FlightPhotoAdjustmentControls(photo, onSetImageAdjustments)
+            if (tab == 5) {
+                FlightPhotoTreatmentControls(
+                    processingPhoto,
+                    corrected,
+                    depthBusy,
+                    showOriginal,
+                    { showOriginal = it },
+                    { depthRetry++ },
+                    onOpenWindow,
+                    onSetImageAdjustments,
+                )
+                FlightPhotoAdjustmentControls(photo, onSetImageAdjustments)
+            }
             if (tab in 2..4) {
                 Text(
                     stringResource(R.string.flight_cal_legend),

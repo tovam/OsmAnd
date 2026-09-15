@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_dehaze_title">Dévoiler</string>
+    <string name="flight_dehaze_original">Original</string>
+    <string name="flight_dehaze_depth">Profondeur</string>
+    <string name="flight_dehaze_recalculate">Recalculer</string>
+    <string name="flight_dehaze_load_window">Charger dans Hublot</string>
+    <string name="flight_dehaze_info">Infos</string>
+    <string name="flight_dehaze_working">Calcul en arrière-plan…</string>
+    <string name="flight_dehaze_disabled">Dévoilage désactivé · original conservé</string>
+    <string name="flight_dehaze_failed">Aperçu non calculé · image originale conservée. Réessaie avec un autre dosage.</string>
+    <string name="flight_dehaze_image_only">Dévoilage par l’image seule</string>
+    <string name="flight_dehaze_no_calibration">Image seule · cale la photo dans Hublot ou calcule ses repères pour utiliser la profondeur.</string>
+    <string name="flight_dehaze_no_terrain">Image seule · relief non chargé dans le champ de la photo.</string>
+    <string name="flight_dehaze_coverage">Relief connu : %1$d %% de la photo · distances %2$.0f–%3$.0f km</string>
+    <string name="flight_dehaze_explanation">Le voile est estimé dans l’image. Avec un calage et du relief chargé, la distance de chaque zone visible et une densité d’air décroissante avec l’altitude modulent le traitement. Le ciel et les zones sans relief connu utilisent l’image seule. Ce n’est pas une mesure de la brume réelle : météo, vitres, reflets et couleurs perdues restent inconnus. Diminue le dosage si des halos, du bruit ou des couleurs trop fortes apparaissent. Les réglages et la petite carte de profondeur sont enregistrés avec la photo, jamais dans le fichier original. Un changement de calage invalide la profondeur ; elle est recalculée dans Retouche. Les aperçus corrigés sont limités à 2 048 pixels de côté au maximum.</string>
     <string name="flight_cal_landmarks">Repères</string>
     <string name="flight_cal_photo_pane">Photo</string>
     <string name="flight_cal_map_pane">Carte satellite</string>

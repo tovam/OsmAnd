@@ -1823,11 +1823,14 @@ private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, o
 	val bitmap by produceState<Bitmap?>(null, photo.localPath) {
 		value = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath), 192) }
 	}
+	val adjustments = photo.effectiveImageAdjustments()
+	val corrected = rememberDehazedPhoto(bitmap, adjustments)
 	val sample = FlightSampleInterpolator.sampleAt(trip, photo.matchedSamplePosition)
 	Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onOpen).padding(6.dp),
 		verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 		Box(Modifier.size(58.dp, 44.dp).clipToBounds().background(Color.Black)) {
-			bitmap?.let { Image(it.asImageBitmap(), photo.fileName, contentScale = ContentScale.Crop,
+			corrected.bitmap?.let { Image(it.asImageBitmap(), photo.fileName, contentScale = ContentScale.Crop,
+				colorFilter = photoColorFilter(adjustments),
 				modifier = Modifier.fillMaxSize().graphicsLayer(rotationZ = photo.rotationDegrees)) }
 		}
 		Column(Modifier.weight(1f)) {
@@ -1857,16 +1860,18 @@ private fun FlightPhotoFullscreen(
 		val loaded = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath)) }
 		value = PhotoPreviewState(loading = false, bitmap = loaded)
 	}
+	val adjustments = photo.effectiveImageAdjustments()
+	val corrected = rememberDehazedPhoto(preview.bitmap, adjustments)
 	Box(
 		Modifier.fillMaxSize().background(Color(0xFA000000)).clickable(enabled = true, onClick = {}),
 		contentAlignment = Alignment.Center
 	) {
-		preview.bitmap?.let { bitmap ->
+		corrected.bitmap?.let { bitmap ->
 			Image(
 				bitmap = bitmap.asImageBitmap(),
 				contentDescription = photo.fileName,
 				contentScale = ContentScale.Fit,
-				colorFilter = photoColorFilter(photo.imageAdjustments),
+				colorFilter = photoColorFilter(adjustments),
 				modifier = Modifier.fillMaxSize().padding(top = 50.dp, bottom = 54.dp)
 					.pointerInput(photo.id) {
 						detectTransformGestures { _, _, _, rotationDegrees ->
@@ -2994,7 +2999,7 @@ private fun FlightWindowScene(
 				offsetXFraction = photoOverlay.offsetXFraction,
 				offsetYFraction = photoOverlay.offsetYFraction,
 				rotationDegrees = currentPhoto.rotationDegrees,
-				imageAdjustments = currentPhoto.imageAdjustments
+				imageAdjustments = currentPhoto.effectiveImageAdjustments()
 			).clamped()
 		}
 	}

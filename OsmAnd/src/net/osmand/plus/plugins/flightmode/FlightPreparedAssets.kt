@@ -20,7 +20,8 @@ internal class FlightPreparedAssets(changed: () -> Unit) : AutoCloseable {
 			vertices === other.vertices && indices === other.indices
 		override fun hashCode(): Int = 31 * System.identityHashCode(vertices) + System.identityHashCode(indices)
 	}
-	data class ImageKey(val path: String, val edge: Int, val photo: Boolean = false) : Key
+	data class ImageKey(val path: String, val edge: Int, val photo: Boolean = false,
+		val dehaze: FlightPhotoDehaze.Recipe = FlightPhotoDehaze.Recipe()) : Key
 	sealed interface Asset
 	data class Geometry(val vertices: FloatBuffer, val indices: ShortBuffer) : Asset
 	data class Image(val bitmap: Bitmap) : Asset
@@ -47,7 +48,7 @@ internal class FlightPreparedAssets(changed: () -> Unit) : AutoCloseable {
 	}
 
 	fun imageRequest(key: ImageKey): PreparedResourceQueue.Request<Key, Asset> =
-		PreparedResourceQueue.Request(key, key.edge.toLong() * key.edge * if (key.photo) 8L else 2L) {
+		PreparedResourceQueue.Request(key, key.edge.toLong() * key.edge * if (key.dehaze.amount > 0) 24L else if (key.photo) 8L else 2L) {
 			val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 			BitmapFactory.decodeFile(key.path, bounds)
 			require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Invalid image dimensions" }
@@ -65,7 +66,10 @@ internal class FlightPreparedAssets(changed: () -> Unit) : AutoCloseable {
 					android.graphics.Matrix().apply { postRotate(angle) }, true
 				)
 				if (oriented !== decoded) decoded.recycle()
-				Image(oriented)
+				val processed = try { FlightPhotoDehaze.apply(oriented, key.dehaze) }
+					catch (failure: Throwable) { if (oriented !== decoded) oriented.recycle(); throw failure }
+				if (processed !== oriented) oriented.recycle()
+				Image(processed)
 			} catch (error: Throwable) {
 				decoded.recycle()
 				throw error

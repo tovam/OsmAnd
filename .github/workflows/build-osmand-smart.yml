@@ -90,7 +90,7 @@ jobs:
             android/OsmAnd/test/native/FlightTubeMeshTest.cpp -o "${RUNNER_TEMP}/flight-tube-test"
           "${RUNNER_TEMP}/flight-tube-test"
 
-      - name: Test photo landmark input and pose solver
+      - name: Test photo landmarks, pose solver and dehazing
         run: |
           mkdir -p "${RUNNER_TEMP}/flight-photo-tests"
           javac --release 8 -d "${RUNNER_TEMP}/flight-photo-tests" \
@@ -98,14 +98,20 @@ jobs:
             android/OsmAnd-java/src/main/java/net/osmand/util/PhotoLandmarkGeometry.java \
             android/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseSolver.java \
             android/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseDiagnostics.java \
+            android/OsmAnd-java/src/main/java/net/osmand/util/PhotoDehaze.java \
+            android/OsmAnd-java/src/main/java/net/osmand/util/PhotoPlaneGeometry.java \
             android/OsmAnd/test/standalone/PhotoCalibrationInputTest.java \
             android/OsmAnd/test/standalone/PhotoLandmarkGeometryTest.java \
             android/OsmAnd/test/standalone/PhotoPoseSolverTest.java \
-            android/OsmAnd/test/standalone/PhotoPoseDiagnosticsTest.java
+            android/OsmAnd/test/standalone/PhotoPoseDiagnosticsTest.java \
+            android/OsmAnd/test/standalone/PhotoDehazeTest.java \
+            android/OsmAnd/test/standalone/PhotoPlaneGeometryTest.java
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoCalibrationInputTest
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoLandmarkGeometryTest
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoPoseSolverTest
           java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoPoseDiagnosticsTest
+          java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoDehazeTest
+          java -cp "${RUNNER_TEMP}/flight-photo-tests" PhotoPlaneGeometryTest
 
       - name: Resolve patched core cache identity
         # Keep the native cache separate from the inexpensive JVM checks below.
