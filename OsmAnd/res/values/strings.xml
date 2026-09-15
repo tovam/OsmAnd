@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_photo_adjust_tab">Retouche</string>
+    <string name="flight_photo_adjust_brightness">LUM</string>
+    <string name="flight_photo_adjust_contrast">CONTR</string>
+    <string name="flight_photo_adjust_temperature">TEMP</string>
+    <string name="flight_photo_adjust_tint">TEINTE</string>
+    <string name="flight_photo_adjust_saturation">SAT</string>
+    <string name="flight_photo_adjust_reset">Réinitialiser l’image</string>
     <string name="flight_overview_drag_zoom">Mini-carte centrée sur l’avion. Glisse vers le haut pour zoomer, vers le bas pour dézoomer.</string>
     <string name="flight_sync_partial">Version envoyée · sélection de photos seulement</string>
     <string name="flight_sync_remove">Retirer du téléphone…</string>

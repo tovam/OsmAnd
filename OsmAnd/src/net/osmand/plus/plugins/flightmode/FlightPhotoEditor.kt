@@ -1,6 +1,7 @@
 package net.osmand.plus.plugins.flightmode
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -12,6 +13,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -49,6 +53,7 @@ internal fun FlightPhotoEditor(
     onOpenWindow: () -> Unit,
     onOpenMap: () -> Unit,
     onClearAssociation: () -> Unit,
+    onSetImageAdjustments: (FlightPhotoImageAdjustments) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -305,7 +310,7 @@ internal fun FlightPhotoEditor(
     }
     Dialog(
         onDismissRequest = {
-            val previous = PhotoCalibrationInput.backTab(tab)
+            val previous = if (tab == 5) 0 else PhotoCalibrationInput.backTab(tab)
             if (previous < 0) onClose() else changeTab(previous)
         },
         properties =
@@ -333,13 +338,14 @@ internal fun FlightPhotoEditor(
             FlightStorageStatusStrip(state, compact = true)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 listOf(
-                        R.string.flight_cal_photo,
-                        R.string.flight_cal_map,
-                        R.string.flight_cal_compare,
-                        R.string.flight_cal_window,
-                        R.string.flight_mode_photo_details,
+                        0 to R.string.flight_cal_photo,
+                        5 to R.string.flight_photo_adjust_tab,
+                        1 to R.string.flight_cal_map,
+                        2 to R.string.flight_cal_compare,
+                        3 to R.string.flight_cal_window,
+                        4 to R.string.flight_mode_photo_details,
                     )
-                    .forEachIndexed { i, res ->
+                    .forEach { (i, res) ->
                         EditorAction(stringResource(res), { changeTab(i) }, tab == i)
                     }
             }
@@ -456,6 +462,7 @@ internal fun FlightPhotoEditor(
                         v.visibility =
                             if (tab < 3) android.view.View.VISIBLE else android.view.View.INVISIBLE
                         if (tab < 3) {
+                            v.imageAdjustments = photo.imageAdjustments
                             v.dragToPlace = action == Action.MOVE
                             v.onImagePoint = { x, y -> placePoint(0) { it.copy(x = x, y = y) } }
                             v.onMapPoint = { lat, lon ->
@@ -481,7 +488,19 @@ internal fun FlightPhotoEditor(
                         }
                     },
                 )
-                if (tab == 4) {
+                if (tab == 5) {
+                    bitmap?.let { preview ->
+                        Image(
+                            preview.asImageBitmap(), photo.fileName,
+                            modifier = Modifier.fillMaxSize().graphicsLayer { rotationZ = photo.rotationDegrees },
+                            contentScale = ContentScale.Fit,
+                            colorFilter = photoColorFilter(photo.imageAdjustments),
+                        )
+                    } ?: Text(
+                        stringResource(if (imageLoading) R.string.flight_mode_photo_preview_loading else R.string.flight_mode_photo_preview_unavailable),
+                        color=Color.LightGray, fontSize=12.sp, modifier=Modifier.align(Alignment.Center),
+                    )
+                } else if (tab == 4) {
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                         FlightPhotoMetadata(photo, sample, state.trip)
                     }
@@ -581,7 +600,8 @@ internal fun FlightPhotoEditor(
                     )
                 }
             }
-            if (tab >= 2) {
+            if (tab == 5) FlightPhotoAdjustmentControls(photo, onSetImageAdjustments)
+            if (tab in 2..4) {
                 Text(
                     stringResource(R.string.flight_cal_legend),
                     color = Color.LightGray,
@@ -589,7 +609,7 @@ internal fun FlightPhotoEditor(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }
-            if (tab >= 2)
+            if (tab in 2..4)
                 data.fit?.let { fit ->
                     val horizontal =
                         if (reference != null && estimate != null)
@@ -642,7 +662,7 @@ internal fun FlightPhotoEditor(
                         { showDiagnostics = true },
                     )
                 }
-            if (status.isNotBlank())
+            if (status.isNotBlank() && tab != 5)
                 Text(
                     status,
                     color = Color(0xFFFFCC66),
@@ -650,15 +670,15 @@ internal fun FlightPhotoEditor(
                     maxLines = 3,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
-            if (reference == null)
+            if (reference == null && tab != 5)
                 Text(
                     stringResource(R.string.flight_cal_need_association),
                     color = Color(0xFFFFCC66),
                     fontSize = 10.sp,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
-            if (tab >= 2) CalculationActions()
-            if (!busy && !canCalculate && tab != 0)
+            if (tab in 2..4) CalculationActions()
+            if (!busy && !canCalculate && tab != 0 && tab != 5)
                 Text(
                     stringResource(
                         when (readiness) {
@@ -675,7 +695,7 @@ internal fun FlightPhotoEditor(
                     fontSize = 10.sp,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
-            if (tab >= 2 && !data.fitFocal) {
+            if (tab in 2..4 && !data.fitFocal) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,

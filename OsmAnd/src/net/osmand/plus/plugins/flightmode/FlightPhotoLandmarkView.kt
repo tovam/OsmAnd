@@ -53,6 +53,17 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     private var fingerCount = 0
     private var satellite = true
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    var imageAdjustments: FlightPhotoImageAdjustments = FlightPhotoImageAdjustments()
+        set(value) {
+            val safe = value.clamped()
+            if (field == safe) return
+            field = safe
+            imagePaint.colorFilter =
+                if (safe.isNeutral()) null
+                else ColorMatrixColorFilter(FlightPhotoColorMatrix.values(safe))
+            invalidate()
+        }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mapPoses = mutableMapOf<Int, Triple<Double, Double, Double>>()
     private var trackSamples: List<FlightSample> = emptyList()
@@ -377,8 +388,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             canvas.save()
             canvas.rotate(rotation, rect.centerX(), rect.centerY())
             image?.let {
-                paint.color = Color.WHITE
-                canvas.drawBitmap(it, null, rect, paint)
+                canvas.drawBitmap(it, null, rect, imagePaint)
             }
             calibration.points.forEachIndexed { i, p ->
                 if (p.x != null && p.y != null && !(i == selected && placementPreview != null))

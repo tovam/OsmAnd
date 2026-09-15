@@ -154,7 +154,6 @@ private val PHOTO_TIME_COMPARATOR = compareBy<FlightPhotoAttachment>(
 private data class PhotoPreviewState(val loading: Boolean = true, val bitmap: Bitmap? = null)
 
 private enum class WindowPanel { FLIGHT, VIEW }
-private enum class WindowPhotoPanel { PLACEMENT, IMAGE }
 
 @Composable
 fun FlightModeScreen(
@@ -382,7 +381,6 @@ fun FlightModeScreen(
 					onTransformLinkedView = onTransformLinkedWindowView,
 					onInitializePhotoViewport = onInitializeWindowPhotoViewport,
 					onRotatePhoto = onRotatePhoto,
-					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onResetPhotoTransform = onResetWindowPhotoTransform,
 					onClearPhoto = onClearWindowPhotoOverlay,
 					onRetryTerrain = onRetryTerrain,
@@ -423,6 +421,7 @@ fun FlightModeScreen(
 					onOpenPhotoOnMap = onOpenPhotoOnMap,
 					onOpenPhotoInWindow = onOpenPhotoInWindow,
 					onSetPhotoCalibration = onSetPhotoCalibration,
+					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onPreparePhotoCalibration = onPreparePhotoCalibration
 				)
 				FlightPage.JOURNEYS -> JourneysScreen(
@@ -1030,7 +1029,6 @@ private fun WindowScreen(
 	onTransformLinkedView: (Float, Float, Float, Float) -> Unit,
 	onInitializePhotoViewport: (String, Float) -> Unit,
 	onRotatePhoto: (String, Float) -> Unit,
-	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onResetPhotoTransform: () -> Unit,
 	onClearPhoto: () -> Unit,
 	onRetryTerrain: () -> Unit,
@@ -1079,7 +1077,6 @@ private fun WindowScreen(
 				onSetGestureTarget = onSetGestureTarget,
 				onResetPhotoTransform = onResetPhotoTransform,
 				onRotatePhoto = onRotatePhoto,
-				onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 				onClearPhoto = onClearPhoto,
 				onSetShadowsEnabled = onSetShadowsEnabled,
 				onRetryTerrain = onRetryTerrain,
@@ -1739,6 +1736,7 @@ private fun PhotoScreen(
 	onOpenPhotoOnMap: (String) -> Unit,
 	onOpenPhotoInWindow: (String) -> Unit,
 	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
+	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onPreparePhotoCalibration: (String) -> Unit
 ) {
 	var editorId by remember { mutableStateOf<String?>(null) }
@@ -1792,7 +1790,8 @@ private fun PhotoScreen(
 			{ onSetPhotoCalibration(photo.id, it) },
 			{ onAssociatePhotoAutomatically(photo.id) }, { onAssociatePhotoAtCurrentReplay(photo.id) },
 			{ fullScreenPhotoId = photo.id }, { editorId = null; onOpenPhotoInWindow(photo.id) },
-			{ editorId = null; onOpenPhotoOnMap(photo.id) }, { onClearPhotoAssociation(photo.id) })
+			{ editorId = null; onOpenPhotoOnMap(photo.id) }, { onClearPhotoAssociation(photo.id) },
+			{ onSetPhotoImageAdjustments(photo.id, it) })
 	}
 	fullScreenPhoto?.let { photo ->
 		androidx.compose.ui.window.Dialog(onDismissRequest = { fullScreenPhotoId = null },
@@ -2925,7 +2924,6 @@ private fun FlightWindowScene(
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onResetPhotoTransform: () -> Unit,
 	onRotatePhoto: (String, Float) -> Unit,
-	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onClearPhoto: () -> Unit,
 	onSetShadowsEnabled: (Boolean) -> Unit,
 	onRetryTerrain: () -> Unit,
@@ -3078,9 +3076,6 @@ private fun FlightWindowScene(
 				onSetOpacity = onSetPhotoOpacity,
 				onSetGestureTarget = onSetGestureTarget,
 				onResetTransform = onResetPhotoTransform,
-				onSetImageAdjustments = { adjustments ->
-					onSetPhotoImageAdjustments(overlayPhoto.id, adjustments)
-				},
 				onClose = onClearPhoto,
 				modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)
 			)
@@ -3144,7 +3139,7 @@ private fun WindowQuickControls(
 	}
 }
 
-private fun photoColorFilter(adjustments: FlightPhotoImageAdjustments): ColorFilter? {
+internal fun photoColorFilter(adjustments: FlightPhotoImageAdjustments): ColorFilter? {
 	val safe = adjustments.clamped()
 	return if (safe.isNeutral()) null else {
 		ColorFilter.colorMatrix(ColorMatrix(FlightPhotoColorMatrix.values(safe)))
@@ -3159,11 +3154,9 @@ private fun WindowPhotoOverlayControls(
 	onSetOpacity: (Float) -> Unit,
 	onSetGestureTarget: (FlightWindowGestureTarget) -> Unit,
 	onResetTransform: () -> Unit,
-	onSetImageAdjustments: (FlightPhotoImageAdjustments) -> Unit,
 	onClose: () -> Unit,
 	modifier: Modifier = Modifier
 ) {
-	var panel by remember(photo.id) { mutableStateOf(WindowPhotoPanel.PLACEMENT) }
 	Column(
 		modifier.fillMaxWidth(0.96f).background(Color(0xE611181E)).border(1.dp, FlightLine)
 			.padding(horizontal = 6.dp, vertical = 3.dp)
@@ -3194,91 +3187,76 @@ private fun WindowPhotoOverlayControls(
 				modifier = Modifier.clickable(onClick = onClose).padding(horizontal = 5.dp, vertical = 3.dp)
 			)
 		}
-		Row(Modifier.fillMaxWidth().height(21.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-			WindowPhotoPanel.values().forEach { item ->
-				val selected = item == panel
+		Row(Modifier.fillMaxWidth().height(26.dp), verticalAlignment = Alignment.CenterVertically) {
+			Text(stringResource(R.string.flight_mode_photo_opacity).uppercase(), color = FlightBlue, fontSize = 7.sp, modifier = Modifier.width(48.dp))
+			Slider(value = overlay.opacity, onValueChange = onSetOpacity, modifier = Modifier.weight(1f).height(24.dp))
+			Text("${(overlay.opacity * 100).roundToInt()} %", color = FlightText, fontSize = 8.sp, modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
+		}
+		Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+			listOf(
+				FlightWindowGestureTarget.VIEW to stringResource(R.string.flight_mode_gesture_view),
+				FlightWindowGestureTarget.PHOTO to stringResource(R.string.flight_mode_gesture_photo),
+				FlightWindowGestureTarget.LINKED to stringResource(R.string.flight_mode_gesture_linked)
+			).forEach { (target, label) ->
+				val selected = overlay.gestureTarget == target
 				Box(
-					Modifier.weight(1f).fillMaxHeight()
-						.background(if (selected) FlightBlue.copy(alpha = 0.14f) else Color.Transparent)
+					Modifier.weight(1f).height(24.dp)
+						.background(if (selected) FlightBlue.copy(alpha = 0.16f) else Color.Transparent)
 						.border(1.dp, if (selected) FlightBlue else FlightLine)
-						.clickable { panel = item },
+						.clickable { onSetGestureTarget(target) },
 					contentAlignment = Alignment.Center
 				) {
-					Text(
-						if (item == WindowPhotoPanel.PLACEMENT) "PLACEMENT" else "IMAGE",
-						color = if (selected) FlightBlue else FlightMuted,
-						fontSize = 7.sp,
-						fontWeight = FontWeight.Bold
-					)
+					Text(label.uppercase(), color = if (selected) FlightBlue else FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
 				}
+			}
+			Box(
+				Modifier.height(24.dp).border(1.dp, FlightLine).clickable(onClick = onResetTransform)
+					.padding(horizontal = 7.dp),
+				contentAlignment = Alignment.Center
+			) {
+				Text(stringResource(R.string.flight_mode_reset).uppercase(), color = FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
 			}
 		}
-		when (panel) {
-			WindowPhotoPanel.PLACEMENT -> {
-				Row(Modifier.fillMaxWidth().height(26.dp), verticalAlignment = Alignment.CenterVertically) {
-					Text(stringResource(R.string.flight_mode_photo_opacity).uppercase(), color = FlightBlue, fontSize = 7.sp, modifier = Modifier.width(48.dp))
-					Slider(value = overlay.opacity, onValueChange = onSetOpacity, modifier = Modifier.weight(1f).height(24.dp))
-					Text("${(overlay.opacity * 100).roundToInt()} %", color = FlightText, fontSize = 8.sp, modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
-				}
-				Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-					listOf(
-						FlightWindowGestureTarget.VIEW to stringResource(R.string.flight_mode_gesture_view),
-						FlightWindowGestureTarget.PHOTO to stringResource(R.string.flight_mode_gesture_photo),
-						FlightWindowGestureTarget.LINKED to stringResource(R.string.flight_mode_gesture_linked)
-					).forEach { (target, label) ->
-						val selected = overlay.gestureTarget == target
-						Box(
-							Modifier.weight(1f).height(24.dp)
-								.background(if (selected) FlightBlue.copy(alpha = 0.16f) else Color.Transparent)
-								.border(1.dp, if (selected) FlightBlue else FlightLine)
-								.clickable { onSetGestureTarget(target) },
-							contentAlignment = Alignment.Center
-						) {
-							Text(label.uppercase(), color = if (selected) FlightBlue else FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-						}
-					}
-					Box(
-						Modifier.height(24.dp).border(1.dp, FlightLine).clickable(onClick = onResetTransform)
-							.padding(horizontal = 7.dp),
-						contentAlignment = Alignment.Center
-					) {
-						Text(stringResource(R.string.flight_mode_reset).uppercase(), color = FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-					}
-				}
-			}
-			WindowPhotoPanel.IMAGE -> {
-				val adjustments = photo.imageAdjustments.clamped()
-				PhotoAdjustmentRow(
-					firstLabel = "LUM",
-					firstValue = adjustments.brightness,
-					onFirstChange = { onSetImageAdjustments(adjustments.copy(brightness = it)) },
-					secondLabel = "CONTR",
-					secondValue = adjustments.contrast,
-					onSecondChange = { onSetImageAdjustments(adjustments.copy(contrast = it)) }
-				)
-				PhotoAdjustmentRow(
-					firstLabel = "TEMP",
-					firstValue = adjustments.temperature,
-					onFirstChange = { onSetImageAdjustments(adjustments.copy(temperature = it)) },
-					secondLabel = "TEINTE",
-					secondValue = adjustments.tint,
-					onSecondChange = { onSetImageAdjustments(adjustments.copy(tint = it)) }
-				)
-				Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-					CompactPhotoAdjustment(
-						label = "SAT",
-						value = adjustments.saturation,
-						onChange = { onSetImageAdjustments(adjustments.copy(saturation = it)) },
-						modifier = Modifier.weight(1f)
-					)
-					Box(
-						Modifier.weight(1f).fillMaxHeight().border(1.dp, FlightLine)
-							.clickable { onSetImageAdjustments(FlightPhotoImageAdjustments()) },
-						contentAlignment = Alignment.Center
-					) {
-						Text("RÉINITIALISER L’IMAGE", color = FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-					}
-				}
+	}
+}
+
+@Composable
+internal fun FlightPhotoAdjustmentControls(
+	photo: FlightPhotoAttachment,
+	onSetImageAdjustments: (FlightPhotoImageAdjustments) -> Unit,
+	modifier: Modifier = Modifier
+) {
+	Column(modifier.fillMaxWidth().background(FlightPanelStrong).padding(horizontal = 8.dp, vertical = 6.dp)) {
+		val adjustments = photo.imageAdjustments.clamped()
+		PhotoAdjustmentRow(
+			firstLabel = stringResource(R.string.flight_photo_adjust_brightness),
+			firstValue = adjustments.brightness,
+			onFirstChange = { onSetImageAdjustments(adjustments.copy(brightness = it)) },
+			secondLabel = stringResource(R.string.flight_photo_adjust_contrast),
+			secondValue = adjustments.contrast,
+			onSecondChange = { onSetImageAdjustments(adjustments.copy(contrast = it)) }
+		)
+		PhotoAdjustmentRow(
+			firstLabel = stringResource(R.string.flight_photo_adjust_temperature),
+			firstValue = adjustments.temperature,
+			onFirstChange = { onSetImageAdjustments(adjustments.copy(temperature = it)) },
+			secondLabel = stringResource(R.string.flight_photo_adjust_tint),
+			secondValue = adjustments.tint,
+			onSecondChange = { onSetImageAdjustments(adjustments.copy(tint = it)) }
+		)
+		Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+			CompactPhotoAdjustment(
+				label = stringResource(R.string.flight_photo_adjust_saturation),
+				value = adjustments.saturation,
+				onChange = { onSetImageAdjustments(adjustments.copy(saturation = it)) },
+				modifier = Modifier.weight(1f)
+			)
+			Box(
+				Modifier.weight(1f).fillMaxHeight().border(1.dp, FlightLine)
+					.clickable { onSetImageAdjustments(FlightPhotoImageAdjustments()) },
+				contentAlignment = Alignment.Center
+			) {
+				Text(stringResource(R.string.flight_photo_adjust_reset), color = FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
 			}
 		}
 	}
