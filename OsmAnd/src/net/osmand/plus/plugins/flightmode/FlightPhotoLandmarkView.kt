@@ -6,6 +6,7 @@ import android.view.*
 import kotlin.math.*
 import kotlinx.coroutines.*
 import net.osmand.plus.OsmandApplication
+import net.osmand.util.PhotoLandmarkGeometry
 
 /** Isolated top-down map / full-image picker. It never takes over OsmAnd's main map. */
 class FlightPhotoLandmarkView(context: Context) : View(context) {
@@ -13,6 +14,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         outlineProvider = ViewOutlineProvider.BOUNDS
         clipToOutline = true
     }
+
     var onImagePoint: (Double, Double) -> Unit = { _, _ -> }
     var onMapPoint: (Double, Double) -> Unit = { _, _ -> }
     var onRotation: (Float) -> Unit = {}
@@ -24,9 +26,11 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             field = value
             invalidate()
         }
+
     var routeOverview: Boolean = false
     var autoFitRoute: Boolean = false
     var gesturesEnabled: Boolean = true
+    var mapRotationEnabled: Boolean = false
     var routePaddingKm: Double = 0.0
     var onStatus: (String) -> Unit = {}
     private var image: Bitmap? = null
@@ -43,6 +47,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     private var imagePanX = 0f
     private var imagePanY = 0f
     private var rotation = 0f
+    private var mapRotation = 0.0
     private var touchActive = false
     private var multiTouch = false
     private var moved = 0f
@@ -64,8 +69,17 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                 else ColorMatrixColorFilter(FlightPhotoColorMatrix.values(safe))
             invalidate()
         }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val mapPoses = mutableMapOf<Int, Triple<Double, Double, Double>>()
+
+    private data class MapPose(
+        val latitude: Double,
+        val longitude: Double,
+        val zoom: Double,
+        val rotation: Double,
+    )
+
+    private val mapPoses = mutableMapOf<Int, MapPose>()
     private var trackSamples: List<FlightSample> = emptyList()
     private val runningTiles = mutableMapOf<String, Job>()
     private var wantedTiles: List<Pair<Boolean, TerrainTileId>> = emptyList()
@@ -85,8 +99,15 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         track: FlightTrip?,
         useSatellite: Boolean,
     ) {
-        val changed = image !== bitmap || calibration != data || selected != index || mode != newMode ||
-            reference != original || estimated != result || trip !== track || satellite != useSatellite
+        val changed =
+            image !== bitmap ||
+                calibration != data ||
+                selected != index ||
+                mode != newMode ||
+                reference != original ||
+                estimated != result ||
+                trip !== track ||
+                satellite != useSatellite
         val routeChanged = routeOverview && data.points != calibration.points
         image = bitmap
         calibration = data
@@ -102,14 +123,15 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             trip = track
         }
         if (mode != newMode) {
-            if (mode > 0) mapPoses[mode] = Triple(latitude, longitude, zoom)
+            if (mode > 0) mapPoses[mode] = MapPose(latitude, longitude, zoom, mapRotation)
             mode = newMode
             if (mode > 0) {
                 val saved = mapPoses[mode]
                 if (saved != null) {
-                    latitude = saved.first
-                    longitude = saved.second
-                    zoom = saved.third
+                    latitude = saved.latitude
+                    longitude = saved.longitude
+                    zoom = saved.zoom
+                    mapRotation = saved.rotation
                 } else fit()
                 requestedKey = ""
             }
@@ -120,14 +142,23 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             requestedKey = ""
         }
         if (routeChanged && autoFitRoute) fit()
-        if (changed) {
-            if (mode != 0) requestTiles()
-            invalidate()
-        }
+        // A retained hidden pane may become visible with exactly the same calibration data.
+        if (mode > 0 && visibility == VISIBLE) requestTiles()
+        if (changed) invalidate()
     }
 
     fun fit() {
+        if (mode == 0) {
+            imageScale = 1f
+            imagePanX = 0f
+            imagePanY = 0f
+            rotation = 0f
+            onRotation(0f)
+            invalidate()
+            return
+        }
         val ref = reference ?: return
+        mapRotation = 0.0
         failedUntil.clear()
         requestedKey = "" // Reframe is also an explicit retry of missing map tiles.
         if (routeOverview) {
@@ -184,17 +215,24 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             longitude = point?.longitude ?: ref.eyeLongitude
             zoom = 14.0
         }
-        mapPoses[mode] = Triple(latitude, longitude, zoom)
+        mapPoses[mode] = MapPose(latitude, longitude, zoom, mapRotation)
         requestTiles()
         invalidate()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        if (oldw == 0 && mode != 0) fit()
+        if (oldw == 0 && mode > 0) fit()
+        if (mode > 0) requestTiles()
+    }
+
+    fun resetMapNorth() {
+        mapRotation = 0.0
+        requestTiles()
+        invalidate()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!gesturesEnabled) return false
+        if (!gesturesEnabled || visibility != VISIBLE) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
@@ -257,26 +295,31 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                     rotation = normalize(rotation + Math.toDegrees(delta.toDouble())).toFloat()
                 } else {
                     val oldSize = 256 * 2.0.pow(zoom)
+                    val oldRotation = mapRotation
                     zoom =
                         (zoom + log2(factor.toDouble())).coerceIn(
                             if (routeOverview) 1.0 else 3.0,
                             23.0,
                         )
                     val newSize = 256 * 2.0.pow(zoom)
-                    longitude =
-                        normalize(
-                            longitude +
-                                360 *
-                                    ((pointerX - width / 2f) / oldSize - (x - width / 2f) / newSize)
+                    if (mapRotationEnabled)
+                        mapRotation = normalize(mapRotation + Math.toDegrees(delta.toDouble()))
+                    val center =
+                        PhotoLandmarkGeometry.transformMapCenter(
+                            longitude / 360,
+                            FlightTerrainTilePlanner.latitudeToTileY(latitude, 0),
+                            (pointerX - width / 2f).toDouble(),
+                            (pointerY - height / 2f).toDouble(),
+                            (x - width / 2f).toDouble(),
+                            (y - height / 2f).toDouble(),
+                            oldSize,
+                            newSize,
+                            oldRotation,
+                            mapRotation,
                         )
+                    longitude = normalize(center[0] * 360)
                     latitude =
-                        FlightTerrainTilePlanner.tileYToLatitude(
-                                FlightTerrainTilePlanner.latitudeToTileY(latitude, 0) +
-                                    (pointerY - height / 2f) / oldSize -
-                                    (y - height / 2f) / newSize,
-                                0,
-                            )
-                            .coerceIn(-85.0, 85.0)
+                        FlightTerrainTilePlanner.tileYToLatitude(center[1], 0).coerceIn(-85.0, 85.0)
                     requestTiles()
                 }
                 pointerX = x
@@ -351,14 +394,21 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             if (u in 0.0..1.0 && v in 0.0..1.0) onImagePoint(u, v)
         } else if (mode == 1) {
             val size = 256 * 2.0.pow(zoom)
+            val at =
+                PhotoLandmarkGeometry.rotate(
+                    (x - width / 2f).toDouble(),
+                    (y - height / 2f).toDouble(),
+                    0.0,
+                    0.0,
+                    -mapRotation,
+                )
             onMapPoint(
                 FlightTerrainTilePlanner.tileYToLatitude(
-                        FlightTerrainTilePlanner.latitudeToTileY(latitude, 0) +
-                            (y - height / 2f) / size,
+                        FlightTerrainTilePlanner.latitudeToTileY(latitude, 0) + at[1] / size,
                         0,
                     )
                     .coerceIn(-85.0, 85.0),
-                normalize(longitude + (x - width / 2f) / size * 360),
+                normalize(longitude + at[0] / size * 360),
             )
         }
     }
@@ -387,32 +437,47 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             val rect = imageRect()
             canvas.save()
             canvas.rotate(rotation, rect.centerX(), rect.centerY())
-            image?.let {
-                canvas.drawBitmap(it, null, rect, imagePaint)
-            }
+            image?.let { canvas.drawBitmap(it, null, rect, imagePaint) }
+            canvas.restore()
             calibration.points.forEachIndexed { i, p ->
-                if (p.x != null && p.y != null && !(i == selected && placementPreview != null))
+                if (p.x != null && p.y != null && !(i == selected && placementPreview != null)) {
+                    val at =
+                        PhotoLandmarkGeometry.rotate(
+                            rect.left + p.x * rect.width(),
+                            rect.top + p.y * rect.height(),
+                            rect.centerX().toDouble(),
+                            rect.centerY().toDouble(),
+                            rotation.toDouble(),
+                        )
                     mark(
                         canvas,
-                        rect.left + p.x.toFloat() * rect.width(),
-                        rect.top + p.y.toFloat() * rect.height(),
+                        at[0].toFloat(),
+                        at[1].toFloat(),
                         i + 1,
                         if (i == selected) Color.YELLOW else Color.CYAN,
                     )
+                }
             }
-            canvas.restore()
         } else drawMap(canvas)
         placementPreview?.let { mark(canvas, it.x, it.y, selected + 1, Color.YELLOW) }
         canvas.restoreToCount(viewportSave)
     }
 
     private fun drawMap(canvas: Canvas) {
+        val rotatedSave = canvas.save()
+        canvas.rotate(mapRotation.toFloat(), width / 2f, height / 2f)
+        val bounds =
+            PhotoLandmarkGeometry.mapViewportHalfExtents(
+                width.toDouble(),
+                height.toDouble(),
+                mapRotation,
+            )
         val z = floor(zoom).toInt().coerceIn(3, if (satellite) 14 else 18)
         val tileSize = (256 * 2.0.pow(zoom - z)).toFloat()
         val cx = FlightTerrainTilePlanner.longitudeToTileX(longitude, z)
         val cy = FlightTerrainTilePlanner.latitudeToTileY(latitude, z)
-        val rx = ceil(width / tileSize / 2).toInt() + 1
-        val ry = ceil(height / tileSize / 2).toInt() + 1
+        val rx = ceil(bounds[0] / tileSize).toInt() + 1
+        val ry = ceil(bounds[1] / tileSize).toInt() + 1
         for (dy in -ry..ry) for (dx in -rx..rx) {
             val x = floor(cx).toInt() + dx
             val y = floor(cy).toInt() + dy
@@ -432,22 +497,31 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         val coverageLayer =
             if (coverage.isNotEmpty())
                 canvas.saveLayer(
-                    0f,
-                    0f,
-                    width.toFloat(),
-                    height.toFloat(),
+                    width / 2f - bounds[0].toFloat(),
+                    height / 2f - bounds[1].toFloat(),
+                    width / 2f + bounds[0].toFloat(),
+                    height / 2f + bounds[1].toFloat(),
                     Paint().apply { alpha = 128 },
                 )
             else null
         coverage.forEach { (id, color) ->
-            // Mercator tile coordinates are already projected. Avoid inverse + forward trig per cell.
+            // Mercator tile coordinates are already projected. Avoid inverse + forward trig per
+            // cell.
             val size = (256 * 2.0.pow(zoom - id.zoom)).toFloat()
             val n = (1 shl id.zoom).toDouble()
             val dx = id.x - FlightTerrainTilePlanner.longitudeToTileX(longitude, id.zoom)
-            val wrappedDx = dx - kotlin.math.floor(dx/n + 0.5)*n
-            val x = width/2f + (wrappedDx*size).toFloat()
-            val y = height/2f + ((id.y-FlightTerrainTilePlanner.latitudeToTileY(latitude,id.zoom))*size).toFloat()
-            if (x + size >= 0 && x <= width && y + size >= 0 && y <= height) {
+            val wrappedDx = dx - kotlin.math.floor(dx / n + 0.5) * n
+            val x = width / 2f + (wrappedDx * size).toFloat()
+            val y =
+                height / 2f +
+                    ((id.y - FlightTerrainTilePlanner.latitudeToTileY(latitude, id.zoom)) * size)
+                        .toFloat()
+            if (
+                x + size >= width / 2 - bounds[0] &&
+                    x <= width / 2 + bounds[0] &&
+                    y + size >= height / 2 - bounds[1] &&
+                    y <= height / 2 + bounds[1]
+            ) {
                 paint.color = color or 0xFF000000.toInt()
                 canvas.drawRect(x, y, x + size, y + size, paint)
             }
@@ -462,24 +536,26 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         paint.style = Paint.Style.STROKE
         canvas.drawPath(path, paint)
         paint.style = Paint.Style.FILL
+        canvas.restoreToCount(rotatedSave)
+        // Labels, selection rings and scale stay upright; only their ground positions rotate.
         calibration.points.forEachIndexed { i, p ->
             if (
                 p.latitude != null &&
                     p.longitude != null &&
                     !(i == selected && placementPreview != null)
             ) {
-                val at = project(p.latitude, p.longitude)
+                val at = projectOnScreen(p.latitude, p.longitude)
                 mark(canvas, at.x, at.y, i + 1, if (i == selected) Color.YELLOW else Color.CYAN)
             }
         }
         if (mode == 2)
             reference?.let {
-                val p = project(it.eyeLatitude, it.eyeLongitude)
+                val p = projectOnScreen(it.eyeLatitude, it.eyeLongitude)
                 mark(canvas, p.x, p.y, 0, Color.rgb(255, 140, 55))
             }
         if (mode == 2)
             estimated?.let {
-                val p = project(it.eyeLatitude, it.eyeLongitude)
+                val p = projectOnScreen(it.eyeLatitude, it.eyeLongitude)
                 mark(canvas, p.x, p.y, 0, Color.rgb(190, 100, 255))
             }
         val metres =
@@ -499,12 +575,25 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     private fun project(lat: Double, lon: Double): PointF {
         val size = 256 * 2.0.pow(zoom)
         return PointF(
-            (width / 2 + normalize(lon - longitude) / 360 * size).toFloat(),
-            (height / 2 +
+            (width / 2.0 + normalize(lon - longitude) / 360 * size).toFloat(),
+            (height / 2.0 +
                     (FlightTerrainTilePlanner.latitudeToTileY(lat, 0) -
                         FlightTerrainTilePlanner.latitudeToTileY(latitude, 0)) * size)
                 .toFloat(),
         )
+    }
+
+    private fun projectOnScreen(lat: Double, lon: Double): PointF {
+        val p = project(lat, lon)
+        val rotated =
+            PhotoLandmarkGeometry.rotate(
+                p.x.toDouble(),
+                p.y.toDouble(),
+                width / 2.0,
+                height / 2.0,
+                mapRotation,
+            )
+        return PointF(rotated[0].toFloat(), rotated[1].toFloat())
     }
 
     private fun mark(canvas: Canvas, x: Float, y: Float, label: Int, color: Int) {
@@ -542,7 +631,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     private fun requestTiles() {
-        if (mode == 0 || width == 0 || released || tilesFramePending) return
+        if (mode <= 0 || width == 0 || released || tilesFramePending) return
         tilesFramePending = true
         postOnAnimation {
             tilesFramePending = false
@@ -551,14 +640,20 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     private fun planTiles() {
-        if (mode == 0 || width == 0 || released || !attached) return
+        if (mode <= 0 || width == 0 || released || !attached || visibility != VISIBLE) return
         val z = floor(zoom).toInt().coerceIn(3, if (satellite) 14 else 18)
         val cx = floor(FlightTerrainTilePlanner.longitudeToTileX(longitude, z)).toInt()
         val cy = floor(FlightTerrainTilePlanner.latitudeToTileY(latitude, z)).toInt()
         val n = 1 shl z
         val tileSize = 256 * 2.0.pow(zoom - z)
-        val rx = ceil(width / tileSize / 2).toInt() + 1
-        val ry = ceil(height / tileSize / 2).toInt() + 1
+        val bounds =
+            PhotoLandmarkGeometry.mapViewportHalfExtents(
+                width.toDouble(),
+                height.toDouble(),
+                mapRotation,
+            )
+        val rx = ceil(bounds[0] / tileSize).toInt() + 1
+        val ry = ceil(bounds[1] / tileSize).toInt() + 1
         val next = "$satellite/$z/$cx/$cy/$rx/$ry"
         if (next == requestedKey) {
             pumpTiles()
@@ -586,7 +681,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     private fun pumpTiles() {
-        if (released || !attached || visibility != VISIBLE || mode == 0) return
+        if (released || !attached || visibility != VISIBLE || mode <= 0) return
         val now = android.os.SystemClock.elapsedRealtime()
         for ((source, id) in wantedTiles) {
             if (runningTiles.size >= if (satellite) 3 else 1) break

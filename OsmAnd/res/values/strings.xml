@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_cal_landmarks">Repères</string>
+    <string name="flight_cal_photo_pane">Photo</string>
+    <string name="flight_cal_map_pane">Carte satellite</string>
+    <string name="flight_cal_add_pair">+ Repère</string>
+    <string name="flight_cal_place_or_move">Placer/déplacer</string>
+    <string name="flight_cal_pair_state">%1$d P%2$s C%3$s</string>
+    <string name="flight_cal_solve_compact">Calculer · %1$d</string>
+    <string name="flight_cal_info_compact">Infos</string>
+    <string name="flight_cal_north">Nord ↑</string>
     <string name="flight_library_journal">Journal</string>
     <string name="flight_library_selected">Ouvert sur ce téléphone</string>
     <string name="flight_library_resume">Reprendre ce vol</string>

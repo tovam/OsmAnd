@@ -101,13 +101,36 @@ cases with network disabled, an unexpired/expired edit lease and two independent
   monotonic timestamps are retained separately. These are not guaranteed to be
   simultaneous with the physical exposure; missing readings remain missing.
 
-## Photo editor visibility
+## Photo editor and paired landmarks
 
 The native Canvas view previously had no explicit clip and could draw outside
 its measured rectangle over the Compose toolbar. It is now clipped in Canvas,
 with a bounds outline, and at the Compose viewport. The toolbar is outside that
 viewport. Selection is through numbered buttons, not hit-testing photo markers.
-The photo and map keep their separate transforms when switching tabs.
+The single **Repères** tab shows two independent native viewports simultaneously: photo above,
+satellite map below, with equal weights in the remaining space. Both stay mounted behind Retouch,
+Compare and Details, retaining their cameras. Comparison has its own camera. Decoded satellite
+tiles are shared through `FlightPhotoTileCache`; ordinary edits never clear that cache.
+
+Four compact, single-line toolbar rows replace the old wrapping controls and instructional footer.
+Actions have a 28 dp minimum height (growing if font scaling needs it). The numbered pair list is lazy
+and horizontally scrollable, so adding many pairs does not create a large vertical panel. P/C marks
+show whether the photo pixel and map position are set. Calculation stays disabled until four complete
+pairs, the image, a track association and a known reference altitude are available. Missing prerequisites
+and load errors remain accessible through **Infos**, not a permanent paragraph over the canvases.
+
+- **+ Repère** creates/selects one empty pair. Taps can fill either half in either order.
+- Selecting a numbered button selects that pair for placement/movement on both canvases.
+- A tap in placement mode updates only the selected pair; canvas taps never select or add markers.
+- One finger pans, two fingers pan/pinch/rotate, including while placing points. A drag cannot place
+  a point accidentally. **Explorer** disables placement; **Placer/déplacer** re-enables it.
+- **Supprimer** removes the selected pair. **Tout effacer** requires confirmation.
+- Photo rotation is display-only: canonical pixel coordinates and existing fits are unchanged.
+- Satellite rotation transforms tiles, the track and control points consistently. Inverse picking
+  and gesture anchoring use the same rotation; the tile planner covers all rotated viewport corners.
+  Labels stay upright. **Nord** resets bearing only; **Recadrer** resets that pane's framing.
+- Back from Retouch, Compare, Hublot or Details returns to the unified landmark workspace, then
+  Back closes the editor. No removed map-only editing page remains in the back stack.
 
 ## Map geometry
 
@@ -183,7 +206,10 @@ Device acceptance must verify:
 
 1. With an eight-point synthetic photo, the complete toolbar stays visible while
    panning, rotating and zooming; numbered selection, move, delete and clear work.
-2. Switching Photo/Satellite and returning preserves map location and zoom.
+2. Photo above and satellite below remain simultaneously visible and equally sized. Rotating and
+   zooming either pane does not affect the other. Switching Retouch/Compare and returning preserves
+   both views. Place a pair in either order; after rotating the map, picking a visible landmark still
+   returns that landmark's ground coordinates. Check at normal and enlarged Android font sizes.
 3. A synthetic elevated track shows the black connecting path with GPS points
    both enabled and disabled, from above and with a tilted camera.
 4. Locked map centre does not move during pan/pinch/rotate/tilt; zoom and angles

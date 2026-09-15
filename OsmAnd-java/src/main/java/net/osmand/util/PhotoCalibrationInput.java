@@ -7,15 +7,14 @@ public final class PhotoCalibrationInput {
 	public enum Readiness { READY, IMAGE_MISSING, ASSOCIATION_MISSING, ALTITUDE_MISSING, PAIRS_MISSING }
 	public enum Action { EXPLORE, ADD, MOVE }
 
-	/** Canvas taps never select a marker. Only the toolbar determines the edited slot. */
-	public static int placementIndex(Action action, int selected, int count, boolean photo) {
-		if (action == Action.ADD && photo) return count;
-		if (action == Action.MOVE && selected >= 0 && selected < count) return selected;
+	/** Add creates a pair in the toolbar; either canvas then fills that explicitly selected pair. */
+	public static int placementIndex(Action action, int selected, int count) {
+		if ((action == Action.ADD || action == Action.MOVE) && selected >= 0 && selected < count) return selected;
 		return -1;
 	}
 
 	public static int backTab(int tab) {
-		return tab == 0 ? -1 : tab == 1 ? 0 : 1;
+		return tab == 0 ? -1 : 0;
 	}
 
 	public static Readiness readiness(boolean imageLoaded, boolean associated,

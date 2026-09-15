@@ -1,10 +1,13 @@
 package net.osmand.plus.plugins.flightmode
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -15,10 +18,11 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,7 +45,6 @@ private enum class PhotoAssociationAction {
 
 /** All calibration exploration is local to this modal; the journal replay cursor is untouched. */
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
 internal fun FlightPhotoEditor(
     photo: FlightPhotoAttachment,
     state: FlightUiState,
@@ -63,6 +66,7 @@ internal fun FlightPhotoEditor(
     DisposableEffect(repository) { onDispose { repository.close() } }
     var data by remember(photo.id) { mutableStateOf(photo.calibration) }
     var selected by remember(photo.id) { mutableStateOf(-1) }
+    val pointListState = key(photo.id) { rememberLazyListState() }
     var action by remember(photo.id) { mutableStateOf(Action.EXPLORE) }
     var clearAllConfirmation by remember(photo.id) { mutableStateOf(false) }
     var associationAction by remember(photo.id) { mutableStateOf<PhotoAssociationAction?>(null) }
@@ -72,12 +76,16 @@ internal fun FlightPhotoEditor(
     var solveJob by remember { mutableStateOf<Job?>(null) }
     var solveProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var showDiagnostics by remember(photo.id) { mutableStateOf(false) }
+    var showCalculationInfo by remember(photo.id) { mutableStateOf(false) }
     var satellite by remember { mutableStateOf(true) }
     var opacity by remember { mutableStateOf(data.editorView.opacity) }
     var cameraMode by remember { mutableStateOf(data.editorView.mode) }
     var yaw by remember { mutableStateOf(data.editorView.yaw) }
     var pitch by remember { mutableStateOf(data.editorView.pitch) }
     var zoom by remember { mutableStateOf(data.editorView.zoom) }
+    LaunchedEffect(photo.id, selected) {
+        if (selected in data.points.indices) pointListState.animateScrollToItem(selected)
+    }
     // A confirmation must not silently apply to a different replay position.
     LaunchedEffect(state.replayProgress, photo.matchedSamplePosition) {
         if (associationAction != null) {
@@ -85,8 +93,17 @@ internal fun FlightPhotoEditor(
             status = context.getString(R.string.flight_cal_association_target_changed)
         }
     }
+    // Separate, stable viewports: editing a pair never replaces either canvas or its camera.
+    val photoView = remember(context, photo.id) { FlightPhotoLandmarkView(context) }
     val mapView = remember(context, photo.id) { FlightPhotoLandmarkView(context) }
-    DisposableEffect(mapView) { onDispose { mapView.release() } }
+    val comparisonView = remember(context, photo.id) { FlightPhotoLandmarkView(context) }
+    DisposableEffect(photoView, mapView, comparisonView) {
+        onDispose {
+            photoView.release()
+            mapView.release()
+            comparisonView.release()
+        }
+    }
     var imageLoading by remember(photo.localPath) { mutableStateOf(true) }
     val bitmap by
         produceState<android.graphics.Bitmap?>(null, photo.localPath) {
@@ -103,25 +120,22 @@ internal fun FlightPhotoEditor(
         onSave(next)
     }
     fun placePoint(mode: Int, update: (FlightPhotoControlPoint) -> FlightPhotoControlPoint) {
-        if (tab != mode) return
-        val edited =
-            PhotoCalibrationInput.placementIndex(action, selected, data.points.size, mode == 0)
+        if (tab != 0 || mode !in 0..1) return
+        val edited = PhotoCalibrationInput.placementIndex(action, selected, data.points.size)
         if (edited < 0) return
-        val points =
-            if (edited == data.points.size) data.points + FlightPhotoControlPoint() else data.points
         val next =
             data.copy(
                 points =
-                    points.mapIndexed { i, point -> if (i == edited) update(point) else point },
+                    data.points.mapIndexed { i, point ->
+                        if (i == edited) update(point) else point
+                    },
                 fit = null,
             )
         save(next)
         selected = edited
-        if (action == Action.MOVE) action = Action.EXPLORE
     }
     fun changeTab(next: Int) {
         action = Action.EXPLORE
-        if (next == 1) satellite = true
         tab = next
     }
     LaunchedEffect(bitmap) {
@@ -220,34 +234,33 @@ internal fun FlightPhotoEditor(
                 }
             },
         )
-    val photoPointCount = data.points.count { it.x != null && it.y != null }
     @Composable
-    fun CalculationActions() {
+    fun CalculationActions(compact: Boolean = false) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            if (compact) Modifier else Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(
-                data.fitFocal,
-                { save(data.copy(fitFocal = it, fit = null)) },
-                modifier = Modifier.size(36.dp),
-            )
-            Text(
-                stringResource(R.string.flight_cal_fit_focal),
-                fontSize = 10.sp,
-                color = Color.LightGray,
-                modifier = Modifier.weight(1f),
-            )
+            if (!compact) {
+                Checkbox(
+                    data.fitFocal,
+                    { save(data.copy(fitFocal = it, fit = null)) },
+                    modifier = Modifier.size(36.dp),
+                )
+                Text(
+                    stringResource(R.string.flight_cal_fit_focal),
+                    fontSize = 10.sp,
+                    color = Color.LightGray,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             EditorAction(
                 if (busy) stringResource(R.string.flight_cal_cancel)
-                else if (tab == 0) stringResource(R.string.flight_cal_continue_map, photoPointCount)
+                else if (compact) stringResource(R.string.flight_cal_solve_compact, ready)
                 else stringResource(R.string.flight_cal_solve, ready),
                 {
                     if (busy) {
                         solveJob?.cancel()
                         busy = false
-                    } else if (tab == 0) {
-                        changeTab(1)
                     } else if (canCalculate && reference != null) {
                         val submitted = data
                         busy = true
@@ -294,10 +307,15 @@ internal fun FlightPhotoEditor(
                             }
                     }
                 },
-                enabled = busy || if (tab == 0) photoPointCount >= 4 else canCalculate,
+                enabled = busy || canCalculate,
             )
+            if (compact && (status.isNotBlank() || !canCalculate))
+                EditorAction(
+                    stringResource(R.string.flight_cal_info_compact),
+                    { showCalculationInfo = true },
+                )
         }
-        if (busy) {
+        if (busy && !compact) {
             Text(
                 solveProgress?.let { (completed, total) ->
                     stringResource(R.string.flight_cal_diagnostics_progress, completed, total)
@@ -310,7 +328,7 @@ internal fun FlightPhotoEditor(
     }
     Dialog(
         onDismissRequest = {
-            val previous = if (tab == 5) 0 else PhotoCalibrationInput.backTab(tab)
+            val previous = PhotoCalibrationInput.backTab(tab)
             if (previous < 0) onClose() else changeTab(previous)
         },
         properties =
@@ -335,12 +353,11 @@ internal fun FlightPhotoEditor(
                 )
                 EditorAction(stringResource(R.string.flight_mode_close), onClose)
             }
-            FlightStorageStatusStrip(state, compact = true)
+            if (tab == 4) FlightStorageStatusStrip(state, compact = true)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 listOf(
-                        0 to R.string.flight_cal_photo,
+                        0 to R.string.flight_cal_landmarks,
                         5 to R.string.flight_photo_adjust_tab,
-                        1 to R.string.flight_cal_map,
                         2 to R.string.flight_cal_compare,
                         3 to R.string.flight_cal_window,
                         4 to R.string.flight_mode_photo_details,
@@ -349,27 +366,29 @@ internal fun FlightPhotoEditor(
                         EditorAction(stringResource(res), { changeTab(i) }, tab == i)
                     }
             }
-            if (tab <= 1) {
-                FlowRow(Modifier.fillMaxWidth()) {
+            if (tab == 0) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     EditorAction(
                         stringResource(R.string.flight_cal_explore),
                         { action = Action.EXPLORE },
                         action == Action.EXPLORE,
                     )
                     EditorAction(
-                        stringResource(R.string.flight_cal_add),
+                        stringResource(R.string.flight_cal_add_pair),
                         {
-                            tab = 0
+                            selected = data.points.size
+                            save(
+                                data.copy(
+                                    points = data.points + FlightPhotoControlPoint(),
+                                    fit = null,
+                                )
+                            )
                             action = Action.ADD
                         },
                         selected = action == Action.ADD,
                     )
                     EditorAction(
-                        stringResource(
-                            if (tab == 1 && data.points.getOrNull(selected)?.latitude == null)
-                                R.string.flight_cal_place
-                            else R.string.flight_cal_edit
-                        ),
+                        stringResource(R.string.flight_cal_place_or_move),
                         { action = Action.MOVE },
                         selected = action == Action.MOVE,
                         enabled = selected in data.points.indices,
@@ -393,42 +412,45 @@ internal fun FlightPhotoEditor(
                         { clearAllConfirmation = true },
                         enabled = data.points.isNotEmpty(),
                     )
-                    if (tab == 0)
-                        EditorAction(
-                            stringResource(R.string.flight_cal_rotation_reset),
-                            { save(data.copy(pickerRotation = 0f)) },
-                        )
                 }
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    data.points.forEachIndexed { i, p ->
-                        EditorAction(
-                            "${i+1} ${if (if (tab == 0) p.x != null else p.latitude != null) "✓" else "·"}",
-                            {
-                                selected = i
-                                action = Action.EXPLORE
-                            },
-                            selected == i,
-                        )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    LazyRow(Modifier.weight(1f), state = pointListState) {
+                        itemsIndexed(data.points) { i, p ->
+                            EditorAction(
+                                stringResource(
+                                    R.string.flight_cal_pair_state,
+                                    i + 1,
+                                    if (p.x != null && p.y != null) "✓" else "·",
+                                    if (p.latitude != null && p.longitude != null) "✓" else "·",
+                                ),
+                                {
+                                    selected = i
+                                    action = Action.MOVE
+                                },
+                                selected == i,
+                            )
+                        }
                     }
+                    CalculationActions(compact = true)
                 }
             }
-            if (tab == 1 || tab == 2) {
+            if (tab == 2) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     EditorAction(
                         stringResource(R.string.flight_cal_satellite),
                         { satellite = true },
                         satellite,
                     )
-                    if (tab == 2)
-                        EditorAction(
-                            stringResource(R.string.flight_cal_osmand),
-                            { satellite = false },
-                            !satellite,
-                        )
-                    EditorAction(stringResource(R.string.flight_cal_fit), { mapView.fit() })
+                    EditorAction(
+                        stringResource(R.string.flight_cal_osmand),
+                        { satellite = false },
+                        !satellite,
+                    )
+                    EditorAction(stringResource(R.string.flight_cal_fit), { comparisonView.fit() })
+                    EditorAction(
+                        stringResource(R.string.flight_cal_north),
+                        { comparisonView.resetMapNorth() },
+                    )
                 }
             }
             if (tab == 3) {
@@ -453,33 +475,106 @@ internal fun FlightPhotoEditor(
                         }
                 }
             }
-            if (tab <= 1) CalculationActions()
             Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                // Keep both panes mounted behind the other tabs to preserve framing and tile work.
+                Column(Modifier.fillMaxSize()) {
+                    Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                        AndroidView(
+                            factory = { photoView },
+                            modifier = Modifier.fillMaxSize().clipToBounds(),
+                            update = { v ->
+                                v.visibility =
+                                    if (tab == 0) android.view.View.VISIBLE
+                                    else android.view.View.INVISIBLE
+                                v.dragToPlace =
+                                    false // A drag always explores; placing is an explicit toolbar
+                                // mode + tap.
+                                v.onImagePoint = { x, y -> placePoint(0) { it.copy(x = x, y = y) } }
+                                v.onRotation = {
+                                    data = data.copy(pickerRotation = it)
+                                    currentOnSave(data)
+                                }
+                                v.imageAdjustments = photo.imageAdjustments
+                                v.update(
+                                    bitmap,
+                                    data,
+                                    selected,
+                                    0,
+                                    reference,
+                                    estimate,
+                                    state.trip,
+                                    true,
+                                )
+                            },
+                        )
+                        if (tab == 0) {
+                            LandmarkPaneBar(
+                                R.string.flight_cal_photo_pane,
+                                onFit = { photoView.fit() },
+                            )
+                            if (bitmap == null)
+                                Text(
+                                    stringResource(
+                                        if (imageLoading) R.string.flight_mode_photo_preview_loading
+                                        else R.string.flight_mode_photo_preview_unavailable
+                                    ),
+                                    color = Color.LightGray,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.align(Alignment.Center),
+                                )
+                        }
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                        AndroidView(
+                            factory = { mapView },
+                            modifier = Modifier.fillMaxSize().clipToBounds(),
+                            update = { v ->
+                                v.visibility =
+                                    if (tab == 0) android.view.View.VISIBLE
+                                    else android.view.View.INVISIBLE
+                                v.mapRotationEnabled = true
+                                v.dragToPlace = false
+                                v.onMapPoint = { lat, lon ->
+                                    placePoint(1) {
+                                        it.copy(latitude = lat, longitude = lon, altitude = null)
+                                    }
+                                }
+                                v.onStatus = { status = it }
+                                if (tab == 0)
+                                    v.update(
+                                        null,
+                                        data,
+                                        selected,
+                                        1,
+                                        reference,
+                                        estimate,
+                                        state.trip,
+                                        true,
+                                    )
+                            },
+                        )
+                        if (tab == 0)
+                            LandmarkPaneBar(
+                                R.string.flight_cal_map_pane,
+                                onFit = { mapView.fit() },
+                                onNorth = { mapView.resetMapNorth() },
+                            )
+                    }
+                }
                 AndroidView(
-                    factory = { mapView },
+                    factory = { comparisonView },
                     modifier = Modifier.fillMaxSize().clipToBounds(),
                     update = { v ->
                         v.visibility =
-                            if (tab < 3) android.view.View.VISIBLE else android.view.View.INVISIBLE
-                        if (tab < 3) {
-                            v.imageAdjustments = photo.imageAdjustments
-                            v.dragToPlace = action == Action.MOVE
-                            v.onImagePoint = { x, y -> placePoint(0) { it.copy(x = x, y = y) } }
-                            v.onMapPoint = { lat, lon ->
-                                placePoint(1) {
-                                    it.copy(latitude = lat, longitude = lon, altitude = null)
-                                }
-                            }
+                            if (tab == 2) android.view.View.VISIBLE else android.view.View.INVISIBLE
+                        if (tab == 2) {
+                            v.mapRotationEnabled = true
                             v.onStatus = { status = it }
-                            v.onRotation = {
-                                data = data.copy(pickerRotation = it)
-                                currentOnSave(data)
-                            }
                             v.update(
-                                bitmap,
+                                null,
                                 data,
                                 selected,
-                                tab,
+                                2,
                                 reference,
                                 estimate,
                                 state.trip,
@@ -491,22 +586,17 @@ internal fun FlightPhotoEditor(
                 if (tab == 5) {
                     bitmap?.let { preview ->
                         Image(
-                            preview.asImageBitmap(), photo.fileName,
-                            modifier = Modifier.fillMaxSize().graphicsLayer { rotationZ = photo.rotationDegrees },
+                            preview.asImageBitmap(),
+                            photo.fileName,
+                            modifier =
+                                Modifier.fillMaxSize().graphicsLayer {
+                                    rotationZ = photo.rotationDegrees
+                                },
                             contentScale = ContentScale.Fit,
                             colorFilter = photoColorFilter(photo.imageAdjustments),
                         )
-                    } ?: Text(
-                        stringResource(if (imageLoading) R.string.flight_mode_photo_preview_loading else R.string.flight_mode_photo_preview_unavailable),
-                        color=Color.LightGray, fontSize=12.sp, modifier=Modifier.align(Alignment.Center),
-                    )
-                } else if (tab == 4) {
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                        FlightPhotoMetadata(photo, sample, state.trip)
                     }
-                } else if (tab < 3) {
-                    if (tab == 0 && bitmap == null)
-                        Text(
+                        ?: Text(
                             stringResource(
                                 if (imageLoading) R.string.flight_mode_photo_preview_loading
                                 else R.string.flight_mode_photo_preview_unavailable
@@ -515,7 +605,11 @@ internal fun FlightPhotoEditor(
                             fontSize = 12.sp,
                             modifier = Modifier.align(Alignment.Center),
                         )
-                } else if (reference != null && state.terrainScene != null) {
+                } else if (tab == 4) {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                        FlightPhotoMetadata(photo, sample, state.trip)
+                    }
+                } else if (tab == 3 && reference != null && state.terrainScene != null) {
                     val target = if (cameraMode == 1) estimate ?: reference else reference
                     val base =
                         if (cameraMode == 2) overviewPhotoCamera(reference, estimate) else target
@@ -575,7 +669,7 @@ internal fun FlightPhotoEditor(
                         },
                         FlightPhotoInspection(camera, reference, estimate, state.trip),
                     )
-                } else
+                } else if (tab == 3)
                     Text(
                         stringResource(R.string.flight_cal_need_scene),
                         color = Color.LightGray,
@@ -662,7 +756,7 @@ internal fun FlightPhotoEditor(
                         { showDiagnostics = true },
                     )
                 }
-            if (status.isNotBlank() && tab != 5)
+            if (status.isNotBlank() && tab in 2..4)
                 Text(
                     status,
                     color = Color(0xFFFFCC66),
@@ -670,7 +764,7 @@ internal fun FlightPhotoEditor(
                     maxLines = 3,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
-            if (reference == null && tab != 5)
+            if (reference == null && tab in 2..4)
                 Text(
                     stringResource(R.string.flight_cal_need_association),
                     color = Color(0xFFFFCC66),
@@ -678,7 +772,7 @@ internal fun FlightPhotoEditor(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             if (tab in 2..4) CalculationActions()
-            if (!busy && !canCalculate && tab != 0 && tab != 5)
+            if (!busy && !canCalculate && tab in 2..4)
                 Text(
                     stringResource(
                         when (readiness) {
@@ -751,6 +845,35 @@ internal fun FlightPhotoEditor(
                     )
                 }
         }
+        if (showCalculationInfo)
+            AlertDialog(
+                onDismissRequest = { showCalculationInfo = false },
+                title = { Text(stringResource(R.string.flight_cal_solve_compact, ready)) },
+                text = {
+                    Column {
+                        if (status.isNotBlank()) Text(status)
+                        if (!canCalculate)
+                            Text(
+                                stringResource(
+                                    when (readiness) {
+                                        PhotoCalibrationInput.Readiness.IMAGE_MISSING ->
+                                            R.string.flight_cal_need_image
+                                        PhotoCalibrationInput.Readiness.ASSOCIATION_MISSING ->
+                                            R.string.flight_cal_need_association
+                                        PhotoCalibrationInput.Readiness.ALTITUDE_MISSING ->
+                                            R.string.flight_cal_need_altitude
+                                        else -> R.string.flight_cal_need_pairs
+                                    }
+                                )
+                            )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showCalculationInfo = false }) {
+                        Text(stringResource(R.string.flight_mode_close))
+                    }
+                },
+            )
         if (showDiagnostics)
             data.fit?.let { fit ->
                 FlightPhotoFitDiagnosticsScreen(
@@ -805,6 +928,32 @@ internal fun FlightPhotoEditor(
     }
 }
 
+/** Small overlaid controls don't consume either pane's half of the available canvas. */
+@Composable
+private fun BoxScope.LandmarkPaneBar(
+    labelResource: Int,
+    onFit: () -> Unit,
+    onNorth: (() -> Unit)? = null,
+) {
+    Row(
+        Modifier.fillMaxWidth().align(Alignment.TopStart),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(labelResource),
+            color = Color.White,
+            fontSize = 10.sp,
+            modifier =
+                Modifier.background(Color(0xCC0A0F13)).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        Row(Modifier.background(Color(0xCC0A0F13))) {
+            if (onNorth != null) EditorAction(stringResource(R.string.flight_cal_north), onNorth)
+            EditorAction(stringResource(R.string.flight_cal_fit), onFit)
+        }
+    }
+}
+
 @Composable
 private fun EditorAction(
     label: String,
@@ -813,16 +962,17 @@ private fun EditorAction(
     enabled: Boolean = true,
 ) {
     Box(
-        Modifier.heightIn(min = 44.dp)
-            .widthIn(min = 44.dp)
+        Modifier.heightIn(min = 28.dp)
+            .widthIn(min = 32.dp)
             .background(if (selected) Color(0xFF234656) else Color.Transparent)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 7.dp),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
-            fontSize = 10.sp,
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
             color =
                 if (!enabled) Color(0xFF6D7379)
                 else if (selected) Color.White else Color(0xFF74D8FF),
