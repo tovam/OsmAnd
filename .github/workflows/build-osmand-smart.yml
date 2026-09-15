@@ -1,5 +1,6 @@
 name: Build OsmAnd Smart APK
 run-name: "5.4.0#smart${{ github.run_number }}.${{ github.run_attempt }} — Build OsmAnd Smart APK"
+# Manual rebuild requested: 2026-09-15 13:28:19 UTC. Application sources are unchanged.
 
 on:
   workflow_dispatch:
