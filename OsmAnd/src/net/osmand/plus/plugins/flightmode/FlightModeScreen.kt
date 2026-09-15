@@ -2999,12 +2999,11 @@ private fun FlightWindowScene(
 								val horizontalFov = latestPlacement.horizontalFieldOfViewDegrees(
 									size.width.toFloat() / size.height.coerceAtLeast(1)
 								)
+								val verticalFov = latestPlacement.verticalFieldOfViewDegrees()
 								latestMoveLook(
 									-pan.x / size.width.coerceAtLeast(1) * horizontalFov,
-									0f
+									pan.y / size.height.coerceAtLeast(1) * verticalFov
 								)
-								// Change the field of view, never the eye position or the aircraft anchor.
-								if (pan.y != 0f) latestChangeZoom(kotlin.math.exp(-pan.y / size.height.coerceAtLeast(1) * 2f))
 							}
 							if (abs(zoom - 1f) > 0.002f) latestChangeZoom(zoom)
 						}

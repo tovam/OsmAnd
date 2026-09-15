@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_overview_drag_zoom">Mini-carte centrée sur l’avion. Glisse vers le haut pour zoomer, vers le bas pour dézoomer.</string>
     <string name="flight_sync_partial">Version envoyée · sélection de photos seulement</string>
     <string name="flight_sync_remove">Retirer du téléphone…</string>
     <string name="flight_sync_remove_confirm">Retirer cette copie locale et ses photos privées non partagées ? La version serveur sera vérifiée avant le retrait. Elle restera téléchargeable. Galerie, relief et satellite ne sont pas supprimés.</string>

@@ -10,18 +10,20 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.util.LruCache
+import android.view.MotionEvent
 import android.view.View
 import java.io.File
 import java.util.concurrent.Executors
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.sin
 
 /**
  * Lightweight, north-up overview for the window view. It uses only satellite
  * tiles already cached by the flight feature: opening it never starts a network
- * request. The square is centered on the aircraft and its physical side equals
- * the complete loaded track distance.
+ * request. The square stays centered on the aircraft. Its initial physical side
+ * equals the complete loaded track distance; vertical drags change only this overview's scale.
  */
 class FlightWindowOverviewView @JvmOverloads constructor(
 	context: Context,
@@ -90,10 +92,62 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	private var scanGeneration = 0
 	private var scanRunning = false
 	private var detached = false
+	private var overviewZoom = 1.0
+	private var activePointerId = NO_POINTER
+	private var lastTouchY = 0f
+	private var touchMoved = false
 
 	init {
 		setLayerType(LAYER_TYPE_SOFTWARE, null)
+		isClickable = true
+		contentDescription = context.getString(net.osmand.plus.R.string.flight_overview_drag_zoom)
 	}
+
+	// Own the entire gesture so it cannot also rotate the surrounding Hublot view or its photo.
+	override fun onTouchEvent(event: MotionEvent): Boolean {
+		when (event.actionMasked) {
+			MotionEvent.ACTION_DOWN -> {
+				activePointerId = event.getPointerId(0)
+				lastTouchY = event.y
+				touchMoved = false
+				parent?.requestDisallowInterceptTouchEvent(true)
+			}
+			MotionEvent.ACTION_MOVE -> {
+				val index = event.findPointerIndex(activePointerId)
+				if (index >= 0) {
+					val deltaY = event.getY(index) - lastTouchY
+					lastTouchY = event.getY(index)
+					if (event.pointerCount == 1 && deltaY != 0f) {
+						touchMoved = true
+						val base = baseSideMeters()
+						overviewZoom = (overviewZoom * exp(-2.0 * deltaY / height.coerceAtLeast(1)))
+							.coerceIn(base / MAXIMUM_VISIBLE_SIDE_METERS, base / MINIMUM_VISIBLE_SIDE_METERS)
+						invalidate()
+					}
+				}
+			}
+			MotionEvent.ACTION_POINTER_DOWN -> touchMoved = true
+			MotionEvent.ACTION_POINTER_UP -> {
+				// Rebase after a finger is lifted; never interpret a pointer switch as a zoom jump.
+				val remaining = if (event.actionIndex == 0) 1 else 0
+				activePointerId = event.getPointerId(remaining)
+				lastTouchY = event.getY(remaining)
+			}
+			MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+				activePointerId = NO_POINTER
+				parent?.requestDisallowInterceptTouchEvent(false)
+				if (event.actionMasked == MotionEvent.ACTION_UP && !touchMoved) performClick()
+			}
+		}
+		return true
+	}
+
+	override fun performClick(): Boolean {
+		super.performClick()
+		return true
+	}
+
+	private fun baseSideMeters(): Double = max(MINIMUM_SIDE_METERS, trip?.totalDistanceMeters ?: DEFAULT_SIDE_METERS)
 
 	fun update(
 		trip: FlightTrip?,
@@ -201,7 +255,8 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 			canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
 			return
 		}
-		val sideMeters = max(MINIMUM_SIDE_METERS, currentTrip?.totalDistanceMeters ?: DEFAULT_SIDE_METERS)
+		val sideMeters = (baseSideMeters() / overviewZoom)
+			.coerceIn(MINIMUM_VISIBLE_SIDE_METERS, MAXIMUM_VISIBLE_SIDE_METERS)
 		val pixelsPerMeter = minOf(width, height).toDouble() / sideMeters
 		val centerX = width / 2f
 		val centerY = height / 2f
@@ -346,9 +401,12 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	}
 
 	companion object {
+		private const val NO_POINTER = -1
 		private const val EARTH_RADIUS_METERS = 6_371_008.8
 		private const val MINIMUM_SIDE_METERS = 10_000.0
 		private const val DEFAULT_SIDE_METERS = 1_000_000.0
+		private const val MINIMUM_VISIBLE_SIDE_METERS = 500.0
+		private const val MAXIMUM_VISIBLE_SIDE_METERS = 20_000_000.0
 		private const val MAXIMUM_TRACK_POINTS = 1_200
 		private const val MAXIMUM_TILE_DECODE_PIXELS = 64
 		private const val BITMAP_CACHE_KIB = 32 * 1_024
