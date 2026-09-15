@@ -69,21 +69,14 @@ class FlightModeFragment : BaseFullScreenFragment() {
 
 	private val backPressedCallback = object : OnBackPressedCallback(true) {
 		override fun handleOnBackPressed() {
+			if (viewModel.uiState.loadingTrip) return
 			if (viewModel.uiState.duplicateJourneyWarning != null) {
 				viewModel.dismissDuplicateImport()
 				return
 			}
-			when (viewModel.uiState.page) {
-				FlightPage.WINDOW_SETUP -> {
-					viewModel.saveWindowPlacement()
-					viewModel.showPage(FlightPage.WINDOW)
-				}
-				FlightPage.WINDOW, FlightPage.SATELLITE, FlightPage.SENSORS, FlightPage.PHOTO,
-				FlightPage.LIVE -> viewModel.showPage(FlightPage.MAP)
-				FlightPage.PREPARE -> viewModel.showPage(FlightPage.PLANS)
-				FlightPage.JOURNEYS, FlightPage.PLANS, FlightPage.MAP -> viewModel.showPage(FlightPage.HOME)
-				FlightPage.HOME -> close()
-			}
+			if (viewModel.uiState.page == FlightPage.WINDOW_SETUP) viewModel.saveWindowPlacement()
+			val back = FlightWorkspaceNavigation.backPage(viewModel.uiState.page, viewModel.uiState.sessionMode)
+			if (back == null) close() else viewModel.showPage(back)
 		}
 	}
 
@@ -178,6 +171,9 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSaveJourney = viewModel::saveJourney,
 					onExportJourney = { exportJourneyLauncher.launch(viewModel.suggestedExportName()) },
 					onOpenJourney = viewModel::openJourney,
+					onConfirmJournalNavigation = viewModel::confirmJournalNavigation,
+					onCancelJournalNavigation = viewModel::cancelJournalNavigation,
+					onClearTripLoadError = viewModel::clearTripLoadError,
 					onOpenDuplicateJourney = viewModel::openDuplicateJourney,
 					onContinueDuplicateImport = viewModel::continueDuplicateImport,
 					onDismissDuplicateImport = viewModel::dismissDuplicateImport,
@@ -454,7 +450,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	}
 
 	private fun close() {
-		parentFragmentManager.popBackStack()
+		viewModel.closeWorkspace { if (isAdded) parentFragmentManager.popBackStack() }
 	}
 
 	private data class MapState(

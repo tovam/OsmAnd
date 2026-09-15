@@ -1,6 +1,7 @@
 package net.osmand.plus.plugins.flightmode
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -18,16 +19,73 @@ import net.osmand.plus.R
 internal data class FlightCloudUi(
     val controller: FlightCloudController,
     val open: (String?) -> Unit,
+    val save: () -> Unit,
 )
 
 internal val LocalFlightCloudUi = staticCompositionLocalOf<FlightCloudUi?> { null }
+
+@Composable
+internal fun FlightLibraryFilters(selected: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth()) {
+        listOf(R.string.flight_cloud_all, R.string.flight_cloud_phone, R.string.flight_cloud_server)
+            .forEachIndexed { index, label ->
+                TextButton(onClick = { onSelect(index) }) {
+                    Text(
+                        stringResource(label),
+                        color = if (selected == index) Color.White else Color.Gray,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+    }
+}
+
+@Composable
+internal fun FlightLibraryServerNotice() {
+    val cloud = LocalFlightCloudUi.current?.controller ?: return
+    if (cloud.busy)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(cloud.operation),
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = cloud::cancel) {
+                Text(stringResource(R.string.shared_string_cancel), fontSize = 11.sp)
+            }
+        }
+    cloud.message?.let { message ->
+        Text(
+            message,
+            color = if (cloud.messageIsError) Color(0xFFFFCC66) else Color(0xFF88DEBF),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+        )
+    }
+    if (cloud.connection != null && !cloud.serverVerified && !cloud.busy) {
+        Text(
+            stringResource(R.string.flight_library_server_offline),
+            color = Color(0xFFFFCC66),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+        )
+    }
+}
 
 internal fun flightLibraryRows(
     local: List<FlightJourneySummary>,
     cloud: FlightCloudController?,
     planned: Boolean,
 ): List<FlightLibraryRow> {
-    return flightCloudRows(local, cloud?.remote.orEmpty(), cloud?.bindings.orEmpty())
+    return flightCloudRows(
+            cloud?.local ?: local,
+            cloud?.remote.orEmpty(),
+            cloud?.bindings.orEmpty(),
+        )
         .filter { ((it.local?.sampleCount ?: it.remote!!.samples) == 0) == planned }
         .sortedByDescending { it.local?.updatedAtMillis ?: it.remote!!.updatedAt }
 }
@@ -57,10 +115,24 @@ internal fun FlightCloudListRow(
 ) {
     val cloud = LocalFlightCloudUi.current?.controller
     val dirty = state.journeyId == row.local?.id && state.journeyDirty
+    val selected = row.local?.id != null && state.journeyId == row.local.id
+    val canOpen =
+        row.canOpenLocal(state, row.local != null && cloud?.removingLocalId == row.local.id)
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Text(row.name, color = Color.White, fontSize = 15.sp)
+        Text(
+            row.name,
+            color = Color.White,
+            fontSize = 15.sp,
+            modifier =
+                Modifier.fillMaxWidth()
+                    .clickable(enabled = canOpen && row.local != null) {
+                        row.local?.let { onOpen(it.id) }
+                    }
+                    .padding(vertical = 5.dp),
+        )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             if (row.local != null) FlightStoragePill(stringResource(R.string.flight_cloud_phone))
+            if (selected) FlightStoragePill(stringResource(R.string.flight_library_selected))
             if (row.remote != null)
                 FlightStoragePill(
                     stringResource(
@@ -71,21 +143,9 @@ internal fun FlightCloudListRow(
                 )
             if (row.local != null && row.remote != null)
                 FlightStoragePill(
-                    stringResource(
-                        when {
-                            row.binding?.revision != row.remote.revision ->
-                                R.string.flight_cloud_server_changed
-                            dirty || row.binding?.localUpdatedAt != row.local.updatedAtMillis ->
-                                R.string.flight_cloud_local_changed
-                            row.binding?.allLocalPhotosIncluded != true ->
-                                R.string.flight_sync_partial
-                            else -> R.string.flight_sync_sent
-                        }
-                    ),
-                    row.binding?.revision != row.remote.revision ||
-                        dirty ||
-                        row.binding?.localUpdatedAt != row.local.updatedAtMillis ||
-                        row.binding?.allLocalPhotosIncluded != true,
+                    stringResource(row.versionState(dirty, cloud?.serverVerified == true).label()),
+                    row.versionState(dirty, cloud?.serverVerified == true) !=
+                        FlightVersionState.SENT,
                 )
         }
         row.local?.let {
@@ -112,23 +172,43 @@ internal fun FlightCloudListRow(
         }
         FlowRow {
             row.local?.let {
-                TextButton(onClick = { onOpen(it.id) }, enabled = !state.journeyDirty) {
-                    Text(stringResource(R.string.flight_cloud_open), fontSize = 12.sp)
+                TextButton(onClick = { onOpen(it.id) }, enabled = canOpen) {
+                    Text(
+                        stringResource(
+                            if (selected) R.string.flight_library_resume
+                            else R.string.flight_cloud_open
+                        ),
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+            if (row.local == null && row.remote != null) {
+                TextButton(
+                    onClick = { cloud?.download(row.remote, onOpen) },
+                    enabled = cloud?.connection != null && cloud.busy == false && !state.loadingTrip,
+                ) {
+                    Text(stringResource(R.string.flight_cloud_download), fontSize = 12.sp)
                 }
             }
             TextButton(onClick = { onManage(row.key) }) {
-                Text(
-                    stringResource(
-                        if (row.local == null) R.string.flight_cloud_download
-                        else R.string.flight_sync_manage
-                    ),
-                    fontSize = 12.sp,
-                )
+                Text(stringResource(R.string.flight_sync_manage), fontSize = 12.sp)
             }
         }
     }
     HorizontalDivider(color = Color(0xFF293740))
 }
+
+internal fun FlightVersionState.label(): Int =
+    when (this) {
+        FlightVersionState.UNVERIFIED -> R.string.flight_cloud_unverified
+        FlightVersionState.NOT_SENT -> R.string.flight_sync_not_uploaded
+        FlightVersionState.SERVER_ONLY -> R.string.flight_cloud_server_only
+        FlightVersionState.BOTH_CHANGED -> R.string.flight_sync_both_changed
+        FlightVersionState.SERVER_CHANGED -> R.string.flight_cloud_server_changed
+        FlightVersionState.LOCAL_CHANGED -> R.string.flight_cloud_local_changed
+        FlightVersionState.PARTIAL -> R.string.flight_sync_partial
+        FlightVersionState.SENT -> R.string.flight_sync_sent
+    }
 
 internal fun flightVersionDate(millis: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
@@ -145,13 +225,10 @@ internal fun FlightStorageStatusStrip(state: FlightUiState, compact: Boolean = f
     val serverLabel =
         when {
             cloud.connection == null -> R.string.flight_sync_not_connected
-            !cloud.serverVerified -> R.string.flight_cloud_unverified
-            remote == null -> R.string.flight_sync_not_uploaded
-            binding?.revision != remote.revision -> R.string.flight_cloud_server_changed
-            pending || binding?.localUpdatedAt != local?.updatedAtMillis ->
-                R.string.flight_cloud_local_changed
-            binding?.allLocalPhotosIncluded != true -> R.string.flight_sync_partial
-            else -> R.string.flight_sync_sent
+            else ->
+                FlightLibraryRow(local, remote, binding)
+                    .versionState(pending, cloud.serverVerified)
+                    .label()
         }
     Column(
         Modifier.fillMaxWidth()
@@ -164,6 +241,7 @@ internal fun FlightStorageStatusStrip(state: FlightUiState, compact: Boolean = f
                     stringResource(
                         when {
                             state.journeySaveError != null -> R.string.flight_sync_local_failed
+                            state.savingJourney -> R.string.flight_local_saving
                             pending -> R.string.flight_sync_local_pending
                             else -> R.string.flight_sync_local_saved
                         }
@@ -180,9 +258,14 @@ internal fun FlightStorageStatusStrip(state: FlightUiState, compact: Boolean = f
                 )
             }
             if (!compact)
-                TextButton(onClick = { ui.open(state.journeyId?.let { "local:$it" }) }) {
-                    Text(stringResource(R.string.flight_sync_manage), fontSize = 11.sp)
-                }
+                if (state.journeySaveError != null) {
+                    TextButton(onClick = ui.save) {
+                        Text(stringResource(R.string.flight_local_retry_save), fontSize = 11.sp)
+                    }
+                } else
+                    TextButton(onClick = { ui.open(state.journeyId?.let { "local:$it" }) }) {
+                        Text(stringResource(R.string.flight_sync_manage), fontSize = 11.sp)
+                    }
         }
     }
 }

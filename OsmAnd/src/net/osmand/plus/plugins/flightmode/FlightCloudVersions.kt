@@ -21,6 +21,38 @@ internal data class FlightLibraryRow(
 
     val name
         get() = local?.name ?: remote!!.name
+
+    fun canOpenLocal(state: FlightUiState, localRemovalInProgress: Boolean = false): Boolean =
+        local != null && !state.loadingTrip && !localRemovalInProgress
+
+    fun matchesLocation(filter: Int): Boolean =
+        filter == 0 || (filter == 1 && local != null) || (filter == 2 && remote != null)
+
+    fun versionState(localDirty: Boolean, serverVerified: Boolean): FlightVersionState {
+        if (!serverVerified) return FlightVersionState.UNVERIFIED
+        if (remote == null) return FlightVersionState.NOT_SENT
+        if (local == null) return FlightVersionState.SERVER_ONLY
+        val localChanged = localDirty || binding?.localUpdatedAt != local.updatedAtMillis
+        val remoteChanged = binding?.revision != remote.revision
+        return when {
+            remoteChanged && localChanged -> FlightVersionState.BOTH_CHANGED
+            remoteChanged -> FlightVersionState.SERVER_CHANGED
+            localChanged -> FlightVersionState.LOCAL_CHANGED
+            binding?.allLocalPhotosIncluded != true -> FlightVersionState.PARTIAL
+            else -> FlightVersionState.SENT
+        }
+    }
+}
+
+internal enum class FlightVersionState {
+    UNVERIFIED,
+    NOT_SENT,
+    SERVER_ONLY,
+    BOTH_CHANGED,
+    SERVER_CHANGED,
+    LOCAL_CHANGED,
+    PARTIAL,
+    SENT,
 }
 
 internal fun flightCloudRows(
@@ -46,11 +78,12 @@ internal fun flightCloudRows(
 internal fun FlightUiState.hasSameJournalContentAs(
     source: FlightUiState,
     includeTrip: Boolean = true,
+    includeMeasurements: Boolean = true,
 ): Boolean =
     journeyId == source.journeyId &&
         journeyName == source.journeyName &&
         plan == source.plan &&
         photos == source.photos &&
         flightSpans == source.flightSpans &&
-        batteryHistory == source.batteryHistory &&
+        (!includeMeasurements || batteryHistory == source.batteryHistory) &&
         (!includeTrip || trip == source.trip)

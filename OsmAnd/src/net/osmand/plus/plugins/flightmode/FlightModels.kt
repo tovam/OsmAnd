@@ -19,7 +19,8 @@ enum class FlightPage {
 	SATELLITE,
 	SENSORS,
 	PHOTO,
-	JOURNEYS
+	JOURNEYS,
+	JOURNAL
 }
 
 enum class FlightSessionMode {
@@ -808,6 +809,8 @@ data class FlightUiState(
 	val journeyName: String = "",
 	val journeyCreatedAtMillis: Long? = null,
 	val journeyDirty: Boolean = false,
+	val savingJourney: Boolean = false,
+	val confirmJourneyNavigation: Boolean = false,
 	val savingPreparation: Boolean = false,
 	val savedJourneys: List<FlightJourneySummary> = emptyList(),
 	val savedJourneysLoading: Boolean = false,

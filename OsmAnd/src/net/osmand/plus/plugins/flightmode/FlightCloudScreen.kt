@@ -37,8 +37,9 @@ internal fun FlightCloudScreen(
     selectedKey: String? = null,
     category: Int = 0,
     onRemoved: (String) -> Unit = {},
+    initialSettings: Boolean = false,
 ) {
-    var settings by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(initialSettings) }
     var filter by remember { mutableStateOf(0) }
     var expanded by remember { mutableStateOf(selectedKey ?: state.journeyId?.let { "local:$it" }) }
     var downloadConfirmation by remember { mutableStateOf<FlightCloudEntry?>(null) }
@@ -52,10 +53,7 @@ internal fun FlightCloudScreen(
             now = android.os.SystemClock.elapsedRealtime()
         }
     }
-    // Refresh saved local versions without initiating any transfer when the parent saves edits.
-    LaunchedEffect(state.journeyDirty) {
-        if (!state.journeyDirty && !controller.busy) controller.refresh()
-    }
+    // Local summaries are updated by the parent. A local autosave never needs a network request.
     DisposableEffect(controller) {
         onDispose {
             controller.lock()
@@ -65,8 +63,20 @@ internal fun FlightCloudScreen(
     val remaining = ((controller.lease?.expiresElapsed ?: 0L) - now).coerceAtLeast(0L)
     fun back() {
         when {
-            controller.busy -> cancelConfirmation = true
-            settings -> settings = false
+            controller.busy &&
+                controller.operation in
+                    listOf(
+                        R.string.flight_cloud_sending,
+                        R.string.flight_cloud_receiving,
+                        R.string.flight_cloud_importing,
+                        R.string.flight_cloud_packing,
+                        R.string.flight_sync_verifying_removal,
+                    ) -> cancelConfirmation = true
+            settings ->
+                if (initialSettings) onClose()
+                else {
+                    settings = false
+                }
             controller.upload != null -> controller.dismissUpload()
             else -> onClose()
         }
@@ -92,6 +102,7 @@ internal fun FlightCloudScreen(
                         when {
                             settings -> R.string.flight_cloud_connection
                             controller.upload != null -> R.string.flight_cloud_choose_content
+                            selectedKey != null -> R.string.flight_sync_manage
                             else -> R.string.flight_cloud_library
                         }
                     ),
@@ -167,20 +178,29 @@ internal fun FlightCloudScreen(
             controller.message?.let {
                 Text(
                     it,
-                    color = Color(0xFFFFCC66),
+                    color = if (controller.messageIsError) Color(0xFFFFCC66) else Color(0xFF88DEBF),
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }
             when {
-                settings -> CloudConnectionForm(controller) { settings = false }
+                settings ->
+                    CloudConnectionForm(controller) {
+                        if (initialSettings) onClose()
+                        else {
+                            settings = false
+                        }
+                    }
                 controller.upload != null ->
                     CloudUploadSelection(controller, controller.upload!!, remaining > 0)
                 else -> {
-                    if (state.journeyDirty) {
+                    if (
+                        state.journeyDirty &&
+                            (selectedKey == null || selectedKey == "local:${state.journeyId}")
+                    ) {
                         CloudHint(R.string.flight_cloud_save_first)
-                        TextButton(onClick = onSave, enabled = !controller.busy) {
-                            Text(stringResource(R.string.flight_mode_save_journey))
+                        TextButton(onClick = onSave, enabled = !state.savingJourney) {
+                            Text(stringResource(R.string.flight_local_retry_save))
                         }
                     }
                     if (controller.connection == null) {
@@ -193,20 +213,22 @@ internal fun FlightCloudScreen(
                         }
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        listOf(
-                                R.string.flight_cloud_all,
-                                R.string.flight_cloud_phone,
-                                R.string.flight_cloud_server,
-                            )
-                            .forEachIndexed { i, label ->
-                                TextButton(onClick = { filter = i }) {
-                                    Text(
-                                        stringResource(label),
-                                        color = if (filter == i) Color.White else Color.Gray,
-                                        fontSize = 12.sp,
-                                    )
+                        if (selectedKey == null) {
+                            listOf(
+                                    R.string.flight_cloud_all,
+                                    R.string.flight_cloud_phone,
+                                    R.string.flight_cloud_server,
+                                )
+                                .forEachIndexed { i, label ->
+                                    TextButton(onClick = { filter = i }) {
+                                        Text(
+                                            stringResource(label),
+                                            color = if (filter == i) Color.White else Color.Gray,
+                                            fontSize = 12.sp,
+                                        )
+                                    }
                                 }
-                            }
+                        }
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick = { controller.refresh() }, enabled = !controller.busy) {
                             Text(stringResource(R.string.flight_cloud_refresh), fontSize = 11.sp)
@@ -219,6 +241,7 @@ internal fun FlightCloudScreen(
                             controller.bindings,
                             filter,
                             category,
+                            selectedKey,
                         ) {
                             flightCloudRows(
                                     controller.local,
@@ -226,10 +249,13 @@ internal fun FlightCloudScreen(
                                     controller.bindings,
                                 )
                                 .filter {
-                                    (category == 0 ||
-                                        ((it.local?.sampleCount ?: it.remote!!.samples) == 0) ==
-                                            (category == 1)) &&
-                                        (filter == 0 ||
+                                    (selectedKey == null || it.key == selectedKey) &&
+                                        (selectedKey != null ||
+                                            category == 0 ||
+                                            ((it.local?.sampleCount ?: it.remote!!.samples) == 0) ==
+                                                (category == 1)) &&
+                                        (selectedKey != null ||
+                                            filter == 0 ||
                                             (filter == 1 && it.local != null) ||
                                             (filter == 2 && it.remote != null))
                                 }
@@ -325,36 +351,52 @@ internal fun FlightCloudScreen(
                                         fontSize = 10.sp,
                                     )
                                 }
-                                if (conflict && row.local != null)
-                                    CloudHint(R.string.flight_cloud_server_changed)
-                                else if (
-                                    row.binding != null &&
-                                        row.local != null &&
-                                        row.local.updatedAtMillis != row.binding.localUpdatedAt
-                                )
-                                    CloudHint(R.string.flight_cloud_local_changed)
-                                else if (row.local != null && row.remote != null && !conflict)
-                                    CloudHint(
-                                        if (row.binding?.allLocalPhotosIncluded == true)
-                                            R.string.flight_sync_sent
-                                        else R.string.flight_sync_partial
+                                if (row.local != null && row.remote != null)
+                                    Text(
+                                        stringResource(
+                                            row.versionState(dirty, controller.serverVerified)
+                                                .label()
+                                        ),
+                                        color =
+                                            if (
+                                                row.versionState(
+                                                    dirty,
+                                                    controller.serverVerified,
+                                                ) == FlightVersionState.SENT
+                                            )
+                                                Color(0xFF88DEBF)
+                                            else Color(0xFFFFCC66),
+                                        fontSize = 11.sp,
                                     )
+                                // Opening the phone copy is always independent of remote transfers.
+                                row.local?.let { local ->
+                                    TextButton(
+                                        onClick = {
+                                            onClose()
+                                            onOpen(local.id)
+                                        },
+                                        enabled =
+                                            row.canOpenLocal(
+                                                state,
+                                                controller.removingLocalId == local.id,
+                                            ),
+                                    ) {
+                                        Text(
+                                            stringResource(
+                                                if (state.journeyId == local.id)
+                                                    R.string.flight_library_resume
+                                                else R.string.flight_cloud_open
+                                            ),
+                                            fontSize = 12.sp,
+                                        )
+                                    }
+                                }
                                 if (expanded == row.key) {
                                     if (recording) CloudHint(R.string.flight_cloud_recording)
+                                    if (conflict && row.local != null)
+                                        CloudHint(R.string.flight_sync_conflict_actions)
                                     FlowRow(Modifier.fillMaxWidth()) {
                                         row.local?.let { local ->
-                                            TextButton(
-                                                onClick = {
-                                                    onClose()
-                                                    onOpen(local.id)
-                                                },
-                                                enabled = !controller.busy && !state.journeyDirty,
-                                            ) {
-                                                Text(
-                                                    stringResource(R.string.flight_cloud_open),
-                                                    fontSize = 12.sp,
-                                                )
-                                            }
                                             TextButton(
                                                 onClick = { controller.prepareUpload(local.id) },
                                                 enabled =
@@ -362,7 +404,8 @@ internal fun FlightCloudScreen(
                                                         !controller.busy &&
                                                         !dirty &&
                                                         !recording &&
-                                                        !conflict,
+                                                        !conflict &&
+                                                        controller.serverVerified,
                                             ) {
                                                 Text(
                                                     stringResource(
@@ -377,7 +420,7 @@ internal fun FlightCloudScreen(
                                         row.remote?.let { entry ->
                                             TextButton(
                                                 onClick = {
-                                                    if (row.local != null || state.journeyDirty)
+                                                    if (row.local != null)
                                                         downloadConfirmation = entry
                                                     else
                                                         controller.download(entry) {
@@ -385,7 +428,10 @@ internal fun FlightCloudScreen(
                                                             onOpen(it)
                                                         }
                                                 },
-                                                enabled = !controller.busy && !state.journeyDirty,
+                                                enabled =
+                                                    !controller.busy &&
+                                                        !state.loadingTrip &&
+                                                        controller.connection != null,
                                             ) {
                                                 Text(
                                                     stringResource(
@@ -481,6 +527,7 @@ internal fun FlightCloudScreen(
                         onClick = {
                             controller.cancel()
                             cancelConfirmation = false
+                            onClose()
                         }
                     ) {
                         Text(stringResource(R.string.shared_string_cancel))

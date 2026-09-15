@@ -237,7 +237,10 @@ fun FlightModeScreen(
 	onPreparationPermissions: () -> Unit = {},
 	onStopLive: () -> Unit = {},
 	onToggleLiveMicrophone: () -> Unit = {},
-	onLocalJourneyRemoved: (String) -> Unit = {}
+	onLocalJourneyRemoved: (String) -> Unit = {},
+	onConfirmJournalNavigation: () -> Unit = {},
+	onCancelJournalNavigation: () -> Unit = {},
+	onClearTripLoadError: () -> Unit = {}
 ) {
 	val cloudContext = LocalContext.current.applicationContext
 	val cloudScope = rememberCoroutineScope()
@@ -249,9 +252,9 @@ fun FlightModeScreen(
 	DisposableEffect(cloud) { onDispose { cloud.close() } }
 	LaunchedEffect(state.savedJourneys) { cloud.acceptLocalSummaries(state.savedJourneys) }
 	LaunchedEffect(state.page) {
-		if (state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS, FlightPage.WINDOW, FlightPage.PHOTO)) cloud.refresh()
+		if (state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refresh()
 	}
-	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud)) {
+	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney)) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
 			primary = FlightOrange,
@@ -264,7 +267,8 @@ fun FlightModeScreen(
 	) {
 		val safeDrawingInsets = WindowInsets.safeDrawing
 		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney,
-			cloud, cloudSelectedKey, when (state.page) { FlightPage.PLANS -> 1; FlightPage.JOURNEYS -> 2; else -> 0 }, onLocalJourneyRemoved)
+			cloud, cloudSelectedKey, when (state.page) { FlightPage.PLANS -> 1; FlightPage.JOURNEYS -> 2; else -> 0 }, onLocalJourneyRemoved,
+			initialSettings = cloudSelectedKey == null)
 		LaunchedEffect(state.replayPlaying, state.replaySpeed) {
 			while (state.replayPlaying) {
 				delay(100)
@@ -424,7 +428,7 @@ fun FlightModeScreen(
 					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onPreparePhotoCalibration = onPreparePhotoCalibration
 				)
-				FlightPage.JOURNEYS -> JourneysScreen(
+				FlightPage.JOURNEYS, FlightPage.JOURNAL -> JourneysScreen(
 					state = state,
 					onClose = onClose,
 					onPageChange = onPageChange,
@@ -438,20 +442,20 @@ fun FlightModeScreen(
 				)
 			}
 
-			if(state.previewingPlan) {
+			if(state.previewingPlan && state.page in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.SATELLITE)) {
 				Row(Modifier.align(Alignment.TopCenter).background(FlightPanelStrong)) {
 					PlanAction(stringResource(R.string.flight_plan_simulation_exit),{onPageChange(FlightPage.PREPARE)})
 				}
 			}
 			if (state.loadingTrip) {
 				Box(
-					modifier = Modifier.fillMaxSize().background(Color(0xD900000000)),
+					modifier = Modifier.fillMaxSize().background(Color(0xD900000000)).clickable { },
 					contentAlignment = Alignment.Center
 				) {
 					Column(horizontalAlignment = Alignment.CenterHorizontally) {
 						CircularProgressIndicator(color = FlightOrange, strokeWidth = 3.dp)
 						Spacer(Modifier.height(14.dp))
-						Text(stringResource(R.string.flight_mode_importing), color = FlightText)
+						Text(stringResource(if (state.savingJourney) R.string.flight_local_saving else R.string.flight_library_opening), color = FlightText)
 					}
 				}
 			}
@@ -464,6 +468,19 @@ fun FlightModeScreen(
 					onCancel = onDismissDuplicateImport
 				)
 			}
+			if (state.confirmJourneyNavigation) androidx.compose.material3.AlertDialog(
+				onDismissRequest = onCancelJournalNavigation,
+				title = { Text(stringResource(R.string.flight_local_pending_photos)) },
+				text = { Text(stringResource(R.string.flight_local_pending_photos_hint, state.pendingPhotos.size)) },
+				confirmButton = { androidx.compose.material3.TextButton(onClick = onConfirmJournalNavigation) { Text(stringResource(R.string.flight_local_keep_continue)) } },
+				dismissButton = { androidx.compose.material3.TextButton(onClick = onCancelJournalNavigation) { Text(stringResource(R.string.flight_local_stay)) } }
+			)
+			state.tripLoadError?.let { error -> androidx.compose.material3.AlertDialog(
+				onDismissRequest = onClearTripLoadError,
+				title = { Text(stringResource(R.string.flight_local_open_failed)) },
+				text = { Text(error) },
+				confirmButton = { androidx.compose.material3.TextButton(onClick = onClearTripLoadError) { Text(stringResource(R.string.shared_string_close)) } }
+			) }
 		}
 	}
 	}
@@ -2064,12 +2081,18 @@ private fun JourneysScreen(
 	onCloud: (String?) -> Unit
 ) {
 	val cloud = LocalFlightCloudUi.current?.controller
+	val library = state.page == FlightPage.JOURNEYS
+	var filter by remember { mutableStateOf(0) }
+	var showStorage by remember { mutableStateOf(false) }
 	val pastJourneys = flightLibraryRows(state.savedJourneys, cloud, false).filterNot {
-		state.activeRecording.running && it.local?.id == state.activeRecording.journeyId }
+		state.activeRecording.running && it.local?.id == state.activeRecording.journeyId }.filter { it.matchesLocation(filter) }
 	var importMenu by remember { mutableStateOf(false) }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
-		FlightTopBar(stringResource(R.string.flight_workspace_past), FlightSessionMode.REPLAY, onClose)
-		PlanAction(stringResource(R.string.flight_workspace_home), { onPageChange(FlightPage.HOME) })
+		FlightTopBar(if (library) stringResource(R.string.flight_workspace_past) else state.journeyName,
+			FlightSessionMode.REPLAY, onClose)
+		PlanAction(stringResource(if (library) R.string.flight_workspace_home else R.string.flight_workspace_past),
+			{ onPageChange(if (library) FlightPage.HOME else FlightPage.JOURNEYS) })
+		if (library) {
 		Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
 			Box {
 				PlanAction(stringResource(R.string.flight_sync_import), { importMenu = true })
@@ -2081,7 +2104,11 @@ private fun JourneysScreen(
 			PlanAction(stringResource(R.string.flight_cloud_connection), { onCloud(null) })
 			PlanAction(stringResource(R.string.flight_cloud_refresh), { cloud?.refresh() })
 		}
+		FlightLibraryFilters(filter) { filter = it }
+		FlightLibraryServerNotice()
+		}
 		LazyColumn(Modifier.weight(1f)) {
+			if (library) {
 			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, pastJourneys.size)) }
 			if (state.savedJourneysLoading || cloud?.busy == true) {
 				item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
@@ -2093,8 +2120,9 @@ private fun JourneysScreen(
 					FlightCloudListRow(journey, state, onOpen, onCloud)
 				}
 			}
-			if (state.sessionMode == FlightSessionMode.REPLAY && state.trip != null) {
-			item { SectionTitle(stringResource(R.string.flight_mode_current_journey)) }
+			}
+			if (!library && state.sessionMode == FlightSessionMode.REPLAY && state.trip != null) {
+			item { SectionTitle(stringResource(R.string.flight_library_journal)) }
 			item { FlightStorageStatusStrip(state) }
 			item {
 				BasicTextField(
@@ -2148,7 +2176,9 @@ private fun JourneysScreen(
 			state.journeyMessage?.let { message ->
 				item { Text(message, color = FlightGreen, fontSize = 11.sp, modifier = Modifier.padding(12.dp)) }
 			}
-			item { SectionTitle(stringResource(R.string.flight_mode_storage)) }
+			if (!library) {
+			item { PlanAction(stringResource(R.string.flight_mode_storage) + if (showStorage) " −" else " +", { showStorage = !showStorage }) }
+			if (showStorage) {
 			item {
 				if (state.storageUsageLoading && state.storageUsage == null) {
 					Row(
@@ -2164,9 +2194,11 @@ private fun JourneysScreen(
 						if (usage != null) FlightStorageUsageTable(usage)
 					}
 			}
+			}
+			}
 
 		}
-		if (state.sessionMode == FlightSessionMode.REPLAY && state.trip != null)
+		if (!library && state.sessionMode == FlightSessionMode.REPLAY && state.trip != null)
 			FlightBottomNavigation(state, onPageChange)
 	}
 }
@@ -2558,6 +2590,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 			FlightPage.SATELLITE -> R.string.flight_mode_cached_tiles_short
 			FlightPage.SENSORS -> R.string.flight_mode_sensors
 			FlightPage.PHOTO -> R.string.flight_mode_photo
+			FlightPage.JOURNAL -> R.string.flight_library_journal
 			else -> R.string.flight_mode_journeys
 		})
 	}

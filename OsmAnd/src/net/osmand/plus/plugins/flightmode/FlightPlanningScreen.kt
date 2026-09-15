@@ -52,7 +52,6 @@ internal fun FlightPlanningScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var mapEditor by remember { mutableStateOf(false) }
     var confirmStart by remember { mutableStateOf(false) }
-    var confirmLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
     var selected by remember { mutableStateOf(0) }
     var source by remember { mutableStateOf(false) }
     var existing by remember { mutableStateOf<Pair<Int, Long>?>(null) }
@@ -102,9 +101,6 @@ internal fun FlightPlanningScreen(
                 withContext(Dispatchers.Default) { quote?.preview(!source, palette) ?: emptyList() }
         }
     fun change(next: FlightPreparation) = onUpdate(state.plan.copy(preparation = next))
-    fun leave(action: () -> Unit) {
-        if (state.journeyDirty) confirmLeave = action else action()
-    }
     fun addVia() {
         val stops = state.plan.stops.toMutableList()
         stops.add(stops.lastIndex, FlightStop(context.getString(R.string.flight_plan_via)))
@@ -112,7 +108,7 @@ internal fun FlightPlanningScreen(
         onUpdate(state.plan.copy(stops = stops, preparation = prep))
         mapEditor = true
     }
-    val backAction by rememberUpdatedState<() -> Unit> { leave(onClose) }
+    val backAction by rememberUpdatedState(onJournals)
     val dispatcher =
         (context as? androidx.activity.OnBackPressedDispatcherOwner)?.onBackPressedDispatcher
     DisposableEffect(dispatcher, mapEditor) {
@@ -127,11 +123,11 @@ internal fun FlightPlanningScreen(
     }
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            PlanAction(stringResource(R.string.flight_workspace_future), { leave(onJournals) })
+            PlanAction(stringResource(R.string.flight_workspace_future), onJournals)
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            PlanAction(stringResource(R.string.flight_plan_new), { leave { onNew(false) } })
-            PlanAction(stringResource(R.string.flight_plan_repeat), { leave { onNew(true) } })
+            PlanAction(stringResource(R.string.flight_plan_new), { onNew(false) })
+            PlanAction(stringResource(R.string.flight_plan_repeat), { onNew(true) })
         }
         Row(Modifier.fillMaxWidth()) {
             Text(
@@ -140,18 +136,18 @@ internal fun FlightPlanningScreen(
                 fontSize = 17.sp,
                 modifier = Modifier.weight(1f).padding(8.dp),
             )
-            PlanAction(stringResource(R.string.flight_mode_close), { leave(onClose) })
+            PlanAction(stringResource(R.string.flight_mode_close), onClose)
         }
         Row(Modifier.fillMaxWidth()) {
             PlanAction(
                 stringResource(R.string.flight_plan_save),
                 { onSave(false) },
-                enabled = !state.savingPreparation,
+                enabled = !state.savingPreparation && !state.savingJourney,
             )
             Text(
                 stringResource(
                     when {
-                        state.savingPreparation -> R.string.flight_plan_saving
+                        state.savingPreparation || state.savingJourney -> R.string.flight_plan_saving
                         state.journeyDirty || state.journeyId == null ->
                             R.string.flight_plan_unsaved
                         else -> R.string.flight_plan_saved_short
@@ -599,36 +595,6 @@ internal fun FlightPlanningScreen(
                     state.plan.stops.all { it.latitude != null && it.longitude != null },
         )
         bottomNavigation()
-    }
-    confirmLeave?.let { action ->
-        AlertDialog(
-            onDismissRequest = { confirmLeave = null },
-            text = { Text(stringResource(R.string.flight_plan_leave_warning)) },
-            confirmButton = {
-                PlanAction(
-                    stringResource(R.string.flight_plan_save),
-                    {
-                        onSave(false)
-                        confirmLeave = null
-                    },
-                )
-            },
-            dismissButton = {
-                Row {
-                    PlanAction(
-                        stringResource(R.string.shared_string_cancel),
-                        { confirmLeave = null },
-                    )
-                    PlanAction(
-                        stringResource(R.string.flight_plan_leave_unsaved),
-                        {
-                            confirmLeave = null
-                            action()
-                        },
-                    )
-                }
-            },
-        )
     }
     if (confirmStart)
         AlertDialog(

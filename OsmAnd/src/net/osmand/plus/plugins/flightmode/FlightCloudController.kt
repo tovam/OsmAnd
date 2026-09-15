@@ -54,10 +54,16 @@ internal class FlightCloudController(
     var message by mutableStateOf<String?>(null)
         private set
 
+    var messageIsError by mutableStateOf(false)
+        private set
+
     var serverVerified by mutableStateOf(false)
         private set
 
     var serverSupportsAppend by mutableStateOf(false)
+        private set
+
+    var removingLocalId by mutableStateOf<String?>(null)
         private set
 
     fun acceptLocalSummaries(summaries: List<FlightJourneySummary>) {
@@ -231,6 +237,7 @@ internal class FlightCloudController(
 
     fun removeLocal(id: String, removed: (String) -> Unit) =
         task(R.string.flight_sync_verifying_removal) {
+            removingLocalId = id
             val config = requireNotNull(connection)
             val binding =
                 bindings.firstOrNull { it.localId == id }
@@ -287,6 +294,7 @@ internal class FlightCloudController(
         operation = label
         progress = null
         message = null
+        messageIsError = false
         job =
             scope.launch {
                 try {
@@ -295,6 +303,7 @@ internal class FlightCloudController(
                     message = context.getString(R.string.flight_cloud_cancelled)
                     throw e
                 } catch (e: Exception) {
+                    messageIsError = true
                     if ((e as? FlightCloudFailure)?.code == "edit_session_expired") lease = null
                     val text =
                         when ((e as? FlightCloudFailure)?.code ?: e.message) {
@@ -316,6 +325,7 @@ internal class FlightCloudController(
                 } finally {
                     busy = false
                     progress = null
+                    removingLocalId = null
                 }
             }
     }

@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -32,6 +32,18 @@ internal fun FlightWorkspaceHome(
             PlanAction(stringResource(R.string.flight_mode_close), onClose)
         }
         if (!planned) {
+            if (state.journeyId != null && state.trip != null) {
+                Text(
+                    state.journeyName,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+                PlanAction(
+                    stringResource(R.string.flight_library_resume),
+                    { onOpen(state.journeyId) },
+                )
+            }
             WorkspaceEntry(R.string.flight_workspace_past, R.string.flight_workspace_past_hint) {
                 onPage(FlightPage.JOURNEYS)
             }
@@ -50,15 +62,38 @@ internal fun FlightWorkspaceHome(
             }
         } else {
             val cloud = LocalFlightCloudUi.current?.controller
+            var filter by remember { mutableStateOf(0) }
             val rows =
-                flightLibraryRows(state.savedJourneys, cloud, true).filterNot {
-                    state.activeRecording.running && it.local?.id == state.activeRecording.journeyId
-                }
-            PlanAction(stringResource(R.string.flight_plan_new), { onNew(false) })
-            PlanAction(stringResource(R.string.flight_cloud_refresh), { cloud?.refresh() })
+                flightLibraryRows(state.savedJourneys, cloud, true)
+                    .filterNot {
+                        state.activeRecording.running &&
+                            it.local?.id == state.activeRecording.journeyId
+                    }
+                    .filter { it.matchesLocation(filter) }
+            Text(
+                stringResource(R.string.flight_workspace_future),
+                color = Color.White,
+                fontSize = 20.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+            Row {
+                PlanAction(stringResource(R.string.flight_plan_new), { onNew(false) })
+                PlanAction(stringResource(R.string.flight_cloud_refresh), { cloud?.refresh() })
+            }
+            FlightLibraryFilters(filter) { filter = it }
+            FlightLibraryServerNotice()
             if (state.savedJourneysLoading || cloud?.busy == true)
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             LazyColumn(Modifier.weight(1f)) {
+                if (rows.isEmpty() && !state.savedJourneysLoading)
+                    item {
+                        Text(
+                            stringResource(R.string.flight_library_no_plans),
+                            color = Color.Gray,
+                            modifier = Modifier.padding(12.dp),
+                            fontSize = 12.sp,
+                        )
+                    }
                 items(rows, key = { it.key }) { journey ->
                     FlightCloudListRow(journey, state, onOpen, onCloud)
                 }

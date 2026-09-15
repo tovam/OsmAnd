@@ -1,11 +1,11 @@
 # Flight workspaces and regression checks
 
 The entry page has three destinations. Navigation is defined once in
-`FlightWorkspaceNavigation`, then rendered in the same bottom bar on every page.
+`FlightWorkspaceNavigation`. Library pages are outside the selected flight's bottom bar.
 
 | Workspace | Available pages | Source of positions |
 | --- | --- | --- |
-| Past flights | Map, Window, Tiles, Sensors, Photo+, Journals | Imported or recorded samples |
+| Past flight opened locally | Map, Window, Tiles, Sensors, Photo+, Journal | Imported or recorded samples |
 | Planned flights | Preparation, Map, Window, Tiles | Display-only great-circle simulation |
 | Current flight | Map, Window, Tiles, Sensors, Photo+, Recorder | Recorder service plus a separate predicted future |
 
@@ -13,6 +13,76 @@ The current-flight entry is disabled unless the recording service is running.
 Opening another journal does not stop the service or cause its updates to replace
 the selected journal. Starting a prepared flight requires confirmation. Creating
 a new plan or previewing it does not start GPS recording.
+
+## Local opening and library audit (September 2026)
+
+The two library UIs previously disabled **Open** using the global `journeyDirty` flag.
+Any unsaved edit, including an edit in a different journal, therefore disabled every local
+flight. Saving locally cleared that flag, which made an intervening server-publication flow
+look like a prerequisite for opening. It was not a requirement of the local file loader.
+
+The local button now depends only on a local copy being present and no local open/removal
+already targeting it. A server outage, read-only lease, revision conflict, unselected photos
+or unsent edits cannot disable it. The same production policy is used in both libraries.
+
+Additional findings addressed:
+
+- Past flights mixed the collection, selected journal's editor and storage report in one list.
+  Collection browsing is now separate from the selected flight's **Journal** tab.
+- The versions screen repeated the entire library after selecting one flight. It now scopes
+  itself to that flight. Global **Server connection** opens connection settings directly.
+- Reopening the selected flight reloaded its file and reset the replay cursor. **Resume**
+  now uses the in-memory flight and retains the cursor and photo data.
+- Preparation's own Back handler closed the whole workspace. Its separate save/leave dialog
+  saved without performing the requested navigation. Back now returns to Planned flights;
+  the shared save-before-replacement/close path owns save protection instead of a second dialog.
+- Local photo autosaves, renames, plan edits and explicit saves had inconsistent paths.
+  Disk snapshots are now captured under one save mutex, with a local save barrier before
+  opening another flight, importing a GPX/archive, creating a plan or closing the workspace.
+- A failed save or load keeps the current journal; an error dialog explains what failed.
+  Pending imported photos require **Keep and continue** or **Stay here**, not silent loss.
+- Implicit local saves do not arm/cancel a recorder or require GPS/scheduling permissions.
+  Programming automatic departure remains an explicit action in Preparation.
+- Autosave completion and entering Photo+/Window triggered unnecessary server refreshes.
+  Local save completion now only updates local summaries. Library refresh remains read-only.
+- Generic **Update** and **Read only** labels confused local edits with server permissions.
+  Transfer directions and server-only permissions are explicit. Successful publication is
+  green; failures remain distinct. A refresh is not labelled as a cancellable file transfer.
+
+### User journey / action contract
+
+| User action | Expected result | Server dependency |
+| --- | --- | --- |
+| Enter flight tracking | Home: past, planned, current; no implicit GPS start | None |
+| Browse past or planned flights | Separate collection; All / Phone / Server filters; storage badges | Server listing is optional |
+| Open a phone copy | Save pending local edits, then open from disk | None |
+| Open a phone copy with server conflicts | Same local open; show differing revisions separately | None |
+| Resume the selected flight | Keep timeline, current data and photo edits; no file reload | None |
+| Switch from an edited journal to another flight | Finish the local write before replacing the selected journal | None |
+| Switch with unvalidated photo imports | Keep photos in the old journal and continue, or stay | None |
+| Fail to save while switching | Stay on the old flight with an explicit local-save error | None |
+| Fail to load the requested flight | Keep the old flight and its saved edits; report the load error | None |
+| Import a GPX / OsmAnd track / flight archive | Save old journal first; retain duplicate-GPX warning; autosave newly imported GPX | None |
+| Create a planned flight | Save old journal, create an independent plan, autosave locally | None |
+| Clone a route | New plan identity, cleared schedule and no enabled automatic departure | None |
+| Simulate a planned flight | Display-only future; original recorded samples remain empty | Cached coverage needed for offline scenery |
+| Start / revisit the current flight | Existing confirmation/service; other journals cannot steal its selection or stop recording | None |
+| Rename, retouch or calibrate a photo, mark flight spans | Local autosave with visible saving/error state | None |
+| Use Back from Map | Return to the appropriate library (or Home for live) | None |
+| Use Back from a library | Home, not a different selected-flight tab | None |
+| Open Journal | Only this flight: rename, local save, export, expandable storage details | None |
+| Open Versions and send | Only the selected flight's phone/server versions and explicit transfers | Listing/update requires connection |
+| Download a server-only flight | Download and open a new phone copy; no edit lease | Read token + network |
+| Fetch a differing server version | Confirmation; separate local copy, no overwrite of local edits | Read token + network |
+| Publish local changes | Explicit photo selection and confirmation; preserve other server photos | Temporary server-edit lease |
+| Retire a phone copy | Separate confirmed action; verify published revision and all photos first | Verified downloadable server copy |
+| Close flight tracking | Finish local save first; leave recorder service running if active | None |
+
+The lightweight suite includes `FlightLocalNavigationTest`, which exercises the production
+open policy, suspendable save-before-load sequence, failure preservation, version states,
+filters and navigation hierarchy with synthetic data. It does not exercise Android touch
+delivery or real device file-system failures. Device acceptance should repeat the local-open
+cases with network disabled, an unexpired/expired edit lease and two independently edited copies.
 
 ## Data boundaries
 

@@ -23,7 +23,7 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$sources/FlightRouteHypothesis.kt" "$sources/FlightTerrainTilePlanner.kt" \
   "$sources/FlightTerrainModels.kt" "$sources/FlightProfilePlanner.kt" "$sources/FlightTrackMath.kt" \
   "$sources/FlightRecordingLines.kt" \
-  "$sources/FlightWorkspaceNavigation.kt" "$sources/FlightLiveTimeline.kt" "$sources/FlightPhotoCaptureJson.kt" \
+  "$sources/FlightWorkspaceNavigation.kt" "$sources/FlightLocalNavigation.kt" "$sources/FlightLiveTimeline.kt" "$sources/FlightPhotoCaptureJson.kt" \
   "$sources/FlightSampleInterpolator.kt" "$sources/FlightReplayEngine.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightPreparationNonSubjectFixtures.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightCloudNonSubjectFixtures.kt" \
@@ -34,8 +34,9 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoCalibrationPersistenceTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoFitDiagnosticsTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightDownloadCancellationTest.kt" \
-  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightWorkspaceTest.kt"
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightWorkspaceTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightLocalNavigationTest.kt"
 cd "$repo_root"
 java -cp "$test_output:$classpath" org.junit.runner.JUnitCore \
-  net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest net.osmand.test.junit.FlightPhotoCalibrationPersistenceTest net.osmand.test.junit.FlightDownloadCancellationTest net.osmand.test.junit.FlightPhotoFitDiagnosticsTest net.osmand.test.junit.FlightCloudArchiveTest
+  net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest net.osmand.test.junit.FlightLocalNavigationTest net.osmand.test.junit.FlightPhotoCalibrationPersistenceTest net.osmand.test.junit.FlightDownloadCancellationTest net.osmand.test.junit.FlightPhotoFitDiagnosticsTest net.osmand.test.junit.FlightCloudArchiveTest
 echo "Flight logic check classes: $test_output"
