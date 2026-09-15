@@ -110,7 +110,7 @@ data class FlightPreparation(
                 )
 
         fun parseOffset(text: String): Int? {
-            val m = Regex("([+-])(\\d{2}):(\\d{2})").matchEntire(text) ?: return null
+            val m = Regex("([+-])(\\d{2}):?(\\d{2})").matchEntire(text) ?: return null
             val hours = m.groupValues[2].toInt()
             val minutes = m.groupValues[3].toInt()
             if (minutes > 59) return null

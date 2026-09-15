@@ -145,11 +145,11 @@ class FlightJourneyStore(private val context: Context) {
 		return children.sumOf { child -> assetTreeSize("$path/$child") }
 	}
 
-	fun list(): List<FlightJourneySummary> = journeyFiles()
+	fun list(): List<FlightJourneySummary> = synchronized(STORE_LOCK) { journeyFiles()
 		.mapNotNull { file ->
 			runCatching { summaryFromJson(JSONObject(file.readText()), file) }.getOrNull()
 		}
-		.sortedByDescending { it.updatedAtMillis }
+		.sortedByDescending { it.updatedAtMillis } }
 
 	/** Returns the newest journal containing the exact same ordered GPX trace, if one exists. */
 	fun findMatchingJourney(trip: FlightTrip): FlightJourneySummary? {
@@ -171,7 +171,9 @@ class FlightJourneyStore(private val context: Context) {
 
 	private fun summaryFromJson(root: JSONObject, file: File): FlightJourneySummary = FlightJourneySummary(
 		id = root.getString("id"),
-		name = root.optString("name").ifBlank { "Journal de vol" },
+		name = planFromJson(root.optJSONObject("plan")).let { plan ->
+			FlightJourneyNaming.updated(root.optString("name").ifBlank { "Journal de vol" }, plan, plan)
+		},
 		updatedAtMillis = root.optLong("updatedAtMillis", file.lastModified()),
 		sampleCount = root.optJSONObject("trip")?.optJSONArray("samples")?.length() ?: 0,
 		photoCount = root.optJSONArray("photos")?.length() ?: 0
@@ -198,6 +200,32 @@ class FlightJourneyStore(private val context: Context) {
 		try { stream.write(journeyToJson(storedJourney).toString().toByteArray(Charsets.UTF_8)); atomic.finishWrite(stream) }
 		catch (error: Exception) { atomic.failWrite(stream); throw error }
 		storedJourney
+	}
+
+	/** Remove only a fully published private copy; never remove an active or scheduled flight. */
+	internal fun removeVerifiedCloudCopy(id: String, updatedAt: Long, remotePhotos: Set<String>) = synchronized(STORE_LOCK) {
+		val safeId = validatedId(id)
+		val live = FlightRecordingService.state.value
+		if (live.running && live.journeyId == id) throw IOException("removal_unverified")
+		val journey = load(id)
+		if (journey.updatedAtMillis != updatedAt || !remotePhotos.containsAll(journey.photos.map { it.id }) ||
+			journey.plan.preparation?.automatic == true) throw IOException("removal_unverified")
+		val journal = File(journeysDirectory, "$safeId.$JOURNEY_FILE_EXTENSION")
+		// Never touch gallery originals, shared media or the shared terrain/satellite stores.
+		val referenced = journeyFiles().filter { it != journal }.flatMap { other ->
+			val photos = JSONObject(other.readText()).optJSONArray("photos") ?: JSONArray()
+			(0 until photos.length()).map { photos.getJSONObject(it).getString("storageName") }
+		}.toSet()
+		val photoFiles = journey.photos.map { File(it.localPath) }.distinct().filter {
+			it.parentFile?.canonicalFile == mediaDirectory.canonicalFile && it.name !in referenced && it.isFile
+		}
+		val recordingRoot = File(context.filesDir, "flight-recordings")
+		val targets = listOf(journal, File(journal.path + ".bak"), File(journal.path + ".new")) + photoFiles +
+			listOf(".jsonl", ".state", ".state.bak", ".state.new").map { File(recordingRoot, safeId + it) }
+		if (targets.any { it.exists() && (!it.isFile || android.system.OsConstants.S_ISLNK(android.system.Os.lstat(it.path).st_mode)) }) throw IOException("removal_unverified")
+		FlightScheduleManager.cancel(context, id)
+		// The server archive was checksum-verified by the caller; stop at the first filesystem error.
+		for (target in targets) if (target.exists() && !target.delete()) throw IOException("removal_unverified")
 	}
 
 	/** A single transaction prevents a recorder/download completion overwriting concurrent photo edits. */

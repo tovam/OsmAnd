@@ -69,6 +69,9 @@ internal data class FlightCloudLease(val token: String, val expiresElapsed: Long
 
 /** Explicit, bounded transfers. Never follows redirects with an account token. */
 internal class FlightCloudClient(private val connection: FlightCloudConnection) {
+    var protocolVersion: Int = 1
+        private set
+
     private val active = AtomicReference<HttpURLConnection?>()
 
     fun cancel() {
@@ -77,7 +80,9 @@ internal class FlightCloudClient(private val connection: FlightCloudConnection) 
 
     fun list(): List<FlightCloudEntry> =
         request("GET", "/v1/journeys") { conn ->
-            val array = jsonResponse(conn).getJSONArray("journeys")
+            val response = jsonResponse(conn)
+            protocolVersion = response.optInt("protocolVersion", 1)
+            val array = response.getJSONArray("journeys")
             List(array.length()) { FlightCloudEntry.parse(array.getJSONObject(it)) }
         }
 

@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_sync_partial">Version envoyée · sélection de photos seulement</string>
+    <string name="flight_sync_remove">Retirer du téléphone…</string>
+    <string name="flight_sync_remove_confirm">Retirer cette copie locale et ses photos privées non partagées ? La version serveur sera vérifiée avant le retrait. Elle restera téléchargeable. Galerie, relief et satellite ne sont pas supprimés.</string>
+    <string name="flight_sync_verifying_removal">Vérification de la copie serveur avant retrait…</string>
+    <string name="flight_sync_removal_unverified">Retrait refusé : enregistre puis envoie la version locale avec toutes ses photos, et actualise. Un départ automatique doit être désactivé avant de retirer ce vol.</string>
+    <string name="flight_sync_removed">Copie locale retirée. Le vol reste téléchargeable depuis le serveur.</string>
+    <string name="flight_sync_import">Importer un vol…</string>
+    <string name="flight_sync_manage">Transférer / versions</string>
+    <string name="flight_sync_sent">Dernière version envoyée</string>
+    <string name="flight_sync_local_date">Téléphone · %1$s</string>
+    <string name="flight_sync_remote_date">Serveur · %1$s · v%2$s · %3$d photos</string>
+    <string name="flight_sync_not_connected">non connecté</string>
+    <string name="flight_sync_not_uploaded">pas encore envoyé</string>
+    <string name="flight_sync_local_failed">Téléphone : échec de sauvegarde — réessayer</string>
+    <string name="flight_sync_local_pending">Téléphone : modifications non encore enregistrées</string>
+    <string name="flight_sync_local_saved">Téléphone : enregistré</string>
+    <string name="flight_sync_server_state">Serveur : %1$s</string>
+    <string name="flight_sync_upgrade_server">Mets le serveur à jour avant cet envoi : sa version ne garantit pas la conservation des photos existantes. La lecture reste possible.</string>
+    <string name="flight_sync_plan_payload">Plan, étapes, horaires et réglages. Pas de GPX sans vol enregistré, ni relief ou satellite. Choisis les photos à ajouter ou mettre à jour ; les autres restent sur le serveur.</string>
+    <string name="flight_sync_confirm_append">Envoyer le journal et %1$d photos (%2$s) ? Les photos sélectionnées sont ajoutées ou mises à jour. Les %3$d autres photos déjà sur le serveur sont conservées. La copie locale reste sur le téléphone.</string>
+    <string name="flight_plan_utc_compact">UTC ±HHMM</string>
     <string name="flight_cloud_mebibytes">%1$.1f Mio</string>
     <string name="flight_cloud_library">Téléphone et serveur</string>
     <string name="flight_cloud_connection">Connexion au serveur</string>
@@ -36,12 +57,11 @@
     <string name="flight_cloud_account_hint">Un token donne accès au compte, sans identifiant ni mot de passe. Il permet aussi d’activer une session d’édition.</string>
     <string name="flight_cloud_test_connect">Tester et connecter</string>
     <string name="flight_cloud_disconnect">Déconnecter ce téléphone</string>
-    <string name="flight_cloud_payload_hint">Trajet et réglages inclus. Coche les photos à conserver sur le serveur : leurs associations et calibrations les accompagnent. Jamais de satellite ni de relief.</string>
+    <string name="flight_cloud_payload_hint">GPX, mesures et réglages inclus. Coche les photos à ajouter ou mettre à jour, avec leurs associations et calibrations. Les autres photos du serveur sont conservées. Jamais de satellite ni de relief.</string>
     <string name="flight_cloud_select_all">Toutes</string>
     <string name="flight_cloud_select_none">Aucune</string>
     <string name="flight_cloud_selected">%1$d photos · %2$s</string>
     <string name="flight_cloud_confirm_send">Envoyer cette version ?</string>
-    <string name="flight_cloud_confirm_payload">Trajet, réglages et %1$d photos (%2$s avant compression).\n%3$d photos de la version serveur précédente ne feront plus partie de cette version. Les originaux locaux sont conservés.</string>
     <string name="flight_cloud_sent">Version enregistrée sur le serveur.</string>
     <string name="flight_cloud_loading">Lecture de la bibliothèque…</string>
     <string name="flight_cloud_connecting">Vérification de la connexion…</string>

@@ -21,13 +21,13 @@ internal fun FlightWorkspaceHome(
     onOpen: (String) -> Unit,
     onNew: (Boolean) -> Unit,
     onClose: () -> Unit,
-    onCloud: () -> Unit = {},
+    onCloud: (String?) -> Unit = {},
 ) {
     val planned = state.page == FlightPage.PLANS
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth()) {
             PlanAction(stringResource(R.string.flight_workspace_home), { onPage(FlightPage.HOME) })
-            PlanAction(stringResource(R.string.flight_cloud_library), onCloud)
+            PlanAction(stringResource(R.string.flight_cloud_connection), { onCloud(null) })
             Spacer(Modifier.weight(1f))
             PlanAction(stringResource(R.string.flight_mode_close), onClose)
         }
@@ -49,21 +49,18 @@ internal fun FlightWorkspaceHome(
                 state.activeRecording.journeyId?.let(onOpen)
             }
         } else {
+            val cloud = LocalFlightCloudUi.current?.controller
+            val rows =
+                flightLibraryRows(state.savedJourneys, cloud, true).filterNot {
+                    state.activeRecording.running && it.local?.id == state.activeRecording.journeyId
+                }
             PlanAction(stringResource(R.string.flight_plan_new), { onNew(false) })
-            if (state.savedJourneysLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            PlanAction(stringResource(R.string.flight_cloud_refresh), { cloud?.refresh() })
+            if (state.savedJourneysLoading || cloud?.busy == true)
+                LinearProgressIndicator(Modifier.fillMaxWidth())
             LazyColumn(Modifier.weight(1f)) {
-                items(
-                    state.savedJourneys.filter {
-                        it.sampleCount == 0 &&
-                            !(state.activeRecording.running &&
-                                it.id == state.activeRecording.journeyId)
-                    },
-                    key = { it.id },
-                ) { journey ->
-                    Row(Modifier.fillMaxWidth().clickable { onOpen(journey.id) }.padding(12.dp)) {
-                        Text(journey.name, color = Color.White, fontSize = 14.sp)
-                    }
-                    HorizontalDivider(color = Color(0xFF2A3842))
+                items(rows, key = { it.key }) { journey ->
+                    FlightCloudListRow(journey, state, onOpen, onCloud)
                 }
             }
         }

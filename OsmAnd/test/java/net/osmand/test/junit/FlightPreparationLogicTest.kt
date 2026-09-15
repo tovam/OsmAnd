@@ -8,6 +8,41 @@ import org.junit.Test
 
 /** Synthetic routes only; no files, devices, accounts or network are used by this suite. */
 class FlightPreparationLogicTest {
+    @Test
+    fun routeNameTracksCitiesButPreservesCustomTitles() {
+        val before = FlightPlan(listOf(FlightStop("Départ"), FlightStop("Arrivée")))
+        val after =
+            before.copy(
+                stops = listOf(FlightStop("Paris"), FlightStop("Vienne"), FlightStop("Podgorica"))
+            )
+        assertEquals(
+            "Paris → Vienne → Podgorica",
+            FlightJourneyNaming.updated("Départ -> arrivée", before, after),
+        )
+        assertEquals(
+            "Paris → Vienne → Podgorica",
+            FlightJourneyNaming.updated("Départ → Arrivée", before, after),
+        )
+        val next = after.copy(stops = after.stops.dropLast(1))
+        assertEquals(
+            "Paris → Vienne",
+            FlightJourneyNaming.updated(FlightJourneyNaming.route(after), after, next),
+        )
+        assertEquals("Vacances", FlightJourneyNaming.updated("Vacances", before, after))
+    }
+
+    @Test
+    fun compactUtcOffsetsAcceptBothSignsAndLegacyFormat() {
+        assertEquals(120, FlightPreparation.parseOffset("+0200"))
+        assertEquals(-330, FlightPreparation.parseOffset("-0530"))
+        assertEquals(120, FlightPreparation.parseOffset("+02:00"))
+        assertEquals(840, FlightPreparation.parseOffset("+1400"))
+        assertNull(FlightPreparation.parseOffset("+1460"))
+        assertNull(FlightPreparation.parseOffset("+1401"))
+        assertNull(FlightPreparation.parseOffset("-1201"))
+        assertNull(FlightPreparation.parseOffset("+02"))
+    }
+
     private val base = 1_800_000_000_000L
 
     private fun sample(

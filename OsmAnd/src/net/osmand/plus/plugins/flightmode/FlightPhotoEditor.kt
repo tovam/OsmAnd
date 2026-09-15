@@ -330,6 +330,7 @@ internal fun FlightPhotoEditor(
                 )
                 EditorAction(stringResource(R.string.flight_mode_close), onClose)
             }
+            FlightStorageStatusStrip(state, compact = true)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 listOf(
                         R.string.flight_cal_photo,

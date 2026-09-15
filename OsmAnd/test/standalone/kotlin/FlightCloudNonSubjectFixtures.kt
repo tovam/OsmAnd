@@ -17,6 +17,18 @@ class FlightJourneyStore(private val directory: File) {
             .put("schemaVersion", 9)
             .put("name", journey.name)
             .put(
+                "trip",
+                JSONObject()
+                    .put(
+                        "samples",
+                        JSONArray(
+                            journey.trip.samples.map {
+                                JSONArray(listOf(it.latitude, it.longitude))
+                            }
+                        ),
+                    ),
+            )
+            .put(
                 "photos",
                 JSONArray(
                     journey.photos.map {

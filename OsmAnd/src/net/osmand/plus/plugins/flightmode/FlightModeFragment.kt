@@ -188,7 +188,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onRehearsePreparation = viewModel::rehearsePreparation,
 					onPreparationPermissions = ::showPreparationPermissions,
 					onStopLive = { FlightRecordingService.stop(requireContext()) },
-					onToggleLiveMicrophone = ::toggleLiveMicrophone
+					onToggleLiveMicrophone = ::toggleLiveMicrophone,
+					onLocalJourneyRemoved = viewModel::localJourneyRemoved
 				)
 				if(showFlightCamera) FlightCameraScreen(viewLifecycleOwner,viewModel.uiState.liveState.latest,
 					onClose={showFlightCamera=false},onPrepareFile=viewModel::preparePhotoCapture,onCaptured=viewModel::finishPhotoCapture,

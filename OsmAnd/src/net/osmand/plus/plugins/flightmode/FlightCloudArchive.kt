@@ -22,6 +22,7 @@ internal fun FlightJourneyStore.writeCloudArchive(
     require(selected.size <= 1000)
     val portable =
         journey.copy(
+            name = FlightJourneyNaming.updated(journey.name, journey.plan, journey.plan),
             photos = selected,
             offlineAssets = FlightOfflineAssets(),
             offlineRequest = FlightOfflineAssets(),
@@ -43,10 +44,14 @@ internal fun FlightJourneyStore.writeCloudArchive(
             zip.closeEntry()
         }
         write("journey.json", json)
-        val gpx = buildGpx(portable).toByteArray(Charsets.UTF_8)
-        uncompressed += gpx.size
-        require(uncompressed <= FLIGHT_CLOUD_MAX_BYTES)
-        write("track.gpx", gpx)
+        val gpx =
+            if (portable.trip.samples.isEmpty()) null
+            else buildGpx(portable).toByteArray(Charsets.UTF_8)
+        if (gpx != null) {
+            uncompressed += gpx.size
+            require(uncompressed <= FLIGHT_CLOUD_MAX_BYTES)
+            write("track.gpx", gpx)
+        }
         selected.forEach { photo ->
             val file = File(photo.localPath)
             if (!file.isFile) throw IOException("cloud_photo_missing")
@@ -77,7 +82,7 @@ internal fun FlightJourneyStore.importCloudArchive(archive: File): FlightJourney
         ZipFile(archive).use { zip ->
             val entries = zip.entries().asSequence().toList()
             require(
-                entries.size in 2..1002 && entries.map { it.name }.distinct().size == entries.size
+                entries.size in 1..1002 && entries.map { it.name }.distinct().size == entries.size
             )
             require(entries.sumOf { it.size.coerceAtLeast(0) } <= FLIGHT_CLOUD_MAX_BYTES)
             require(
@@ -93,10 +98,14 @@ internal fun FlightJourneyStore.importCloudArchive(archive: File): FlightJourney
                 }
             )
             val manifest = requireNotNull(zip.getEntry("journey.json"))
-            require(manifest.size in 1..CLOUD_JSON_MAX_BYTES && zip.getEntry("track.gpx") != null)
+            require(manifest.size in 1..CLOUD_JSON_MAX_BYTES)
             val bytes =
                 zip.getInputStream(manifest).use { it.readBytesBounded(CLOUD_JSON_MAX_BYTES) }
             val root = JSONObject(bytes.toString(Charsets.UTF_8))
+            require(
+                root.getJSONObject("trip").getJSONArray("samples").length() == 0 ||
+                    zip.getEntry("track.gpx") != null
+            )
             val photos = root.optJSONArray("photos") ?: org.json.JSONArray()
             val names =
                 (0 until photos.length()).map { photos.getJSONObject(it).getString("storageName") }

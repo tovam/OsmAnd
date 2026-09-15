@@ -816,6 +816,7 @@ data class FlightUiState(
 	val pendingPhotos: List<FlightPhotoAttachment> = emptyList(),
 	val selectedPhotoId: String? = null,
 	val journeyMessage: String? = null,
+	val journeySaveError: String? = null,
 	val storageUsage: FlightStorageUsage? = null,
 	val storageUsageLoading: Boolean = false,
 	val photoMainCamera: Boolean = true,

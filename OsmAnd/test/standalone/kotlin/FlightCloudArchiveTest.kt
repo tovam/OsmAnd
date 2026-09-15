@@ -11,6 +11,63 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FlightCloudArchiveTest {
+    @Test
+    fun cloudRowsKeepCopyProvenanceAndShowServerOnlyFlights() {
+        val remote =
+            FlightCloudEntry("shared", "Server flight", "a".repeat(64), 100, 20, emptySet(), 10)
+        val first = FlightJourneySummary("copy1", "Local edit", 30, 10, 0)
+        val second = first.copy(id = "copy2", updatedAtMillis = 20)
+        val bindings =
+            listOf(
+                FlightCloudBinding("copy1", "shared", "b".repeat(64), 10),
+                FlightCloudBinding("copy2", "shared", remote.revision, 20, true),
+            )
+        val rows =
+            flightCloudRows(
+                listOf(first, second),
+                listOf(remote, remote.copy(id = "elsewhere")),
+                bindings,
+            )
+        assertEquals(3, rows.size)
+        assertEquals("b".repeat(64), rows.first { it.local?.id == "copy1" }.binding?.revision)
+        assertEquals(remote.revision, rows.first { it.local?.id == "copy2" }.binding?.revision)
+        assertEquals("elsewhere", rows.single { it.local == null }.remote?.id)
+    }
+
+    @Test
+    fun serverRecordingIsVisibleEvenWhenPhoneStillHasPlan() {
+        val local = FlightJourneySummary("local", "Plan", 10, 0, 0)
+        val remote =
+            FlightCloudEntry("remote", "Recorded", "a".repeat(64), 100, 20, emptySet(), 100)
+        val rows =
+            flightCloudRows(
+                listOf(local),
+                listOf(remote),
+                listOf(FlightCloudBinding("local", "remote", "b".repeat(64), 10)),
+            )
+        assertEquals(2, rows.size)
+        assertEquals(0, rows.single { it.local != null }.local!!.sampleCount)
+        assertEquals(100, rows.single { it.local == null }.remote!!.samples)
+    }
+
+    @Test
+    fun finishedSaveCannotAcknowledgeNewerEditsOrAnotherJourney() {
+        val source = FlightUiState(journeyId = "one", journeyName = "Original")
+        assertTrue(source.copy(journeyDirty = true).hasSameJournalContentAs(source))
+        assertFalse(source.copy(journeyName = "Edited during save").hasSameJournalContentAs(source))
+        assertFalse(source.copy(journeyId = "other").hasSameJournalContentAs(source))
+        val photo = FlightPhotoAttachment("p", "test.jpg", "synthetic.jpg", null, null)
+        val withPhoto = source.copy(photos = listOf(photo))
+        assertFalse(
+            withPhoto
+                .copy(photos = listOf(photo.copy(rotationDegrees = 22f)))
+                .hasSameJournalContentAs(withPhoto)
+        )
+        val simulated = source.copy(trip = recordedFlightTrip("Simulation", emptyList()))
+        assertFalse(simulated.hasSameJournalContentAs(source))
+        assertTrue(simulated.hasSameJournalContentAs(source, includeTrip = false))
+    }
+
     private fun fixture(block: (File, FlightJourneyStore, FlightJourney) -> Unit) {
         val parent = File("OsmAnd/build").also { it.mkdirs() }
         val directory = Files.createTempDirectory(parent.toPath(), "cloud-fixture-").toFile()
@@ -58,6 +115,17 @@ class FlightCloudArchiveTest {
     }
 
     @Test
+    fun oldGenericPlanNameIsUpdatedInCloudPayload() = fixture { dir, store, journey ->
+        val plan = FlightPlan(listOf(FlightStop("Paris"), FlightStop("Podgorica")))
+        store.writeCloudArchive(
+            journey.copy(name = "Départ -> arrivée", plan = plan),
+            emptySet(),
+            File(dir, "plan.zip"),
+        )
+        assertEquals("Paris → Podgorica", store.serialized.name)
+    }
+
+    @Test
     fun sendsOnlySelectedPhotosAndNeverOfflineAssets() = fixture { dir, store, journey ->
         val archive = File(dir, "transfer.zip")
         store.writeCloudArchive(journey, setOf("photo-a"), archive)
@@ -67,7 +135,7 @@ class FlightCloudArchiveTest {
         assertEquals(false, store.serialized.plan.preparation?.automatic)
         ZipFile(archive).use { zip ->
             assertEquals(
-                setOf("journey.json", "track.gpx", "photos/image-0.jpg"),
+                setOf("journey.json", "photos/image-0.jpg"),
                 zip.entries().asSequence().map { it.name }.toSet(),
             )
             assertArrayEquals(
@@ -98,10 +166,19 @@ class FlightCloudArchiveTest {
     }
 
     @Test
+    fun recordedFlightIncludesGpx() = fixture { dir, store, journey ->
+        val point = FlightSample(0, 0, 1800000000000L, 45.0, 10.0, 12000.0, 250f, 90f, 5f)
+        val recorded = journey.copy(trip = recordedFlightTrip("Recorded", listOf(point)))
+        val archive = File(dir, "recorded.zip")
+        store.writeCloudArchive(recorded, emptySet(), archive)
+        ZipFile(archive).use { assertNotNull(it.getEntry("track.gpx")) }
+    }
+
+    @Test
     fun noPhotoExportAndMissingPhotoAreExplicit() = fixture { dir, store, journey ->
         val archive = File(dir, "transfer.zip")
         store.writeCloudArchive(journey, emptySet(), archive)
-        ZipFile(archive).use { assertEquals(2, it.size()) }
+        ZipFile(archive).use { assertEquals(1, it.size()) }
         val missing =
             journey.copy(
                 photos = listOf(journey.photos[0].copy(localPath = File(dir, "absent.jpg").path))

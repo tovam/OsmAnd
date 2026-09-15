@@ -18,7 +18,7 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$sources/FlightPhotoCalibration.kt" "$sources/FlightTerrainCoordinates.kt" \
   "$sources/FlightPhotoFitDiagnostics.kt" \
   "$sources/FlightDownloadCancellation.kt" \
-  "$sources/FlightCloudArchive.kt" "$sources/FlightCloudClient.kt" \
+  "$sources/FlightCloudArchive.kt" "$sources/FlightCloudClient.kt" "$sources/FlightJourneyNaming.kt" "$sources/FlightCloudVersions.kt" \
   "$sources/FlightOfflinePreparation.kt" "$sources/FlightLivePredictor.kt" \
   "$sources/FlightRouteHypothesis.kt" "$sources/FlightTerrainTilePlanner.kt" \
   "$sources/FlightTerrainModels.kt" "$sources/FlightProfilePlanner.kt" "$sources/FlightTrackMath.kt" \

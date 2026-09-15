@@ -49,6 +49,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -85,6 +88,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -233,8 +237,22 @@ fun FlightModeScreen(
 	onRehearsePreparation: () -> Unit = {},
 	onPreparationPermissions: () -> Unit = {},
 	onStopLive: () -> Unit = {},
-	onToggleLiveMicrophone: () -> Unit = {}
+	onToggleLiveMicrophone: () -> Unit = {},
+	onLocalJourneyRemoved: (String) -> Unit = {}
 ) {
+	val cloudContext = LocalContext.current.applicationContext
+	val cloudScope = rememberCoroutineScope()
+	val cloud = remember(cloudContext) { FlightCloudController(cloudContext, cloudScope) }
+	var showCloudLibrary by remember { mutableStateOf(false) }
+	var cloudSelectedKey by remember { mutableStateOf<String?>(null) }
+	val openCloud: (String?) -> Unit = { cloudSelectedKey = it; showCloudLibrary = true }
+	LaunchedEffect(cloud) { cloud.initialize() }
+	DisposableEffect(cloud) { onDispose { cloud.close() } }
+	LaunchedEffect(state.savedJourneys) { cloud.acceptLocalSummaries(state.savedJourneys) }
+	LaunchedEffect(state.page) {
+		if (state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS, FlightPage.WINDOW, FlightPage.PHOTO)) cloud.refresh()
+	}
+	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud)) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
 			primary = FlightOrange,
@@ -246,8 +264,8 @@ fun FlightModeScreen(
 		)
 	) {
 		val safeDrawingInsets = WindowInsets.safeDrawing
-		var showCloudLibrary by remember { mutableStateOf(false) }
-		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney)
+		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney,
+			cloud, cloudSelectedKey, when (state.page) { FlightPage.PLANS -> 1; FlightPage.JOURNEYS -> 2; else -> 0 }, onLocalJourneyRemoved)
 		LaunchedEffect(state.replayPlaying, state.replaySpeed) {
 			while (state.replayPlaying) {
 				delay(100)
@@ -306,7 +324,7 @@ fun FlightModeScreen(
 		) {
 			when (state.page) {
 				FlightPage.HOME, FlightPage.PLANS -> FlightWorkspaceHome(state, onPageChange,
-					onOpenJourney, onNewPreparation, onClose, onCloud = { showCloudLibrary = true })
+					onOpenJourney, onNewPreparation, onClose, onCloud = openCloud)
 				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
 					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction) }
 					FlightBottomNavigation(state, onPageChange)
@@ -417,7 +435,7 @@ fun FlightModeScreen(
 					onSave = onSaveJourney,
 					onExport = onExportJourney,
 					onOpen = onOpenJourney,
-					onCloud = { showCloudLibrary = true }
+					onCloud = openCloud
 				)
 			}
 
@@ -448,6 +466,7 @@ fun FlightModeScreen(
 				)
 			}
 		}
+	}
 	}
 }
 
@@ -1031,6 +1050,7 @@ private fun WindowScreen(
 	}
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_window), state.sessionMode, onClose)
+		FlightStorageStatusStrip(state)
 		Box(Modifier.weight(1f).fillMaxWidth()) {
 			FlightWindowScene(
 				placement = state.windowPlacement,
@@ -1729,6 +1749,7 @@ private fun PhotoScreen(
 	val fullScreenPhoto = all.firstOrNull { it.id == fullScreenPhotoId }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
+		FlightStorageStatusStrip(state)
 		Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
 			Text(stringResource(R.string.flight_mode_attached_photos, state.photos.size), color = FlightMuted,
 				fontSize = 11.sp, modifier = Modifier.weight(1f))
@@ -2041,32 +2062,41 @@ private fun JourneysScreen(
 	onSave: () -> Unit,
 	onExport: () -> Unit,
 	onOpen: (String) -> Unit,
-	onCloud: () -> Unit
+	onCloud: (String?) -> Unit
 ) {
-	val pastJourneys = state.savedJourneys.filter { it.sampleCount > 0 &&
-		!(state.activeRecording.running && it.id == state.activeRecording.journeyId) }
+	val cloud = LocalFlightCloudUi.current?.controller
+	val pastJourneys = flightLibraryRows(state.savedJourneys, cloud, false).filterNot {
+		state.activeRecording.running && it.local?.id == state.activeRecording.journeyId }
+	var importMenu by remember { mutableStateOf(false) }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_workspace_past), FlightSessionMode.REPLAY, onClose)
+		PlanAction(stringResource(R.string.flight_workspace_home), { onPageChange(FlightPage.HOME) })
 		Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-			PlanAction(stringResource(R.string.flight_workspace_home), { onPageChange(FlightPage.HOME) })
-			PlanAction(stringResource(R.string.flight_cloud_library), onCloud)
-			PlanAction(stringResource(R.string.flight_mode_load_osmand_track), onSelectInternalTrack)
-			PlanAction(stringResource(R.string.flight_mode_load_gpx_file), onImport)
+			Box {
+				PlanAction(stringResource(R.string.flight_sync_import), { importMenu = true })
+				DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
+					PlanAction(stringResource(R.string.flight_mode_load_osmand_track), { importMenu = false; onSelectInternalTrack() })
+					PlanAction(stringResource(R.string.flight_mode_import_journey_or_gpx), { importMenu = false; onImport() })
+				}
+			}
+			PlanAction(stringResource(R.string.flight_cloud_connection), { onCloud(null) })
+			PlanAction(stringResource(R.string.flight_cloud_refresh), { cloud?.refresh() })
 		}
 		LazyColumn(Modifier.weight(1f)) {
 			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, pastJourneys.size)) }
-			if (state.savedJourneysLoading) {
+			if (state.savedJourneysLoading || cloud?.busy == true) {
 				item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
 			}
 			if (pastJourneys.isEmpty() && !state.savedJourneysLoading) {
 				item { Text(stringResource(R.string.flight_mode_no_saved_journey), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
 			} else {
 				itemsIndexed(pastJourneys) { _, journey ->
-					SavedJourneyRow(journey = journey, onOpen = onOpen)
+					FlightCloudListRow(journey, state, onOpen, onCloud)
 				}
 			}
 			if (state.sessionMode == FlightSessionMode.REPLAY && state.trip != null) {
 			item { SectionTitle(stringResource(R.string.flight_mode_current_journey)) }
+			item { FlightStorageStatusStrip(state) }
 			item {
 				BasicTextField(
 					value = state.journeyName,
@@ -2113,25 +2143,6 @@ private fun JourneysScreen(
 						onSave
 					)
 					FlatButton(stringResource(R.string.flight_mode_export_journey), Modifier.weight(1f), false, onExport)
-				}
-			}
-			item {
-				Row(
-					Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
-					horizontalArrangement = Arrangement.spacedBy(8.dp)
-				) {
-					FlatButton(
-						stringResource(R.string.flight_mode_load_osmand_track),
-						Modifier.weight(1f),
-						false,
-						onSelectInternalTrack
-					)
-					FlatButton(
-						stringResource(R.string.flight_mode_import_journey_or_gpx),
-						Modifier.weight(1f),
-						false,
-						onImport
-					)
 				}
 			}
 			}
@@ -2988,11 +2999,12 @@ private fun FlightWindowScene(
 								val horizontalFov = latestPlacement.horizontalFieldOfViewDegrees(
 									size.width.toFloat() / size.height.coerceAtLeast(1)
 								)
-								val verticalFov = latestPlacement.verticalFieldOfViewDegrees()
 								latestMoveLook(
 									-pan.x / size.width.coerceAtLeast(1) * horizontalFov,
-									pan.y / size.height.coerceAtLeast(1) * verticalFov
+									0f
 								)
+								// Change the field of view, never the eye position or the aircraft anchor.
+								if (pan.y != 0f) latestChangeZoom(kotlin.math.exp(-pan.y / size.height.coerceAtLeast(1) * 2f))
 							}
 							if (abs(zoom - 1f) > 0.002f) latestChangeZoom(zoom)
 						}
@@ -3975,7 +3987,7 @@ private fun SourceToggle(title: String, checked: Boolean, onChecked: (Boolean) -
 }
 
 private fun routeTitle(state: FlightUiState): String {
-	return state.journeyName.takeIf { it.isNotBlank() }
+	return FlightJourneyNaming.updated(state.journeyName, state.plan, state.plan).takeIf { it.isNotBlank() }
 		?: state.trip?.name
 		?: state.plan.stops.joinToString(" → ") { it.name }
 }

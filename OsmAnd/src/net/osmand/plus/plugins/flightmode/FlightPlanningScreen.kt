@@ -3,6 +3,7 @@ package net.osmand.plus.plugins.flightmode
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -11,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -162,6 +164,7 @@ internal fun FlightPlanningScreen(
                 modifier = Modifier.padding(8.dp),
             )
         }
+        FlightStorageStatusStrip(state)
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
@@ -824,7 +827,8 @@ private fun FlightDateField(
     onChange: (Long, Int) -> Unit,
 ) {
     val context = LocalContext.current
-    var zone by remember(offset) { mutableStateOf(FlightPreparation.offsetText(offset)) }
+    var zone by
+        remember(offset) { mutableStateOf(FlightPreparation.offsetText(offset).replace(":", "")) }
     fun calendar() =
         Calendar.getInstance(SimpleTimeZone(offset * 60_000, "flight-offset")).apply {
             timeInMillis = millis.takeIf { it > 0 } ?: System.currentTimeMillis()
@@ -878,12 +882,28 @@ private fun FlightDateField(
         OutlinedTextField(
             zone,
             {
-                zone = it
-                val o = FlightPreparation.parseOffset(it)
+                val digits = it.filter(Char::isDigit).take(4)
+                zone = (if (it.startsWith("-")) "-" else "+") + digits
+                val o = FlightPreparation.parseOffset(zone)
                 // An incomplete edit must never erase the stored schedule or reset its simulation.
                 if (o != null) onChange(FlightPreparation.parseDate(date, o) ?: millis, o)
             },
-            label = { Text("UTC ±HH:mm", fontSize = 10.sp) },
+            label = { Text(stringResource(R.string.flight_plan_utc_compact), fontSize = 10.sp) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            leadingIcon = {
+                TextButton(
+                    onClick = {
+                        zone =
+                            (if (zone.startsWith("-")) "+" else "-") +
+                                zone.removePrefix("+").removePrefix("-")
+                        FlightPreparation.parseOffset(zone)?.let { o ->
+                            onChange(FlightPreparation.parseDate(date, o) ?: millis, o)
+                        }
+                    }
+                ) {
+                    Text("±")
+                }
+            },
             singleLine = true,
             modifier = Modifier.weight(1f).padding(2.dp),
             textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),

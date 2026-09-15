@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -27,18 +26,6 @@ import java.io.File
 import kotlinx.coroutines.*
 import net.osmand.plus.R
 
-private data class CloudLibraryRow(
-    val local: FlightJourneySummary?,
-    val remote: FlightCloudEntry?,
-    val binding: FlightCloudBinding?,
-) {
-    val key: String
-        get() = local?.let { "local:${it.id}" } ?: "remote:${remote!!.id}"
-
-    val name: String
-        get() = local?.name ?: remote!!.name
-}
-
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 internal fun FlightCloudScreen(
@@ -46,17 +33,19 @@ internal fun FlightCloudScreen(
     onClose: () -> Unit,
     onOpen: (String) -> Unit,
     onSave: () -> Unit,
+    controller: FlightCloudController,
+    selectedKey: String? = null,
+    category: Int = 0,
+    onRemoved: (String) -> Unit = {},
 ) {
-    val context = LocalContext.current.applicationContext
-    val scope = rememberCoroutineScope()
-    val controller = remember { FlightCloudController(context, scope) }
     var settings by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(0) }
-    var expanded by remember { mutableStateOf(state.journeyId?.let { "local:$it" }) }
+    var expanded by remember { mutableStateOf(selectedKey ?: state.journeyId?.let { "local:$it" }) }
     var downloadConfirmation by remember { mutableStateOf<FlightCloudEntry?>(null) }
     var cancelConfirmation by remember { mutableStateOf(false) }
+    var removeConfirmation by remember { mutableStateOf<String?>(null) }
     var now by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
-    LaunchedEffect(Unit) { controller.initialize() }
+    LaunchedEffect(Unit) { controller.refresh() }
     LaunchedEffect(Unit) {
         while (true) {
             delay(1000)
@@ -67,7 +56,12 @@ internal fun FlightCloudScreen(
     LaunchedEffect(state.journeyDirty) {
         if (!state.journeyDirty && !controller.busy) controller.refresh()
     }
-    DisposableEffect(controller) { onDispose { controller.close() } }
+    DisposableEffect(controller) {
+        onDispose {
+            controller.lock()
+            controller.dismissUpload()
+        }
+    }
     val remaining = ((controller.lease?.expiresElapsed ?: 0L) - now).coerceAtLeast(0L)
     fun back() {
         when {
@@ -219,27 +213,25 @@ internal fun FlightCloudScreen(
                         }
                     }
                     val rows =
-                        remember(controller.local, controller.remote, controller.bindings, filter) {
-                            val used = mutableSetOf<String>()
-                            val localRows =
-                                controller.local.map { local ->
-                                    val binding =
-                                        controller.bindings.firstOrNull { it.localId == local.id }
-                                    val remote =
-                                        controller.remote.firstOrNull {
-                                            it.id == (binding?.remoteId ?: local.id)
-                                        }
-                                    remote?.let { used += it.id }
-                                    CloudLibraryRow(local, remote, binding)
-                                }
-                            (localRows +
-                                    controller.remote
-                                        .filterNot { it.id in used }
-                                        .map { CloudLibraryRow(null, it, null) })
+                        remember(
+                            controller.local,
+                            controller.remote,
+                            controller.bindings,
+                            filter,
+                            category,
+                        ) {
+                            flightCloudRows(
+                                    controller.local,
+                                    controller.remote,
+                                    controller.bindings,
+                                )
                                 .filter {
-                                    filter == 0 ||
-                                        (filter == 1 && it.local != null) ||
-                                        (filter == 2 && it.remote != null)
+                                    (category == 0 ||
+                                        ((it.local?.sampleCount ?: it.remote!!.samples) == 0) ==
+                                            (category == 1)) &&
+                                        (filter == 0 ||
+                                            (filter == 1 && it.local != null) ||
+                                            (filter == 2 && it.remote != null))
                                 }
                                 .sortedByDescending {
                                     it.local?.updatedAtMillis ?: it.remote!!.updatedAt
@@ -311,6 +303,28 @@ internal fun FlightCloudScreen(
                                 }
                                 if (row.remote != null && !controller.serverVerified)
                                     CloudHint(R.string.flight_cloud_unverified)
+                                row.local?.let {
+                                    Text(
+                                        stringResource(
+                                            R.string.flight_sync_local_date,
+                                            flightVersionDate(it.updatedAtMillis),
+                                        ),
+                                        color = Color.Gray,
+                                        fontSize = 10.sp,
+                                    )
+                                }
+                                row.remote?.let {
+                                    Text(
+                                        stringResource(
+                                            R.string.flight_sync_remote_date,
+                                            flightVersionDate(it.updatedAt),
+                                            it.revision.take(8),
+                                            it.photoIds.size,
+                                        ),
+                                        color = Color.Gray,
+                                        fontSize = 10.sp,
+                                    )
+                                }
                                 if (conflict && row.local != null)
                                     CloudHint(R.string.flight_cloud_server_changed)
                                 else if (
@@ -319,6 +333,12 @@ internal fun FlightCloudScreen(
                                         row.local.updatedAtMillis != row.binding.localUpdatedAt
                                 )
                                     CloudHint(R.string.flight_cloud_local_changed)
+                                else if (row.local != null && row.remote != null && !conflict)
+                                    CloudHint(
+                                        if (row.binding?.allLocalPhotosIncluded == true)
+                                            R.string.flight_sync_sent
+                                        else R.string.flight_sync_partial
+                                    )
                                 if (expanded == row.key) {
                                     if (recording) CloudHint(R.string.flight_cloud_recording)
                                     FlowRow(Modifier.fillMaxWidth()) {
@@ -377,6 +397,24 @@ internal fun FlightCloudScreen(
                                                 )
                                             }
                                         }
+                                        if (row.local != null && row.remote != null)
+                                            TextButton(
+                                                onClick = { removeConfirmation = row.local.id },
+                                                enabled =
+                                                    !controller.busy &&
+                                                        !dirty &&
+                                                        !recording &&
+                                                        !conflict &&
+                                                        row.binding?.allLocalPhotosIncluded ==
+                                                            true &&
+                                                        row.binding.localUpdatedAt ==
+                                                            row.local.updatedAtMillis,
+                                            ) {
+                                                Text(
+                                                    stringResource(R.string.flight_sync_remove),
+                                                    fontSize = 12.sp,
+                                                )
+                                            }
                                     }
                                 }
                             }
@@ -385,6 +423,28 @@ internal fun FlightCloudScreen(
                     }
                 }
             }
+        }
+        removeConfirmation?.let { id ->
+            AlertDialog(
+                onDismissRequest = { removeConfirmation = null },
+                title = { Text(stringResource(R.string.flight_sync_remove)) },
+                text = { Text(stringResource(R.string.flight_sync_remove_confirm)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            removeConfirmation = null
+                            controller.removeLocal(id, onRemoved)
+                        }
+                    ) {
+                        Text(stringResource(R.string.flight_sync_remove))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { removeConfirmation = null }) {
+                        Text(stringResource(R.string.shared_string_cancel))
+                    }
+                },
+            )
         }
         downloadConfirmation?.let { entry ->
             AlertDialog(
@@ -511,7 +571,10 @@ private fun ColumnScope.CloudUploadSelection(
         modifier = Modifier.padding(horizontal = 12.dp),
     )
     Text(
-        stringResource(R.string.flight_cloud_payload_hint),
+        stringResource(
+            if (upload.journey.trip.samples.isEmpty()) R.string.flight_sync_plan_payload
+            else R.string.flight_cloud_payload_hint
+        ),
         color = Color.LightGray,
         fontSize = 11.sp,
         modifier = Modifier.padding(12.dp),
@@ -593,7 +656,7 @@ private fun ColumnScope.CloudUploadSelection(
             text = {
                 Text(
                     stringResource(
-                        R.string.flight_cloud_confirm_payload,
+                        R.string.flight_sync_confirm_append,
                         selected.size,
                         cloudSize(bytes),
                         (upload.remote?.photoIds.orEmpty() - selected).size,

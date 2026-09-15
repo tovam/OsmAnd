@@ -13,13 +13,6 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
-internal data class FlightCloudBinding(
-    val localId: String,
-    val remoteId: String,
-    val revision: String,
-    val localUpdatedAt: Long,
-)
-
 /** Account token encrypted with Android Keystore; no cloud credentials in device backups. */
 internal class FlightCloudSettings(context: Context) {
     private val configuration =
@@ -104,6 +97,7 @@ internal class FlightCloudSettings(context: Context) {
                             row.getString("remoteId"),
                             row.getString("revision"),
                             row.getLong("localUpdatedAt"),
+                            row.optBoolean("allLocalPhotosIncluded", false),
                         )
                     }
                     .getOrNull()
@@ -114,18 +108,14 @@ internal class FlightCloudSettings(context: Context) {
     fun bind(scope: String, binding: FlightCloudBinding) {
         val root = readBindings()
         val account = root.optJSONObject(scope) ?: JSONObject()
-        // One canonical local copy per remote entry. Older copies remain independent local
-        // journals.
-        account.keys().asSequence().toList().forEach { id ->
-            if (account.getJSONObject(id).optString("remoteId") == binding.remoteId)
-                account.remove(id)
-        }
+        // Preserve provenance and the base revision of every older local copy.
         account.put(
             binding.localId,
             JSONObject()
                 .put("remoteId", binding.remoteId)
                 .put("revision", binding.revision)
-                .put("localUpdatedAt", binding.localUpdatedAt),
+                .put("localUpdatedAt", binding.localUpdatedAt)
+                .put("allLocalPhotosIncluded", binding.allLocalPhotosIncluded),
         )
         root.put(scope, account)
         write(bindings, root)

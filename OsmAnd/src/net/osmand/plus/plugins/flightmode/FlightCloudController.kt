@@ -57,6 +57,13 @@ internal class FlightCloudController(
     var serverVerified by mutableStateOf(false)
         private set
 
+    var serverSupportsAppend by mutableStateOf(false)
+        private set
+
+    fun acceptLocalSummaries(summaries: List<FlightJourneySummary>) {
+        local = summaries
+    }
+
     fun initialize() =
         task(R.string.flight_cloud_loading) {
             local = io { store.list() }
@@ -69,6 +76,7 @@ internal class FlightCloudController(
         bindings = io { settings.bindings(config.scope) }
         serverVerified = false
         remote = io { client!!.list() }
+        serverSupportsAppend = client!!.protocolVersion >= 2
         serverVerified = true
     }
 
@@ -88,6 +96,7 @@ internal class FlightCloudController(
             val candidate = FlightCloudClient(config)
             client = candidate
             val listing = io { candidate.list() }
+            serverSupportsAppend = candidate.protocolVersion >= 2
             io { settings.save(config) }
             connection = config
             remote = listing
@@ -133,6 +142,7 @@ internal class FlightCloudController(
             val binding = bindings.firstOrNull { it.localId == id }
             val existing = remote.firstOrNull { it.id == (binding?.remoteId ?: id) }
             if (!serverVerified) throw FlightCloudFailure("refresh_required")
+            if (!serverSupportsAppend) throw FlightCloudFailure("server_update_required")
             if (existing != null && binding?.revision != existing.revision)
                 throw FlightCloudFailure("revision_conflict")
             val journey = io { store.load(id) }
@@ -174,6 +184,7 @@ internal class FlightCloudController(
                         result.id,
                         result.revision,
                         selected.journey.updatedAtMillis,
+                        photoIds.containsAll(selected.journey.photos.map { it.id }),
                     )
                 io { settings.bind(config.scope, binding) }
                 bindings = io { settings.bindings(config.scope) }
@@ -206,12 +217,44 @@ internal class FlightCloudController(
                             entry.id,
                             entry.revision,
                             imported.updatedAtMillis,
+                            true,
                         ),
                     )
                 }
                 bindings = io { settings.bindings(config.scope) }
                 local = io { store.list() }
                 open(imported.id)
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+            }
+        }
+
+    fun removeLocal(id: String, removed: (String) -> Unit) =
+        task(R.string.flight_sync_verifying_removal) {
+            val config = requireNotNull(connection)
+            val binding =
+                bindings.firstOrNull { it.localId == id }
+                    ?: throw FlightCloudFailure("removal_unverified")
+            if (!binding.allLocalPhotosIncluded) throw FlightCloudFailure("removal_unverified")
+            client = FlightCloudClient(config)
+            val listing = io { client!!.list() }
+            val entry =
+                listing.firstOrNull { it.id == binding.remoteId }
+                    ?: throw FlightCloudFailure("removal_unverified")
+            if (entry.revision != binding.revision) throw FlightCloudFailure("revision_conflict")
+            val file = temporaryArchive()
+            try {
+                // Verify the downloadable bytes, not only the server listing, before local removal.
+                io { client!!.download(entry, file, ::publishProgress) }
+                currentCoroutineContext().ensureActive()
+                // Once removal starts, reconcile the open editor even if the user cancels the task.
+                withContext(NonCancellable) {
+                    io { store.removeVerifiedCloudCopy(id, binding.localUpdatedAt, entry.photoIds) }
+                    remote = listing
+                    local = local.filterNot { it.id == id }
+                    removed(id)
+                    message = context.getString(R.string.flight_sync_removed)
+                }
             } finally {
                 withContext(NonCancellable + Dispatchers.IO) { file.delete() }
             }
@@ -262,6 +305,8 @@ internal class FlightCloudController(
                             "archive_too_large" -> R.string.flight_cloud_too_large
                             "cloud_photo_missing" -> R.string.flight_cloud_photo_missing
                             "refresh_required" -> R.string.flight_cloud_refresh_required
+                            "server_update_required" -> R.string.flight_sync_upgrade_server
+                            "removal_unverified" -> R.string.flight_sync_removal_unverified
                             "checksum_mismatch",
                             "invalid_archive",
                             "incomplete_transfer" -> R.string.flight_cloud_invalid_archive
