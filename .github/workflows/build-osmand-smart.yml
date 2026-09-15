@@ -77,6 +77,8 @@ jobs:
           git -C core apply ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
           git -C core apply --check ../android/OsmAnd/patches/osmand-core/flight-volumetric-geometry.patch
           git -C core apply ../android/OsmAnd/patches/osmand-core/flight-volumetric-geometry.patch
+          git -C core apply --check ../android/OsmAnd/patches/osmand-core/basemap-overzoom-fallback.patch
+          git -C core apply ../android/OsmAnd/patches/osmand-core/basemap-overzoom-fallback.patch
           cp android/OsmAnd/patches/osmand-core/FlightTubeMesh.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/FlightVectorLineBridge.cpp core/wrappers/java/
 
