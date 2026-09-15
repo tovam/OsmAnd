@@ -1,6 +1,23 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
-    <string name="flight_test_start">Tester hors ligne</string>
+    <string name="flight_camera_settings_failed">Réglage refusé par l’appareil photo</string>
+    <string name="flight_camera_manual">Exposition manuelle</string>
+    <string name="flight_camera_auto">Exposition auto</string>
+    <string name="flight_camera_focus_manual">Mise au point manuelle</string>
+    <string name="flight_camera_focus_auto">Autofocus</string>
+    <string name="flight_camera_wb_auto">WB auto</string>
+    <string name="flight_camera_wb_day">Soleil</string>
+    <string name="flight_camera_wb_cloud">Nuageux</string>
+    <string name="flight_camera_wb_warm">Tungstène</string>
+    <string name="flight_immersion_title">Simulation du direct</string>
+    <string name="flight_immersion_start">Simuler le vol en cours</string>
+    <string name="flight_immersion_name">[Simulation] %1$s</string>
+    <string name="flight_immersion_sources">GPS et horloge simulés · photo, micro et batterie réels</string>
+    <string name="flight_immersion_landed">Simulation terminée · atterrissage détecté</string>
+    <string name="flight_immersion_stopped">Simulation arrêtée · pas de fin automatique détectée</string>
+    <string name="flight_back_library">‹ Mes vols</string>
+    <string name="flight_edit_plan">Préparation</string>
+    <string name="flight_test_start">Explorer hors ligne</string>
     <string name="flight_test_preparing">Simulation…</string>
     <string name="flight_test_offline">Test hors ligne · aucun téléchargement</string>
     <string name="flight_test_online">Réseau autorisé</string>

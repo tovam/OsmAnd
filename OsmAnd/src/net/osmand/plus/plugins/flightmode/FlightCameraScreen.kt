@@ -64,6 +64,7 @@ internal fun FlightCameraScreen(
     var minZoom by remember { mutableFloatStateOf(1f) }
     var maxZoom by remember { mutableFloatStateOf(1f) }
     var exposure by remember { mutableIntStateOf(0) }
+    var manualExposure by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var saved by remember { mutableIntStateOf(0) }
@@ -84,7 +85,7 @@ internal fun FlightCameraScreen(
         )
         onDispose { active = false }
     }
-    DisposableEffect(provider, selected, owner) {
+    DisposableEffect(provider, cameras, selected, owner) {
         val p = provider
         val preview =
             Preview.Builder().build().apply { setSurfaceProvider(previewView.surfaceProvider) }
@@ -225,7 +226,8 @@ internal fun FlightCameraScreen(
                         enabled = !busy,
                     )
             }
-            camera
+            camera?.let { FlightCameraControls(it,!busy,{manualExposure=it},{error=it}) }
+            camera?.takeUnless { manualExposure }
                 ?.cameraInfo
                 ?.exposureState
                 ?.takeIf { it.isExposureCompensationSupported }
