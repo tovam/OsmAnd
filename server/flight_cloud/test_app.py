@@ -73,6 +73,16 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(self.put(HTTP_IF_NONE_MATCH="*")["status"], 403)
         self.assertEqual(self.call("GET", "/v1/journeys", token="invalid")["status"], 401)
 
+    def test_listing_does_not_wait_for_an_upload_lock(self):
+        head = self.put(HTTP_X_EDIT_TOKEN=self.lease(), HTTP_IF_NONE_MATCH="*")["json"]
+        with ThreadPoolExecutor(1) as pool:
+            with self.app.locked("one"):
+                # A photo merge can hold this lock for seconds. Metadata must stay readable.
+                pending = pool.submit(self.call, "GET", "/v1/journeys")
+                response = pending.result(timeout=2)
+                self.assertEqual(response["status"], 200)
+                self.assertEqual(response["json"]["journeys"], [head])
+
     def test_round_trip_with_optional_photos_and_isolated_accounts(self):
         data = archive(photo=True)
         result = self.put(data, HTTP_X_EDIT_TOKEN=self.lease(), HTTP_IF_NONE_MATCH="*")

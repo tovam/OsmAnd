@@ -220,8 +220,10 @@ class FlightCloud:
             account = self.authenticate(env)
             method, path = env["REQUEST_METHOD"], env.get("PATH_INFO", "")
             if method == "GET" and path == "/v1/journeys":
-                with self.locked(account) as directory:
-                    rows = [load_json(p.read_bytes()) for p in directory.glob("*/head.json")]
+                # Heads are individually published with atomic replace. A list may observe the
+                # previous revision during an upload, but never needs to wait for ZIP merging.
+                directory = self.root / account
+                rows = [load_json(p.read_bytes()) for p in directory.glob("*/head.json")]
                 body = {"journeys": sorted(rows, key=lambda r: r["updatedAt"], reverse=True),
                         "maxUploadBytes": MAX_UPLOAD, "protocolVersion": 2}
             elif method == "POST" and path == "/v1/edit-session":
