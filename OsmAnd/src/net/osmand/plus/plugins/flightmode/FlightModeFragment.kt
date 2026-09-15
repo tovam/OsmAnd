@@ -184,6 +184,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onPreloadPreparation = viewModel::preloadPreparation,
 					onCancelPreparationDownload = viewModel::pausePreparationDownload,
 					onRehearsePreparation = { viewModel.rehearsePreparation() },
+					onSimulateLive = viewModel::startLiveSimulation,
 					onPreparationPermissions = ::showPreparationPermissions,
 					onStopLive = { FlightRecordingService.stop(requireContext()) },
 					onToggleLiveMicrophone = ::toggleLiveMicrophone,

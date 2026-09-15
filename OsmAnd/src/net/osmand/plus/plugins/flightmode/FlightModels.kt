@@ -731,7 +731,8 @@ data class FlightJourney(
 	val photos: List<FlightPhotoAttachment>,
 	val offlineAssets: FlightOfflineAssets = FlightOfflineAssets(),
 	val batteryHistory: List<FlightBatteryPoint> = emptyList(),
-	val offlineRequest: FlightOfflineAssets = FlightOfflineAssets()
+	val offlineRequest: FlightOfflineAssets = FlightOfflineAssets(),
+	val simulation: Boolean = false
 )
 
 /** Ground point receiving an additional satellite-detail ring. */
@@ -781,6 +782,7 @@ data class FlightUiState(
 	val offlineSimulation: Boolean = false,
 	val simulationLoading: Boolean = false,
 	val simulationError: String? = null,
+	val simulatedJourney: Boolean = false,
 	val scheduledPreparation: FlightPreparation? = null,
 	val scheduledStartMillis: Long? = null,
 	val scheduleError: String? = null,

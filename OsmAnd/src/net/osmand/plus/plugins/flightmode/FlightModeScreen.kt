@@ -244,7 +244,8 @@ fun FlightModeScreen(
 	onCancelJournalNavigation: () -> Unit = {},
 	onClearTripLoadError: () -> Unit = {},
 	onDisarmPreparation: () -> Unit = {},
-	onOfflineSimulation: (Boolean) -> Unit = {}
+	onOfflineSimulation: (Boolean) -> Unit = {},
+	onSimulateLive: () -> Unit = {}
 ) {
 	val cloudContext = LocalContext.current.applicationContext
 	val cloudScope = rememberCoroutineScope()
@@ -259,7 +260,9 @@ fun FlightModeScreen(
 		if (!state.offlineSimulation && state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refreshIfStale()
 	}
 	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney),
-		LocalFlightOfflineAction provides onOfflineSimulation) {
+		LocalFlightOfflineAction provides onOfflineSimulation,
+		LocalFlightSimulateAction provides onSimulateLive,
+		LocalFlightCameraAction provides onPhotoAction) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
 			primary = FlightOrange,
@@ -330,6 +333,20 @@ fun FlightModeScreen(
 				}
 				.windowInsetsPadding(safeDrawingInsets)
 		) {
+			Column(Modifier.fillMaxSize()) {
+			if (state.page !in listOf(FlightPage.HOME,FlightPage.PLANS,FlightPage.JOURNEYS,FlightPage.PREPARE)) {
+				Row(Modifier.fillMaxWidth().height(34.dp).background(FlightPanelStrong),verticalAlignment=Alignment.CenterVertically) {
+					TextButton(onClick={onPageChange(FlightWorkspaceNavigation.libraryPage(state.sessionMode))},
+						contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=8.dp,vertical=0.dp)) {
+						Text(stringResource(R.string.flight_back_library),fontSize=11.sp)
+					}
+					Text(state.journeyName,Modifier.weight(1f),color=FlightText,fontSize=11.sp,maxLines=1)
+					if(state.sessionMode==FlightSessionMode.PREPARE) TextButton(onClick={onPageChange(FlightPage.PREPARE)}) {
+						Text(stringResource(R.string.flight_edit_plan),fontSize=11.sp)
+					}
+				}
+			}
+			Box(Modifier.weight(1f).fillMaxWidth()) {
 			when (state.page) {
 				FlightPage.HOME, FlightPage.PLANS -> FlightWorkspaceHome(state, onPageChange,
 					onOpenJourney, onNewPreparation, onClose, onCloud = openCloud)
@@ -342,7 +359,7 @@ fun FlightModeScreen(
 					onStartLive,onPreparationPermissions,onNewPreparation,
 					{ onPageChange(FlightPage.PLANS) },
 					onUpdateStop, onSelectCity, onDismissCitySuggestions,
-					onDisarmPreparation,
+					onDisarmPreparation, onSimulateLive,
 					{ FlightBottomNavigation(state, onPageChange) }) }
 				FlightPage.MAP -> MapScreen(
 					state = state,
@@ -448,6 +465,8 @@ fun FlightModeScreen(
 				)
 			}
 
+			}
+			}
 			if (state.loadingTrip) {
 				Box(
 					modifier = Modifier.fillMaxSize().background(Color(0xD900000000)).clickable { },
@@ -2601,6 +2620,28 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 		})
 	}
 	Column {
+	val context=LocalContext.current
+	val live=state.liveState
+	if(live.simulation && !live.running && live.tracking.phase in listOf(FlightTrackingPhase.LANDED,FlightTrackingPhase.STOPPED))
+		Text(stringResource(if(live.tracking.phase==FlightTrackingPhase.LANDED)R.string.flight_immersion_landed else R.string.flight_immersion_stopped),
+			color=FlightGreen,fontSize=11.sp,modifier=Modifier.fillMaxWidth().background(FlightPanelStrong).padding(4.dp))
+	if(state.sessionMode==FlightSessionMode.LIVE) {
+		Row(Modifier.fillMaxWidth().background(FlightPanelStrong),verticalAlignment=Alignment.CenterVertically) {
+			if(live.simulation) {
+				Text(stringResource(R.string.flight_immersion_title),color=FlightOrange,fontSize=10.sp)
+				TextButton(onClick={FlightRecordingService.simulationControl(context,live.simulationRate,!live.simulationPaused)}) {
+					Text(if(live.simulationPaused) "▶" else "Ⅱ",fontSize=12.sp)
+				}
+				TextButton(onClick={
+					val rates=listOf(1,10,60,300)
+					FlightRecordingService.simulationControl(context,rates[(rates.indexOf(live.simulationRate)+1)%rates.size],live.simulationPaused)
+				}) { Text("×${live.simulationRate}",fontSize=11.sp) }
+			}
+			Spacer(Modifier.weight(1f))
+			val cameraAction=LocalFlightCameraAction.current
+			TextButton(onClick=cameraAction,enabled=live.running) { Text(stringResource(R.string.flight_live_camera),fontSize=11.sp) }
+		}
+	}
 	if (state.offlineSimulation || (state.sessionMode==FlightSessionMode.REPLAY && state.snapshot!=null)) {
 		val offlineAction=LocalFlightOfflineAction.current
 		Row(Modifier.fillMaxWidth().background(FlightPanelStrong).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -2614,8 +2655,9 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 			if(state.sessionMode==FlightSessionMode.REPLAY) TextButton(onClick={offlineAction(!state.offlineSimulation)}) {
 				Text(stringResource(if(state.offlineSimulation)R.string.flight_test_exit else R.string.flight_test_start),fontSize=10.sp)
 			}
-			if(state.sessionMode==FlightSessionMode.PREPARE) TextButton(onClick={onSelected(FlightPage.PREPARE)}) {
-				Text(stringResource(R.string.flight_plan_simulation_exit),fontSize=10.sp)
+			if(state.sessionMode==FlightSessionMode.REPLAY) {
+				val simulate=LocalFlightSimulateAction.current
+				TextButton(onClick=simulate,enabled=!state.activeRecording.running) { Text(stringResource(R.string.flight_immersion_start),fontSize=10.sp) }
 			}
 		}
 	}
@@ -2647,6 +2689,8 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 }
 
 internal val LocalFlightOfflineAction = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
+internal val LocalFlightSimulateAction = staticCompositionLocalOf<() -> Unit> { {} }
+internal val LocalFlightCameraAction = staticCompositionLocalOf<() -> Unit> { {} }
 
 @Composable
 private fun FlightStopRow(

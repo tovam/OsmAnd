@@ -95,7 +95,7 @@
 		android:enableOnBackInvokedCallback="false">
 
 		<service android:name=".plugins.flightmode.FlightRecordingService" android:exported="false"
-			android:foregroundServiceType="location|microphone" android:stopWithTask="false" />
+			android:foregroundServiceType="location|microphone|dataSync" android:stopWithTask="false" />
 		<receiver android:name=".plugins.flightmode.FlightScheduleReceiver" android:exported="false">
 			<intent-filter>
 				<action android:name="android.intent.action.BOOT_COMPLETED" />

@@ -157,7 +157,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				uiState = uiState.copy(activeRecording = live)
 				// A background recording never steals the selected journal or the home page.
 				if (live.journeyId != null && uiState.journeyId == live.journeyId && !uiState.previewingPlan) {
-					live.latest?.let { livePredictor.accept(it, android.os.SystemClock.elapsedRealtime()) }
+					if (live.simulation && !uiState.liveState.running && live.running && live.simulationPlan != null)
+						uiState=uiState.copy(plan=live.simulationPlan)
+					live.latest?.let { livePredictor.accept(it, android.os.SystemClock.elapsedRealtime(),
+						if (live.simulation) { if (live.simulationPaused) 0.0 else live.simulationRate.toDouble() } else 1.0) }
 					val newPhotos=if(live.running && live.trip!==uiState.trip && live.trip!=null) uiState.photos.map { photo ->
 						if(photo.matchedSamplePosition==null && photo.timestampMillis!=null &&
 							live.trip.samples.firstOrNull()?.timestampMillis?.let { photo.timestampMillis>=it }==true &&
@@ -166,6 +169,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					} else uiState.photos
 					val photosChanged=newPhotos!=uiState.photos
 					uiState = uiState.copy(liveState = live, batteryHistory = live.battery,
+						simulatedJourney = live.simulation,
 						recordingPolicy=live.policy,
 						photos=newPhotos,journeyDirty=uiState.journeyDirty || photosChanged,
 						trip = live.trip ?: uiState.trip,
@@ -275,7 +279,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				trip = (if (source.previewingPlan) simulationOriginal?.trip else source.trip)
 					?: recordedFlightTrip(name, emptyList()),
 				flightSpans = source.flightSpans, photos = source.photos,
-				offlineAssets = source.offlineAssets, batteryHistory = source.batteryHistory
+				offlineAssets = source.offlineAssets, batteryHistory = source.batteryHistory,
+				simulation = source.simulatedJourney
 			)
 			val saved = withContext(Dispatchers.IO) { journeyStore.save(journey) }
 			if (uiState.journeyId == source.journeyId) {
@@ -582,6 +587,38 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
+	fun startLiveSimulation() {
+		if (uiState.simulationLoading) return
+		if (FlightRecordingService.state.value.running) {
+			uiState=uiState.copy(journeyMessage=app.getString(net.osmand.plus.R.string.flight_live_already_running))
+			return
+		}
+		val source = uiState
+		if (!FlightOfflinePreparation.canSimulate(source.plan) && (source.trip?.samples?.size ?: 0) < 2) return
+		uiState=uiState.copy(simulationLoading=true,simulationError=null)
+		viewModelScope.launch {
+			try {
+				savePendingLocalChanges()
+				val now=System.currentTimeMillis()
+				val copy=FlightJourney("simulation_${UUID.randomUUID()}",
+					app.getString(net.osmand.plus.R.string.flight_immersion_name,source.journeyName),now,now,
+					source.plan.copy(preparation=(source.plan.preparation ?: FlightPreparation()).copy(automatic=false)),
+					if(source.previewingPlan) recordedFlightTrip("",emptyList()) else source.trip ?: recordedFlightTrip("",emptyList()),
+					emptyList(),emptyList(),source.offlineAssets,simulation=true)
+				val saved=withContext(Dispatchers.IO) { journeyStore.save(copy) }
+				setOfflineSimulation(true)
+				applyJourney(saved)
+				simulationJob?.cancel(); simulationOriginal=null; replayEngine=null; livePredictor.reset()
+				uiState=uiState.copy(page=FlightPage.MAP,sessionMode=FlightSessionMode.LIVE,previewingPlan=false,
+					simulatedJourney=true,simulationLoading=false,snapshot=null,trip=recordedFlightTrip(saved.name,emptyList()),
+					liveState=FlightLiveState(journeyId=saved.id,simulation=true))
+				FlightRecordingService.simulate(app,saved.id)
+			} catch(e:CancellationException) { throw e }
+			catch(e:Exception) { uiState=uiState.copy(simulationLoading=false,simulationError=e.message,
+				sessionMode=FlightSessionMode.PREPARE,page=FlightPage.PREPARE) }
+		}
+	}
+
 	fun loadSource(uri: Uri) {
 		pendingDuplicateTrip = null
 		runJournalNavigation {
@@ -650,6 +687,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	private fun applyImportedTrip(trip: FlightTrip) {
 		pendingDuplicateTrip = null
+		uiState = uiState.copy(simulatedJourney = false)
 		// Importing a recording for inspection must not fill its offline gaps before the test starts.
 		setOfflineSimulation(true)
 		applyReplayTrip(
@@ -672,6 +710,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if(journey.id!=uiState.journeyId)livePredictor.reset()
 		pendingDuplicateTrip = null
 		uiState = uiState.copy(plan = journey.plan,batteryHistory=journey.batteryHistory,previewingPlan=false,savingPreparation=false,
+			simulatedJourney=journey.simulation,
 			simulationLoading=false,simulationError=null,scheduleError=null,scheduledPreparation=null,scheduledStartMillis=null,
 			liveTimeline=null,browsingLiveTimeline=false,replayPlaying=false,
 			liveState=FlightRecordingService.state.value.takeIf { it.journeyId==journey.id }?:FlightLiveState())
@@ -717,9 +756,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private fun attachLoadedLiveJourney() {
 		val live=FlightRecordingService.state.value
 		if(live.running && live.journeyId==uiState.journeyId) {
-			FlightNetworkAccess.release(offlineOwner)
-			uiState=uiState.copy(offlineSimulation=false)
-			live.latest?.let { livePredictor.accept(it,android.os.SystemClock.elapsedRealtime()) }
+			if (!live.simulation) FlightNetworkAccess.release(offlineOwner)
+			uiState=uiState.copy(offlineSimulation=live.simulation, simulatedJourney=live.simulation,
+				plan=live.simulationPlan ?: uiState.plan)
+			live.latest?.let { livePredictor.accept(it,android.os.SystemClock.elapsedRealtime(),
+				if (live.simulation) { if (live.simulationPaused) 0.0 else live.simulationRate.toDouble() } else 1.0) }
 			uiState=uiState.copy(page=FlightPage.MAP,sessionMode=FlightSessionMode.LIVE,liveState=live,
 				trip=live.trip?:uiState.trip,batteryHistory=live.battery,snapshot=live.latest?.let { FlightSnapshot(it,0f) })
 			rebuildLiveTimeline(live)
@@ -1394,8 +1435,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun recordPhotoShutter(capture: FlightPhotoCapture) {
 		if (pendingCaptureFile == null) return
-		pendingCaptureSensors = capture
-		pendingCaptureTimestampMillis = capture.shutterMillis
+		val associated = if (uiState.liveState.simulation) capture.copy(
+			shutterMillis=capture.fix?.timestampMillis ?: uiState.liveState.latest?.timestampMillis ?: capture.shutterMillis) else capture
+		pendingCaptureSensors = associated
+		pendingCaptureTimestampMillis = associated.shutterMillis
 	}
 
 	fun finishPhotoCapture(success: Boolean) {

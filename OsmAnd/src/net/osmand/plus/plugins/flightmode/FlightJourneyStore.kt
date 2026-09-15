@@ -479,6 +479,7 @@ class FlightJourneyStore(private val context: Context) {
 		put("schemaVersion", SCHEMA_VERSION)
 		put("id", journey.id)
 		put("name", journey.name)
+		put("simulation", journey.simulation)
 		put("createdAtMillis", journey.createdAtMillis)
 		put("updatedAtMillis", journey.updatedAtMillis)
 		put("tripFingerprint", FlightTripFingerprint.create(journey.trip))
@@ -568,6 +569,7 @@ class FlightJourneyStore(private val context: Context) {
 		return FlightJourney(
 			id = validatedId(root.optString("id").ifBlank { UUID.randomUUID().toString() }),
 			name = root.optString("name").ifBlank { trip.name },
+			simulation = root.optBoolean("simulation", false),
 			createdAtMillis = root.optLong("createdAtMillis", System.currentTimeMillis()),
 			updatedAtMillis = root.optLong("updatedAtMillis", System.currentTimeMillis()),
 			plan = planFromJson(root.optJSONObject("plan")),

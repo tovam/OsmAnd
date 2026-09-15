@@ -92,8 +92,6 @@ class FlightWorkspaceTest {
     fun preparationNeverContainsLiveSensorsOrPhotos() {
         assertEquals(
             listOf(
-                FlightPage.HOME,
-                FlightPage.PREPARE,
                 FlightPage.MAP,
                 FlightPage.WINDOW,
                 FlightPage.SATELLITE,
@@ -109,10 +107,12 @@ class FlightWorkspaceTest {
     fun pastNeverStartsARecorderAndAllModesUseTheSameHomeEntry() {
         assertFalse(FlightWorkspaceNavigation.allows(FlightSessionMode.REPLAY, FlightPage.LIVE))
         assertFalse(FlightWorkspaceNavigation.allows(FlightSessionMode.REPLAY, FlightPage.PREPARE))
-        for (mode in FlightSessionMode.entries) assertEquals(
-            FlightPage.HOME,
-            FlightWorkspaceNavigation.pages(mode).first(),
-        )
+        for (mode in FlightSessionMode.entries) {
+            assertEquals(FlightPage.MAP, FlightWorkspaceNavigation.pages(mode).first())
+            assertFalse(FlightPage.HOME in FlightWorkspaceNavigation.pages(mode))
+            assertFalse(FlightPage.PREPARE in FlightWorkspaceNavigation.pages(mode))
+            assertTrue(FlightWorkspaceNavigation.allows(mode,FlightPage.HOME))
+        }
         assertEquals(FlightPage.HOME, FlightUiState().page)
     }
 

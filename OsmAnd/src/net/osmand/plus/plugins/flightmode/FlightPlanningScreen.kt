@@ -44,6 +44,7 @@ internal fun FlightPlanningScreen(
     onSelectCity: (Int, FlightCitySuggestion) -> Unit,
     onDismissCity: (Int) -> Unit,
     onDisarm: () -> Unit,
+    onSimulateLive: () -> Unit,
     bottomNavigation: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -183,6 +184,8 @@ internal fun FlightPlanningScreen(
                 fontSize = 11.sp,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
+        PlanAction(stringResource(R.string.flight_immersion_start),onSimulateLive,
+            enabled=canSimulate && !state.simulationLoading && !state.activeRecording.running)
         state.simulationError?.let { Text(it, color = Color(0xFFFFBD39), fontSize = 11.sp) }
         state.journeySaveError?.let { errorText ->
             TextButton(onClick = { showSaveError = !showSaveError }) {

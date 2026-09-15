@@ -11,6 +11,11 @@ data class FlightLiveState(
     val microphone: Boolean = false,
     val policy: FlightRecordingPolicy = FlightRecordingPolicy(),
     val error: String? = null,
+    val simulation: Boolean = false,
+    val simulationRate: Int = 60,
+    val simulationPaused: Boolean = false,
+    val simulationProgress: Float = 0f,
+    val simulationPlan: FlightPlan? = null,
 )
 
 internal fun recordedFlightTrip(name: String, samples: List<FlightSample>): FlightTrip {

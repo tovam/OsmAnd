@@ -51,6 +51,7 @@ internal fun FlightLiveScreen(
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Text(state.journeyName, color = Color.White, fontSize = 16.sp)
+            if(live.simulation) Text(stringResource(R.string.flight_immersion_sources),color=Color(0xFFFFBD39),fontSize=11.sp)
             Text(
                 if (live.journeyId != null && live.journeyId == state.journeyId)
                     stringResource(phase)

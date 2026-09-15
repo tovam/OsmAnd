@@ -6,15 +6,12 @@ internal object FlightWorkspaceNavigation {
         when (mode) {
             FlightSessionMode.PREPARE ->
                 listOf(
-                    FlightPage.HOME,
-                    FlightPage.PREPARE,
                     FlightPage.MAP,
                     FlightPage.WINDOW,
                     FlightPage.SATELLITE,
                 )
             FlightSessionMode.REPLAY ->
                 listOf(
-                    FlightPage.HOME,
                     FlightPage.MAP,
                     FlightPage.WINDOW,
                     FlightPage.SATELLITE,
@@ -24,7 +21,6 @@ internal object FlightWorkspaceNavigation {
                 )
             FlightSessionMode.LIVE ->
                 listOf(
-                    FlightPage.HOME,
                     FlightPage.MAP,
                     FlightPage.WINDOW,
                     FlightPage.SATELLITE,
@@ -63,5 +59,5 @@ internal object FlightWorkspaceNavigation {
                 FlightPage.PLANS,
                 FlightPage.JOURNEYS,
                 FlightPage.WINDOW_SETUP,
-            ) || page in pages(mode)
+            ) || (page == FlightPage.PREPARE && mode == FlightSessionMode.PREPARE) || page in pages(mode)
 }
