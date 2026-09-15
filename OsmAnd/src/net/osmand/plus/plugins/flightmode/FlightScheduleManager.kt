@@ -18,6 +18,24 @@ internal object FlightScheduleManager {
 
     data class PermissionStatus(val label: Int, val granted: Boolean)
 
+    fun scheduled(context: Context, id: String?): FlightPreparation? {
+        if (id == null) return null
+        val stored =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(id, null)
+                ?: return null
+        return FlightPreparation.fromJson(JSONObject(stored))
+    }
+
+    fun scheduledStart(context: Context, id: String): Long? {
+        val stored =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(id, null)
+                ?: return null
+        val json = JSONObject(stored)
+        return json
+            .optLong("scheduledStart", FlightPreparation.fromJson(json)?.startMillis ?: 0L)
+            .takeIf { it > 0 }
+    }
+
     fun permissionStatuses(context: Context): List<PermissionStatus> {
         fun granted(permission: String) =
             ContextCompat.checkSelfPermission(context, permission) ==
@@ -92,7 +110,7 @@ internal object FlightScheduleManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    fun arm(context: Context, journey: FlightJourney) {
+    fun arm(context: Context, journey: FlightJourney): Long {
         val p = requireNotNull(journey.plan.preparation)
         require(
             p.departureMillis > 0 &&
@@ -115,12 +133,14 @@ internal object FlightScheduleManager {
             missingPermissions(context).joinToString(" · ")
         }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val at = p.startMillis.coerceAtLeast(System.currentTimeMillis() + 1000)
         (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            p.startMillis.coerceAtLeast(System.currentTimeMillis() + 1000),
+            at,
             alarmIntent(context, journey.id),
         )
-        prefs.edit().putString(journey.id, p.toJson().toString()).apply()
+        prefs.edit().putString(journey.id, p.toJson().put("scheduledStart", at).toString()).apply()
+        return at
     }
 
     fun cancel(context: Context, id: String) {

@@ -128,6 +128,7 @@ public abstract class TilesCache<T> {
 	protected synchronized T getTileForMap(String tileId, ITileSource map, int x, int y, int zoom,
 	                                       boolean loadFromInternetIfNeeded, boolean sync,
 	                                       boolean deleteBefore, long timestamp) {
+		loadFromInternetIfNeeded &= !net.osmand.plus.plugins.flightmode.FlightNetworkAccess.isOffline();
 		if (tileId == null) {
 			tileId = calculateTileId(map, x, y, zoom);
 		}
@@ -202,7 +203,7 @@ public abstract class TilesCache<T> {
 				}
 			}
 
-			if (cache.get(req.tileId) == null && req.url != null) {
+			if (cache.get(req.tileId) == null && req.url != null && !net.osmand.plus.plugins.flightmode.FlightNetworkAccess.isOffline()) {
 				asyncLoadingThread.requestToDownload(req);
 			}
 
@@ -228,7 +229,7 @@ public abstract class TilesCache<T> {
 	}
 
 	protected void downloadIfExpired(TileLoadDownloadRequest req, long lastModified) {
-		if (isExpired(req, lastModified)) {
+		if (isExpired(req, lastModified) && !net.osmand.plus.plugins.flightmode.FlightNetworkAccess.isOffline()) {
 			asyncLoadingThread.requestToDownload(req);
 		}
 	}

@@ -18,6 +18,28 @@ internal class FlightCloudSettings(context: Context) {
     private val configuration =
         AtomicFile(File(context.noBackupFilesDir, "flight-cloud-connection.json"))
     private val bindings = AtomicFile(File(context.noBackupFilesDir, "flight-cloud-bindings.json"))
+    private val listing = AtomicFile(File(context.noBackupFilesDir, "flight-cloud-list.json"))
+
+    fun cachedList(scope: String): List<FlightCloudEntry> =
+        runCatching {
+                val json =
+                    listing.openRead().use {
+                        JSONObject(it.readBytesBounded(8L * 1024 * 1024).toString(Charsets.UTF_8))
+                    }
+                if (json.getString("scope") != scope) return emptyList()
+                val rows = json.getJSONArray("rows")
+                List(rows.length()) { FlightCloudEntry.parse(rows.getJSONObject(it)) }
+            }
+            .getOrDefault(emptyList())
+
+    fun cacheList(scope: String, rows: List<FlightCloudEntry>) {
+        write(
+            listing,
+            JSONObject()
+                .put("scope", scope)
+                .put("rows", org.json.JSONArray(rows.map { it.toJson() })),
+        )
+    }
 
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -82,6 +104,7 @@ internal class FlightCloudSettings(context: Context) {
 
     fun disconnect() {
         configuration.delete()
+        listing.delete()
     }
 
     fun bindings(scope: String): List<FlightCloudBinding> {

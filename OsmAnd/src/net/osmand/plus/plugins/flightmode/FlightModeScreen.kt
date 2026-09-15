@@ -60,6 +60,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -240,7 +241,9 @@ fun FlightModeScreen(
 	onLocalJourneyRemoved: (String) -> Unit = {},
 	onConfirmJournalNavigation: () -> Unit = {},
 	onCancelJournalNavigation: () -> Unit = {},
-	onClearTripLoadError: () -> Unit = {}
+	onClearTripLoadError: () -> Unit = {},
+	onDisarmPreparation: () -> Unit = {},
+	onOfflineSimulation: (Boolean) -> Unit = {}
 ) {
 	val cloudContext = LocalContext.current.applicationContext
 	val cloudScope = rememberCoroutineScope()
@@ -251,10 +254,11 @@ fun FlightModeScreen(
 	LaunchedEffect(cloud) { cloud.initialize() }
 	DisposableEffect(cloud) { onDispose { cloud.close() } }
 	LaunchedEffect(state.savedJourneys) { cloud.acceptLocalSummaries(state.savedJourneys) }
-	LaunchedEffect(state.page) {
-		if (state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refresh()
+	LaunchedEffect(state.page, state.offlineSimulation) {
+		if (!state.offlineSimulation && state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refreshIfStale()
 	}
-	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney)) {
+	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney),
+		LocalFlightOfflineAction provides onOfflineSimulation) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
 			primary = FlightOrange,
@@ -337,6 +341,7 @@ fun FlightModeScreen(
 					onStartLive,onPreparationPermissions,onNewPreparation,
 					{ onPageChange(FlightPage.PLANS) },
 					onUpdateStop, onSelectCity, onDismissCitySuggestions,
+					onDisarmPreparation,
 					{ FlightBottomNavigation(state, onPageChange) }) }
 				FlightPage.MAP -> MapScreen(
 					state = state,
@@ -442,11 +447,6 @@ fun FlightModeScreen(
 				)
 			}
 
-			if(state.previewingPlan && state.page in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.SATELLITE)) {
-				Row(Modifier.align(Alignment.TopCenter).background(FlightPanelStrong)) {
-					PlanAction(stringResource(R.string.flight_plan_simulation_exit),{onPageChange(FlightPage.PREPARE)})
-				}
-			}
 			if (state.loadingTrip) {
 				Box(
 					modifier = Modifier.fillMaxSize().background(Color(0xD900000000)).clickable { },
@@ -1053,7 +1053,7 @@ private fun WindowScreen(
 	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit
 ) {
 	var panel by remember(state.sessionMode) {
-		mutableStateOf(if (state.sessionMode == FlightSessionMode.REPLAY) WindowPanel.FLIGHT else WindowPanel.VIEW)
+		mutableStateOf(if (state.sessionMode != FlightSessionMode.LIVE) WindowPanel.FLIGHT else WindowPanel.VIEW)
 	}
 	val overlayPhoto = state.windowPhotoOverlay.photoId?.let { photoId ->
 		(state.photos + state.pendingPhotos).firstOrNull { it.id == photoId }
@@ -2115,7 +2115,7 @@ private fun JourneysScreen(
 		LazyColumn(Modifier.weight(1f)) {
 			if (library) {
 			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, pastJourneys.size)) }
-			if (state.savedJourneysLoading || cloud?.busy == true) {
+			if (state.savedJourneysLoading) {
 				item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
 			}
 			if (pastJourneys.isEmpty() && !state.savedJourneysLoading) {
@@ -2599,6 +2599,25 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 			else -> R.string.flight_mode_journeys
 		})
 	}
+	Column {
+	if (state.offlineSimulation || (state.sessionMode==FlightSessionMode.REPLAY && state.snapshot!=null)) {
+		val offlineAction=LocalFlightOfflineAction.current
+		Row(Modifier.fillMaxWidth().background(FlightPanelStrong).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
+			Column(Modifier.weight(1f).padding(vertical=4.dp)) {
+				Text(stringResource(if(state.offlineSimulation)R.string.flight_test_offline else R.string.flight_test_online),
+					color=if(state.offlineSimulation)FlightOrange else FlightMuted,fontSize=10.sp)
+				if(state.offlineSimulation && state.terrainStatus.requestedTiles>0) Text(
+					stringResource(R.string.flight_test_loaded,state.terrainStatus.availableTiles,state.terrainStatus.requestedTiles,
+						state.terrainStatus.satelliteTiles),color=FlightMuted,fontSize=9.sp)
+			}
+			if(state.sessionMode==FlightSessionMode.REPLAY) TextButton(onClick={offlineAction(!state.offlineSimulation)}) {
+				Text(stringResource(if(state.offlineSimulation)R.string.flight_test_exit else R.string.flight_test_start),fontSize=10.sp)
+			}
+			if(state.sessionMode==FlightSessionMode.PREPARE) TextButton(onClick={onSelected(FlightPage.PREPARE)}) {
+				Text(stringResource(R.string.flight_plan_simulation_exit),fontSize=10.sp)
+			}
+		}
+	}
 	Row(
 		Modifier.fillMaxWidth().height(48.dp)
 			.background(if (overlay) FlightHudPanel else FlightPanelStrong)
@@ -2607,7 +2626,8 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 		pages.forEach { (page, label) ->
 			Box(
 				modifier = Modifier.weight(1f).fillMaxHeight().clickable(
-					enabled = page !in listOf(FlightPage.MAP, FlightPage.WINDOW) || state.snapshot != null
+					enabled = page !in listOf(FlightPage.MAP, FlightPage.WINDOW) || state.snapshot != null ||
+						(state.sessionMode==FlightSessionMode.PREPARE && FlightOfflinePreparation.canSimulate(state.plan))
 				) { onSelected(page) },
 				contentAlignment = Alignment.Center
 			) {
@@ -2623,6 +2643,9 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 		}
 	}
 }
+}
+
+internal val LocalFlightOfflineAction = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
 
 @Composable
 private fun FlightStopRow(

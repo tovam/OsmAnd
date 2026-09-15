@@ -939,7 +939,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	): FlightTerrainStatus {
 		if (plan.preparation != null) {
 			val quote = withContext(Dispatchers.Default) { FlightOfflinePreparation.quote(plan) }
-			return preloadPrepared(quote,onStatus)
+			return preloadPrepared(quote,onStatus).status
 		}
 		onStatus(FlightTerrainStatus(phase = FlightTerrainPhase.PLANNING))
 		val tilePlan = withContext(Dispatchers.Default) {
@@ -1017,7 +1017,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	}
 
 	/** Verify each expected source independently, including cached files, before declaring readiness. */
-	suspend fun preloadPrepared(quote: FlightOfflineQuote, onStatus: suspend (FlightTerrainStatus) -> Unit): FlightTerrainStatus = coroutineScope {
+	data class PreparedResult(val status: FlightTerrainStatus, val assets: FlightOfflineAssets)
+
+	suspend fun preloadPrepared(quote: FlightOfflineQuote, onStatus: suspend (FlightTerrainStatus) -> Unit): PreparedResult = coroutineScope {
 		val cancellation = FlightDownloadCancellation()
 		// Thread interruption alone does not reliably unblock HttpURLConnection on Android.
 		val watcher = launch(Dispatchers.IO, start=kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -1027,7 +1029,10 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	}
 
 	private suspend fun preloadPreparedFiles(quote: FlightOfflineQuote, cancellation: FlightDownloadCancellation,
-		onStatus: suspend (FlightTerrainStatus) -> Unit): FlightTerrainStatus {
+		onStatus: suspend (FlightTerrainStatus) -> Unit): PreparedResult {
+		val verifiedTerrain=mutableListOf<TerrainTileId>()
+		val verifiedSatellite=mutableListOf<TerrainTileId>()
+		fun result(status: FlightTerrainStatus)=PreparedResult(status,FlightOfflineAssets(verifiedTerrain.toList(),verifiedSatellite.toList()))
 		var terrain=0; var satellite=0; var failedTerrain=0; var failedSatellite=0; var downloaded=0
 		var bytes=0L
 		val started=android.os.SystemClock.elapsedRealtime()
@@ -1046,7 +1051,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			val chunk = quote.requests.subList(offset, minOf(offset + PARALLEL_DOWNLOADS, quote.requests.size))
 			if(withContext(Dispatchers.IO) { app.filesDir.usableSpace<256L*1024*1024 && chunk.any {
 				!(if(it.satellite) satelliteFile(it.tile) else tileFile(it.tile)).isFile } })
-				return status(FlightTerrainPhase.ERROR).copy(message=app.getString(net.osmand.plus.R.string.flight_plan_low_space))
+				return result(status(FlightTerrainPhase.ERROR).copy(message=app.getString(net.osmand.plus.R.string.flight_plan_low_space)))
 			val results=coroutineScope { chunk.map { request -> async {
 				runInterruptible(Dispatchers.IO) {
 				preparationCancellation.set(cancellation)
@@ -1068,6 +1073,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			currentCoroutineContext().ensureActive()
 			results.forEachIndexed { i,result ->
 				result.onSuccess {
+					(if(chunk[i].satellite)verifiedSatellite else verifiedTerrain).add(chunk[i].tile)
 					if(chunk[i].satellite) satellite++ else terrain++
 					if(it.downloaded) downloaded++
 					bytes+=it.downloadedBytes
@@ -1085,7 +1091,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				lastPublished = now
 			}
 		}
-		return status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR)
+		return result(status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR))
 	}
 
 	private fun loadTerrainTile(tileId: TerrainTileId): LoadedTerrainTile {
@@ -1352,6 +1358,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		readTimeoutMillis: Int = READ_TIMEOUT_MILLIS
 	): CachedAsset {
 		ensureWorkActive()
+		FlightNetworkAccess.requireOnline()
 		val parent = destination.parentFile ?: throw IOException("Dossier de cache invalide")
 		if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de créer le cache du relief")
 		val partial = File(parent, destination.name + PARTIAL_SUFFIX)
@@ -1359,6 +1366,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val connection = NetworkUtils.getHttpURLConnection(url)
 		val cancellation = preparationCancellation.get()
 		try {
+			FlightNetworkAccess.register(connection) { connection.disconnect() }
 			cancellation?.attach(connection)
 			connection.requestMethod = "GET"
 			connection.connectTimeout = connectTimeoutMillis
@@ -1397,6 +1405,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				networkRequests = 1
 			)
 		} finally {
+			FlightNetworkAccess.unregister(connection)
 			cancellation?.detach(connection)
 			connection.disconnect()
 			if (partial.exists()) partial.delete()

@@ -48,6 +48,16 @@ class FlightOfflineQuote(
 object FlightOfflinePreparation {
     const val MAX_REQUESTS = 250_000
 
+    fun canSimulate(plan: FlightPlan): Boolean =
+        plan.stops.size >= 2 &&
+            plan.stops.all {
+                it.latitude?.let { lat -> lat.isFinite() && abs(lat) < 85.0511 } == true &&
+                    it.longitude?.let { lon -> lon.isFinite() && lon in -180.0..180.0 } == true
+            } &&
+            plan.stops.zipWithNext().any { (a, b) ->
+                a.latitude != b.latitude || a.longitude != b.longitude
+            }
+
     fun simulationInput(plan: FlightPlan) =
         Triple(
             plan.stops.map { it.latitude to it.longitude },
@@ -173,6 +183,7 @@ object FlightOfflinePreparation {
     }
 
     fun simulation(plan: FlightPlan): FlightTrip {
+        require(canSimulate(plan)) { "Place at least two distinct route points on the map" }
         val coordinates =
             plan.stops.mapNotNull { s -> s.latitude?.let { lat -> s.longitude?.let { lat to it } } }
         require(coordinates.size >= 2)

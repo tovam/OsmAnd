@@ -81,11 +81,7 @@ internal fun flightLibraryRows(
     cloud: FlightCloudController?,
     planned: Boolean,
 ): List<FlightLibraryRow> {
-    return flightCloudRows(
-            cloud?.local ?: local,
-            cloud?.remote.orEmpty(),
-            cloud?.bindings.orEmpty(),
-        )
+    return flightCloudRows(local, cloud?.remote.orEmpty(), cloud?.bindings.orEmpty())
         .filter { ((it.local?.sampleCount ?: it.remote!!.samples) == 0) == planned }
         .sortedByDescending { it.local?.updatedAtMillis ?: it.remote!!.updatedAt }
 }
@@ -114,6 +110,7 @@ internal fun FlightCloudListRow(
     onManage: (String) -> Unit,
 ) {
     val cloud = LocalFlightCloudUi.current?.controller
+    val offlineAction = LocalFlightOfflineAction.current
     val dirty = state.journeyId == row.local?.id && state.journeyDirty
     val selected = row.local?.id != null && state.journeyId == row.local.id
     val canOpen =
@@ -181,6 +178,16 @@ internal fun FlightCloudListRow(
                         fontSize = 12.sp,
                     )
                 }
+                if (state.activeRecording.journeyId != it.id || !state.activeRecording.running)
+                    TextButton(
+                        onClick = {
+                            offlineAction(true)
+                            onOpen(it.id)
+                        },
+                        enabled = canOpen,
+                    ) {
+                        Text(stringResource(R.string.flight_test_start), fontSize = 12.sp)
+                    }
             }
             if (row.local == null && row.remote != null) {
                 TextButton(

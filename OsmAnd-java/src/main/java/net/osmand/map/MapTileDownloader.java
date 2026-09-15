@@ -28,6 +28,15 @@ import java.util.concurrent.TimeUnit;
 
 public class MapTileDownloader {
 
+	/** Optional application policy, including cancellation of in-flight raster requests. */
+	public interface DownloadAccess {
+		boolean isAllowed();
+		void opened(HttpURLConnection connection) throws IOException;
+		void closed(HttpURLConnection connection);
+	}
+	private volatile DownloadAccess downloadAccess;
+	public void setDownloadAccess(DownloadAccess access) { downloadAccess = access; }
+
 	private static final Log log = PlatformUtil.getLog(MapTileDownloader.class);
 
 	// Download manager tile settings
@@ -188,6 +197,8 @@ public class MapTileDownloader {
 	}
 
 	public void requestToDownload(DownloadRequest request) {
+		DownloadAccess access = downloadAccess;
+		if (access != null && !access.isAllowed()) return;
 		long now = System.currentTimeMillis();
 		if ((int) (now - timeForErrorCounter) > TIMEOUT_AFTER_EXCEEDING_LIMIT_ERRORS) {
 			timeForErrorCounter = now;
@@ -224,6 +235,8 @@ public class MapTileDownloader {
 		public void run() {
 			if (request != null && request.fileToSave != null && request.url != null) {
 				pendingToDownload.remove(request.fileToSave);
+				DownloadAccess access = downloadAccess;
+				if (access != null && !access.isAllowed()) return;
 				if (currentlyDownloaded.containsKey(request.fileToSave)) {
 					return;
 				}
@@ -237,6 +250,7 @@ public class MapTileDownloader {
 				HttpURLConnection connection = null;
 				try {
 					connection = NetworkUtils.getHttpURLConnection(request.url);
+					if (access != null) access.opened(connection);
 					connection.setRequestProperty("User-Agent", Algorithms.isEmpty(request.userAgent) ? USER_AGENT : request.userAgent); 
 					if (request.referer != null)
 						connection.setRequestProperty("Referer", request.referer); 
@@ -253,13 +267,16 @@ public class MapTileDownloader {
 					request.setError(true);
 					log.error("UnknownHostException, cannot download tile " + request.url + " " + e.getMessage());   //$NON-NLS-2$
 				} catch (Exception e) {
-					currentErrors++;
-					timeForErrorCounter = System.currentTimeMillis();
 					request.setError(true);
-					log.warn("Cannot download tile : " + request.url, e); 
+					if (access == null || access.isAllowed()) {
+						currentErrors++;
+						timeForErrorCounter = System.currentTimeMillis();
+						log.warn("Cannot download tile : " + request.url, e);
+					}
 				} finally {
 					currentlyDownloaded.remove(request.fileToSave);
 					if (connection != null) {
+						if (access != null) access.closed(connection);
 						connection.disconnect();
 					}
 				}

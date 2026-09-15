@@ -24,6 +24,7 @@ internal class FlightCloudController(
     private val settings = FlightCloudSettings(context)
     private var job: Job? = null
     private var client: FlightCloudClient? = null
+    private var lastRefreshMillis = 0L
     var connection by mutableStateOf<FlightCloudConnection?>(null)
         private set
 
@@ -72,9 +73,12 @@ internal class FlightCloudController(
 
     fun initialize() =
         task(R.string.flight_cloud_loading) {
-            local = io { store.list() }
             connection = io { settings.load() }
-            connection?.let { connectLoaded(it) }
+            connection?.let {
+                remote = io { settings.cachedList(it.scope) }
+                bindings = io { settings.bindings(it.scope) }
+                if (!FlightNetworkAccess.isOffline()) connectLoaded(it)
+            }
         }
 
     private suspend fun connectLoaded(config: FlightCloudConnection) {
@@ -84,6 +88,8 @@ internal class FlightCloudController(
         remote = io { client!!.list() }
         serverSupportsAppend = client!!.protocolVersion >= 2
         serverVerified = true
+        lastRefreshMillis = android.os.SystemClock.elapsedRealtime()
+        io { runCatching { settings.cacheList(config.scope, remote) } }
     }
 
     fun connect(url: String, token: String, done: () -> Unit) =
@@ -108,14 +114,18 @@ internal class FlightCloudController(
             remote = listing
             bindings = io { settings.bindings(config.scope) }
             serverVerified = true
+            io { runCatching { settings.cacheList(config.scope, remote) } }
             done()
         }
 
-    fun refresh() =
-        task(R.string.flight_cloud_loading) {
-            local = io { store.list() }
-            connection?.let { connectLoaded(it) }
-        }
+    fun refresh() {
+        if (FlightNetworkAccess.isOffline()) return
+        task(R.string.flight_cloud_loading) { connection?.let { connectLoaded(it) } }
+    }
+
+    fun refreshIfStale() {
+        if (android.os.SystemClock.elapsedRealtime() - lastRefreshMillis > 30_000L) refresh()
+    }
 
     fun disconnect() =
         task(R.string.flight_cloud_loading) {
@@ -316,6 +326,7 @@ internal class FlightCloudController(
                             "refresh_required" -> R.string.flight_cloud_refresh_required
                             "server_update_required" -> R.string.flight_sync_upgrade_server
                             "removal_unverified" -> R.string.flight_sync_removal_unverified
+                            "offline_simulation" -> R.string.flight_test_offline
                             "checksum_mismatch",
                             "invalid_archive",
                             "incomplete_transfer" -> R.string.flight_cloud_invalid_archive

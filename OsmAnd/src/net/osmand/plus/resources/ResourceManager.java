@@ -177,6 +177,7 @@ public class ResourceManager {
 		renderingBufferImageThread.start();
 
 		tileDownloader = MapTileDownloader.getInstance(Version.getFullVersion(app));
+		tileDownloader.setDownloadAccess(net.osmand.plus.plugins.flightmode.FlightRasterDownloadAccess.INSTANCE);
 		resetStoreDirectory();
 
 		DisplayMetrics dm = new DisplayMetrics();

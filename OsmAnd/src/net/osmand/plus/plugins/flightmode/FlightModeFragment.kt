@@ -96,6 +96,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					mapView = app.osmandMap.mapView,
 					onClose = ::close,
 					onPageChange = viewModel::showPage,
+					onDisarmPreparation = viewModel::cancelAutomaticDeparture,
+					onOfflineSimulation = viewModel::setOfflineSimulation,
 					onImportTrip = {
 						openTripLauncher.launch(
 							arrayOf(
@@ -181,7 +183,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onNewPreparation = viewModel::newPreparation,
 					onPreloadPreparation = viewModel::preloadPreparation,
 					onCancelPreparationDownload = viewModel::pausePreparationDownload,
-					onRehearsePreparation = viewModel::rehearsePreparation,
+					onRehearsePreparation = { viewModel.rehearsePreparation() },
 					onPreparationPermissions = ::showPreparationPermissions,
 					onStopLive = { FlightRecordingService.stop(requireContext()) },
 					onToggleLiveMicrophone = ::toggleLiveMicrophone,

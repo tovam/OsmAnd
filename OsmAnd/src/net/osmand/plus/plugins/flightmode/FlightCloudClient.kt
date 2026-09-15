@@ -39,6 +39,16 @@ internal data class FlightCloudEntry(
     val photoIds: Set<String>,
     val samples: Int,
 ) {
+    fun toJson(): JSONObject =
+        JSONObject()
+            .put("id", id)
+            .put("name", name)
+            .put("revision", revision)
+            .put("bytes", bytes)
+            .put("updatedAt", updatedAt)
+            .put("photoIds", org.json.JSONArray(photoIds.toList()))
+            .put("sampleCount", samples)
+
     companion object {
         fun parse(json: JSONObject): FlightCloudEntry {
             val id = json.getString("id")
@@ -186,17 +196,21 @@ internal class FlightCloudClient(private val connection: FlightCloudConnection) 
     }
 
     private fun <T> request(method: String, path: String, action: (HttpURLConnection) -> T): T {
+        FlightNetworkAccess.requireOnline()
         val conn = URI(connection.url + path).toURL().openConnection() as HttpURLConnection
         active.set(conn)
         try {
+            FlightNetworkAccess.register(conn) { conn.disconnect() }
             conn.instanceFollowRedirects = false
-            conn.connectTimeout = 15000
-            conn.readTimeout = 60000
+            val listing = method == "GET" && path == "/v1/journeys"
+            conn.connectTimeout = if (listing) 3000 else 15000
+            conn.readTimeout = if (listing) 5000 else 60000
             conn.requestMethod = method
             conn.setRequestProperty("Authorization", "Bearer ${connection.token}")
             conn.setRequestProperty("Accept", "application/json, application/zip")
             return action(conn)
         } finally {
+            FlightNetworkAccess.unregister(conn)
             active.compareAndSet(conn, null)
             conn.disconnect()
         }

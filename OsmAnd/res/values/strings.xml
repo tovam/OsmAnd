@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_test_start">Tester hors ligne</string>
+    <string name="flight_test_preparing">Simulation…</string>
+    <string name="flight_test_offline">Test hors ligne · aucun téléchargement</string>
+    <string name="flight_test_online">Réseau autorisé</string>
+    <string name="flight_test_exit">Autoriser le réseau</string>
+    <string name="flight_test_loaded">Relief : %1$d/%2$d · textures satellite : %3$d</string>
+    <string name="flight_test_route_required">Place au moins deux points distincts sur la carte pour tester le vol.</string>
+    <string name="flight_plan_section_route">Trajet</string>
+    <string name="flight_plan_section_offline">Hors ligne</string>
+    <string name="flight_plan_section_auto">Départ auto</string>
+    <string name="flight_plan_auto_off">Départ automatique : désactivé</string>
+    <string name="flight_plan_auto_at">Départ auto : %1$s UTC%2$s</string>
+    <string name="flight_plan_auto_candidate">À programmer : %1$s UTC%2$s</string>
+    <string name="flight_plan_auto_dates_required">Pour le départ auto : choisis un départ et une arrivée future, après le départ.</string>
+    <string name="flight_plan_auto_changed">Modifications non appliquées au départ automatique.</string>
+    <string name="flight_plan_set_departure">Renseigne les horaires dans Trajet.</string>
+    <string name="flight_plan_save_error_details">Sauvegarde locale échouée · voir la cause</string>
+    <string name="flight_plan_save_failed_short">Échec de sauvegarde</string>
     <string name="flight_dehaze_title">Dévoiler</string>
     <string name="flight_dehaze_original">Original</string>
     <string name="flight_dehaze_depth">Profondeur</string>
@@ -153,10 +171,10 @@
     <string name="flight_cal_diagnostics_failed">Retrait non calculable : les points restants ne permettent pas une solution visible et suffisamment répartie.</string>
     <string name="flight_cal_diagnostics_progress">Modélisations terminées : %1$d / %2$d (complète + retraits)</string>
     <string name="flight_cal_diagnostics_altitudes">Récupération des altitudes des points…</string>
-    <string name="flight_plan_saving">Enregistrement en cours…</string>
-    <string name="flight_plan_disarm">Désactiver le départ automatique</string>
-    <string name="flight_plan_unsaved">Modifications non enregistrées</string>
-    <string name="flight_plan_saved_short">✓ Enregistré sur ce téléphone</string>
+    <string name="flight_plan_saving">Enregistrement…</string>
+    <string name="flight_plan_disarm">Désactiver</string>
+    <string name="flight_plan_unsaved">À enregistrer</string>
+    <string name="flight_plan_saved_short">Téléphone ✓</string>
     <string name="flight_plan_leave_warning">Cette préparation contient des modifications non enregistrées. Enregistre-la avant de quitter pour la retrouver dans Vols prévus.</string>
     <string name="flight_plan_leave_unsaved">Quitter sans enregistrer</string>
     <string name="flight_plan_pick_date">Choisir la date</string>
@@ -244,7 +262,7 @@
 	<string name="flight_live_waiting">Au départ · attente du décollage</string>
 	<string name="flight_plan_title">Préparer</string>
 	<string name="flight_plan_add_via">+ Point de passage</string>
-	<string name="flight_plan_arm">Armer le départ automatique</string>
+	<string name="flight_plan_arm">Programmer le départ auto</string>
 	<string name="flight_plan_armed">Départ automatique armé. Les heures sont conservées avec leur décalage UTC.</string>
 	<string name="flight_plan_arrival">Arrivée</string>
 	<string name="flight_plan_automatic">Suivi automatique</string>

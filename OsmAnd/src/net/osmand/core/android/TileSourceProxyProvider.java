@@ -201,7 +201,7 @@ public class TileSourceProxyProvider extends interface_ImageMapLayerProvider {
 		byte[] bytes = null;
 		try {
 			String tileFilename = rm.calculateTileId(tileSource, tileX, tileY, zoom);
-			if (!cacheOnly && tileSource.couldBeDownloadedFromInternet()) {
+			if (!cacheOnly && !net.osmand.plus.plugins.flightmode.FlightNetworkAccess.isOffline() && tileSource.couldBeDownloadedFromInternet()) {
 				TileReadyCallback tileReadyCallback = new TileReadyCallback(tileSource, tileX, tileY, zoom);
 				rm.getMapTileDownloader().addDownloaderCallback(tileReadyCallback);
 				try {
@@ -216,7 +216,7 @@ public class TileSourceProxyProvider extends interface_ImageMapLayerProvider {
 							} catch (InterruptedException ignored) {
 							}
 						}
-						if (queryController == null || queryController.isAborted()) {
+						if (queryController == null || queryController.isAborted() || net.osmand.plus.plugins.flightmode.FlightNetworkAccess.isOffline()) {
 							break;
 						}				
 					}

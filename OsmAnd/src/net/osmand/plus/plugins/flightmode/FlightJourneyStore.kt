@@ -145,11 +145,16 @@ class FlightJourneyStore(private val context: Context) {
 		return children.sumOf { child -> assetTreeSize("$path/$child") }
 	}
 
-	fun list(): List<FlightJourneySummary> = synchronized(STORE_LOCK) { journeyFiles()
-		.mapNotNull { file ->
-			runCatching { summaryFromJson(JSONObject(file.readText()), file) }.getOrNull()
+	fun list(onPartial: (List<FlightJourneySummary>) -> Unit = {}): List<FlightJourneySummary> {
+		val summaries = mutableListOf<FlightJourneySummary>()
+		// No STORE_LOCK: a metadata list must not wait behind photo serialization or a recorder.
+		for (file in journeyFiles().sortedByDescending(File::lastModified)) {
+			if (Thread.currentThread().isInterrupted) throw InterruptedException()
+			runCatching { FlightJournalSummaries.read(file) }.getOrNull()?.let { summaries += it }
+			onPartial(summaries.sortedByDescending { it.updatedAtMillis })
 		}
-		.sortedByDescending { it.updatedAtMillis } }
+		return summaries.sortedByDescending { it.updatedAtMillis }
+	}
 
 	/** Returns the newest journal containing the exact same ordered GPX trace, if one exists. */
 	fun findMatchingJourney(trip: FlightTrip): FlightJourneySummary? {
@@ -179,7 +184,9 @@ class FlightJourneyStore(private val context: Context) {
 		photoCount = root.optJSONArray("photos")?.length() ?: 0
 	)
 
-	fun save(journey: FlightJourney): FlightJourney = synchronized(STORE_LOCK) {
+	fun save(journey: FlightJourney): FlightJourney = save(journey, mergePreviousAssets = true)
+
+	private fun save(journey: FlightJourney, mergePreviousAssets: Boolean): FlightJourney = synchronized(STORE_LOCK) {
 		val target=File(journeysDirectory,"${validatedId(journey.id)}.$JOURNEY_FILE_EXTENSION")
 		val previous=if(target.isFile) JSONObject(android.util.AtomicFile(target).openRead().bufferedReader().use { it.readText() }) else JSONObject()
 		val previousAssets=offlineAssetsFromJson(previous.optJSONObject("offlineAssets"))
@@ -187,11 +194,12 @@ class FlightJourneyStore(private val context: Context) {
 		val recorded=FlightRecordingStore(context,journey.id).merge(journey)
 		val request=FlightOfflineAssets((recorded.offlineRequest.terrainTiles+previousRequest.terrainTiles).distinct(),
 			(recorded.offlineRequest.standardSatelliteTiles+previousRequest.standardSatelliteTiles).distinct())
-		val combined=FlightOfflineAssets((recorded.offlineAssets.terrainTiles+previousAssets.terrainTiles+request.terrainTiles).distinct(),
-			(recorded.offlineAssets.standardSatelliteTiles+previousAssets.standardSatelliteTiles+request.standardSatelliteTiles).distinct())
+		// Requests are not completed assets. Verification belongs to the explicit offline worker.
+		val combined=if (mergePreviousAssets) FlightOfflineAssets((recorded.offlineAssets.terrainTiles+previousAssets.terrainTiles).distinct(),
+			(recorded.offlineAssets.standardSatelliteTiles+previousAssets.standardSatelliteTiles).distinct()) else recorded.offlineAssets
 		val storedJourney = recorded.copy(
 			offlineRequest=request,
-			offlineAssets = discoverOfflineAssets(recorded.plan, recorded.trip, combined)
+			offlineAssets = combined
 		)
 		val safeId = validatedId(storedJourney.id)
 		val destination = File(journeysDirectory, "$safeId.$JOURNEY_FILE_EXTENSION")
@@ -199,6 +207,9 @@ class FlightJourneyStore(private val context: Context) {
 		val stream = atomic.startWrite()
 		try { stream.write(journeyToJson(storedJourney).toString().toByteArray(Charsets.UTF_8)); atomic.finishWrite(stream) }
 		catch (error: Exception) { atomic.failWrite(stream); throw error }
+		// A disposable index failure must not turn a successful journal write into data loss.
+		runCatching { FlightJournalSummaries.write(destination, FlightJourneySummary(storedJourney.id,
+			storedJourney.name, storedJourney.updatedAtMillis, storedJourney.trip.samples.size, storedJourney.photos.size)) }
 		storedJourney
 	}
 
@@ -220,7 +231,8 @@ class FlightJourneyStore(private val context: Context) {
 			it.parentFile?.canonicalFile == mediaDirectory.canonicalFile && it.name !in referenced && it.isFile
 		}
 		val recordingRoot = File(context.filesDir, "flight-recordings")
-		val targets = listOf(journal, File(journal.path + ".bak"), File(journal.path + ".new")) + photoFiles +
+		val targets = listOf(journal, File(journal.path + ".bak"), File(journal.path + ".new"),
+			FlightJournalSummaries.sidecar(journal)) + photoFiles +
 			listOf(".jsonl", ".state", ".state.bak", ".state.new").map { File(recordingRoot, safeId + it) }
 		if (targets.any { it.exists() && (!it.isFile || android.system.OsConstants.S_ISLNK(android.system.Os.lstat(it.path).st_mode)) }) throw IOException("removal_unverified")
 		FlightScheduleManager.cancel(context, id)
@@ -233,17 +245,25 @@ class FlightJourneyStore(private val context: Context) {
 		save(transform(load(id)))
 	}
 
+	/** A completed check replaces only its own inventory, without losing unrelated assets or edits. */
+	fun updateVerifiedOfflineAssets(id: String, requested: FlightOfflineAssets, verified: FlightOfflineAssets): FlightJourney = synchronized(STORE_LOCK) {
+		val latest = load(id)
+		val terrain = requested.terrainTiles.toHashSet()
+		val satellite = requested.standardSatelliteTiles.toHashSet()
+		val assets = FlightOfflineAssets(
+			(latest.offlineAssets.terrainTiles.filterNot { it in terrain } + verified.terrainTiles).distinct(),
+			(latest.offlineAssets.standardSatelliteTiles.filterNot { it in satellite } + verified.standardSatelliteTiles).distinct()
+		)
+		save(latest.copy(offlineAssets = assets), mergePreviousAssets = false)
+	}
+
 	fun load(id: String): FlightJourney = synchronized(STORE_LOCK) {
 		val file = File(journeysDirectory, "${validatedId(id)}.$JOURNEY_FILE_EXTENSION")
 		if (!file.isFile) throw IOException("Journal de vol introuvable")
 		val loaded = journeyFromJson(JSONObject(android.util.AtomicFile(file).openRead().bufferedReader().use { it.readText() })) { storageName ->
 			File(mediaDirectory, safeFileName(storageName)).absolutePath
 		}
-		val withRecording = FlightRecordingStore(context, loaded.id).merge(loaded)
-		val discoveredAssets = discoverOfflineAssets(withRecording.plan, withRecording.trip, FlightOfflineAssets(
-			withRecording.offlineAssets.terrainTiles+withRecording.offlineRequest.terrainTiles,
-			withRecording.offlineAssets.standardSatelliteTiles+withRecording.offlineRequest.standardSatelliteTiles))
-		withRecording.copy(offlineAssets = discoveredAssets)
+		FlightRecordingStore(context, loaded.id).merge(loaded)
 	}
 
 	fun isJourneyArchive(uri: Uri): Boolean = context.contentResolver.openInputStream(uri)?.buffered()?.use { input ->

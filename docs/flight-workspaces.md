@@ -150,7 +150,7 @@ bash OsmAnd/test/standalone/check-flight-preparation.sh /path/to/test-libraries
 ```
 
 The directory contains `ktfmt.jar` (with the Kotlin compiler), `json.jar`,
-`coroutines.jar`, `junit.jar` and `hamcrest.jar`. Native geometry checks are in
+`coroutines.jar`, `junit.jar`, `hamcrest.jar` and `gson.jar` (2.8.9, for the standalone streaming-reader fixture). Native geometry checks are in
 `OsmAnd/test/native/FlightTubeMeshTest.cpp`. Photo action/transform/solver checks
 are in `OsmAnd/test/standalone/Photo*Test.java`.
 

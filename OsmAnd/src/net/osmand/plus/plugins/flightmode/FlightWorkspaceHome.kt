@@ -82,7 +82,7 @@ internal fun FlightWorkspaceHome(
             }
             FlightLibraryFilters(filter) { filter = it }
             FlightLibraryServerNotice()
-            if (state.savedJourneysLoading || cloud?.busy == true)
+            if (state.savedJourneysLoading)
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             LazyColumn(Modifier.weight(1f)) {
                 if (rows.isEmpty() && !state.savedJourneysLoading)
