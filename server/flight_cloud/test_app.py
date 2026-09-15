@@ -14,14 +14,16 @@ TOKEN = "synthetic-test-account-one-token-00001"
 OTHER = "synthetic-test-account-two-token-00002"
 
 
-def archive(name="Synthetic flight", photo=False, extra=None):
+def archive(name="Synthetic flight", photo=False, extra=None, planned=False, photo_id="photo1", calibration=None):
     memory = io.BytesIO()
     journal = {"schemaVersion": 9, "id": "synthetic-flight", "name": name,
-               "trip": {"samples": [[0, 0, 0]]}, "offlineAssets": {}, "offlineRequest": {},
-               "photos": [{"id": "photo1", "storageName": "image-0.jpg", "calibration": {"synthetic": True}}] if photo else []}
+               "trip": {"samples": [] if planned else [[0, 0, 0]]}, "offlineAssets": {}, "offlineRequest": {},
+               "plan": {"stops": [{"name": "City A"}, {"name": "City B"}], "preparation": {"departureMillis": 1800000000000}},
+               "photos": [{"id": photo_id, "storageName": "image-0.jpg", "calibration": calibration or {"synthetic": True}}] if photo else []}
     with zipfile.ZipFile(memory, "w", zipfile.ZIP_DEFLATED) as output:
         output.writestr("journey.json", json.dumps(journal))
-        output.writestr("track.gpx", "<gpx/>")
+        if not planned:
+            output.writestr("track.gpx", "<gpx/>")
         if photo:
             output.writestr("photos/image-0.jpg", b"synthetic-image-not-a-user-photo")
         if extra:
@@ -100,7 +102,10 @@ class CloudTest(unittest.TestCase):
         second = self.put(second_data, HTTP_X_EDIT_TOKEN=lease, HTTP_IF_MATCH='"' + first["revision"] + '"')
         self.assertEqual(second["status"], 200)
         self.assertEqual(self.put(archive("Stale"), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_MATCH='"' + first["revision"] + '"')["status"], 409)
-        self.assertEqual(self.call("GET", "/v1/journeys/trip1/archive")["body"], second_data)
+        current = self.call("GET", "/v1/journeys/trip1/archive")["body"]
+        self.assertEqual(hashlib.sha256(current).hexdigest(), second["json"]["revision"])
+        with zipfile.ZipFile(io.BytesIO(current)) as zip:
+            self.assertEqual(json.loads(zip.read("journey.json"))["name"], "Changed")
         self.assertEqual(self.call("GET", "/v1/journeys/trip1/archive", HTTP_IF_MATCH='"' + first["revision"] + '"')["status"], 409)
 
     def test_concurrent_create_allows_only_one_winner(self):
@@ -108,6 +113,56 @@ class CloudTest(unittest.TestCase):
         with ThreadPoolExecutor(2) as pool:
             results = list(pool.map(lambda n: self.put(archive(str(n)), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_NONE_MATCH="*")["status"], range(2)))
         self.assertEqual(sorted(results), [200, 409])
+
+    def test_planned_flight_round_trip_without_gpx(self):
+        data = archive(planned=True)
+        result = self.put(data, HTTP_X_EDIT_TOKEN=self.lease(), HTTP_IF_NONE_MATCH="*")
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["json"]["kind"], "planned")
+        self.assertEqual(result["json"]["sampleCount"], 0)
+        with zipfile.ZipFile(io.BytesIO(self.call("GET", "/v1/journeys/trip1/archive")["body"])) as zip:
+            self.assertEqual(zip.namelist(), ["journey.json"])
+            self.assertEqual(json.loads(zip.read("journey.json"))["plan"]["preparation"]["departureMillis"], 1800000000000)
+        self.assertEqual(self.call("GET", "/v1/journeys")["json"]["protocolVersion"], 2)
+
+    def test_recorded_flight_requires_gpx(self):
+        with zipfile.ZipFile(io.BytesIO(archive())) as zip:
+            manifest = zip.read("journey.json")
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as zip:
+            zip.writestr("journey.json", manifest)
+        self.assertEqual(self.put(payload.getvalue(), HTTP_X_EDIT_TOKEN=self.lease(), HTTP_IF_NONE_MATCH="*")["status"], 422)
+
+    def test_omitted_photos_are_preserved_and_new_photos_append_despite_same_filename(self):
+        lease = self.lease()
+        first = self.put(archive(photo=True), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_NONE_MATCH="*")["json"]
+        second = self.put(archive(photo=True, photo_id="photo2"), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_MATCH='"'+first["revision"]+'"')
+        self.assertEqual(second["status"], 200)
+        self.assertEqual(set(second["json"]["photoIds"]), {"photo1", "photo2"})
+        third = self.put(archive("No photos selected"), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_MATCH='"'+second["json"]["revision"]+'"')
+        self.assertEqual(set(third["json"]["photoIds"]), {"photo1", "photo2"})
+        with zipfile.ZipFile(io.BytesIO(self.call("GET", "/v1/journeys/trip1/archive")["body"])) as zip:
+            photos = json.loads(zip.read("journey.json"))["photos"]
+            self.assertEqual(len({p["storageName"] for p in photos}), 2)
+            for p in photos:
+                self.assertEqual(zip.read("photos/"+p["storageName"]), b"synthetic-image-not-a-user-photo")
+
+    def test_submitted_photo_updates_calibration_without_duplicates(self):
+        lease = self.lease()
+        first = self.put(archive(photo=True), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_NONE_MATCH="*")["json"]
+        second = self.put(archive(photo=True, calibration={"yaw": 42}), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_MATCH='"'+first["revision"]+'"')
+        self.assertEqual(second["status"], 200)
+        with zipfile.ZipFile(io.BytesIO(self.call("GET", "/v1/journeys/trip1/archive")["body"])) as zip:
+            photos = json.loads(zip.read("journey.json"))["photos"]
+            self.assertEqual(len(photos), 1)
+            self.assertEqual(photos[0]["calibration"], {"yaw": 42})
+
+    def test_plan_can_become_recorded_but_never_erase_recording(self):
+        lease = self.lease()
+        first = self.put(archive(planned=True), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_NONE_MATCH="*")["json"]
+        second = self.put(archive(), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_MATCH='"'+first["revision"]+'"')["json"]
+        self.assertEqual(second["kind"], "past")
+        self.assertEqual(self.put(archive(planned=True), HTTP_X_EDIT_TOKEN=lease, HTTP_IF_MATCH='"'+second["revision"]+'"')["status"], 409)
 
     def test_only_current_and_previous_archive_retained(self):
         lease, revision = self.lease(), None

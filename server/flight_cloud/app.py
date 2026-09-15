@@ -65,8 +65,8 @@ def inspect_archive(file):
             names = [entry.filename for entry in entries]
             if len(entries) > 1002 or len(names) != len(set(names)):
                 raise ValueError("Duplicate or excessive entries")
-            if "journey.json" not in names or "track.gpx" not in names:
-                raise ValueError("Missing journal or GPX")
+            if "journey.json" not in names:
+                raise ValueError("Missing journal")
             total = 0
             for entry in entries:
                 name = entry.filename
@@ -95,6 +95,8 @@ def inspect_archive(file):
             samples = journal.get("trip", {}).get("samples", [])
             if not isinstance(photos, list) or not isinstance(samples, list) or len(photos) > 1000:
                 raise ValueError("Invalid journal")
+            if samples and "track.gpx" not in names:
+                raise ValueError("Recorded journal requires GPX")
             expected = {"photos/" + p["storageName"] for p in photos}
             if len(expected) != len(photos) or expected != {n for n in names if n.startswith("photos/")}:
                 raise ValueError("Photo manifest does not match files")
@@ -107,12 +109,57 @@ def inspect_archive(file):
             name = journal.get("name", "")
             if not isinstance(name, str) or not name.strip() or len(name) > 300:
                 raise ValueError("Invalid journal name")
-            return {"name": name, "photoCount": len(photos), "sampleCount": len(samples),
+            return {"name": name, "kind": "past" if samples else "planned", "photoCount": len(photos), "sampleCount": len(samples),
                     "photoIds": [p["id"] for p in photos]}
     except ApiError:
         raise
     except (ValueError, KeyError, TypeError, AttributeError, zipfile.BadZipFile, EOFError, RuntimeError):
         raise ApiError(422, "invalid_archive") from None
+
+
+def append_existing_photos(incoming, previous_path, target):
+    """Incoming metadata wins for submitted photos; omitted server photos are never removed."""
+    with zipfile.ZipFile(incoming) as new, zipfile.ZipFile(previous_path) as old:
+        journal = load_json(new.read("journey.json"))
+        previous = load_json(old.read("journey.json"))
+        if previous.get("trip", {}).get("samples") and not journal.get("trip", {}).get("samples"):
+            raise ApiError(409, "recorded_flight_cannot_become_plan")
+        submitted = {photo["id"] for photo in journal.get("photos", [])}
+        combined = [(photo, new) for photo in journal.get("photos", [])]
+        combined += [(photo, old) for photo in previous.get("photos", []) if photo["id"] not in submitted]
+        if len(combined) > 1000:
+            raise ApiError(413, "archive_too_large")
+        journal["photos"] = []
+        total = 0
+        with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as output:
+            for photo, archive in combined:
+                photo = dict(photo)
+                source = "photos/" + photo["storageName"]
+                suffix = Path(photo["storageName"]).suffix.lower()
+                if suffix not in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"):
+                    suffix = ".bin"
+                name = hashlib.sha256(photo["id"].encode()).hexdigest() + suffix
+                photo["storageName"] = name
+                journal["photos"].append(photo)
+                with archive.open(source) as src, output.open("photos/" + name, "w") as dst:
+                    while chunk := src.read(65536):
+                        total += len(chunk)
+                        if total > MAX_UPLOAD:
+                            raise ApiError(413, "archive_too_large")
+                        dst.write(chunk)
+            manifest = encode_json(journal)
+            if len(manifest) > MAX_JSON:
+                raise ApiError(413, "archive_too_large")
+            output.writestr("journey.json", manifest)
+            if "track.gpx" in new.namelist():
+                with new.open("track.gpx") as src, output.open("track.gpx", "w") as dst:
+                    while chunk := src.read(65536):
+                        total += len(chunk)
+                        if total + len(manifest) > MAX_UPLOAD:
+                            raise ApiError(413, "archive_too_large")
+                        dst.write(chunk)
+    target.seek(0)
+    return inspect_archive(target)
 
 
 class FlightCloud:
@@ -176,7 +223,7 @@ class FlightCloud:
                 with self.locked(account) as directory:
                     rows = [load_json(p.read_bytes()) for p in directory.glob("*/head.json")]
                 body = {"journeys": sorted(rows, key=lambda r: r["updatedAt"], reverse=True),
-                        "maxUploadBytes": MAX_UPLOAD}
+                        "maxUploadBytes": MAX_UPLOAD, "protocolVersion": 2}
             elif method == "POST" and path == "/v1/edit-session":
                 body = self.lease(account)
             else:
@@ -228,6 +275,21 @@ class FlightCloud:
                             raise ApiError(409, "revision_conflict")
                         if not previous and env.get("HTTP_IF_NONE_MATCH") != "*":
                             raise ApiError(409, "revision_conflict")
+                        if previous:
+                            with tempfile.TemporaryFile(dir=self.root) as merged:
+                                summary = append_existing_photos(incoming, folder / (previous["revision"] + ".zip"), merged)
+                                merged.seek(0)
+                                incoming.seek(0)
+                                incoming.truncate()
+                                digest, length = hashlib.sha256(), 0
+                                while chunk := merged.read(65536):
+                                    length += len(chunk)
+                                    if length > MAX_UPLOAD:
+                                        raise ApiError(413, "archive_too_large")
+                                    digest.update(chunk)
+                                    incoming.write(chunk)
+                                revision = digest.hexdigest()
+                            self.require_edit(env, account)
                         folder.mkdir(exist_ok=True, mode=0o700)
                         archive_path = folder / (revision + ".zip")
                         if not archive_path.exists():

@@ -1,7 +1,8 @@
 # Flight library
 
 Small Python WSGI application. Files on disk, no database, no login/password, no tile uploads.
-The Android library is under **Flights → Phone and server** (also available in Journals).
+Planned and past flight lists show both local and server entries, with separate storage/version pills.
+Each row opens its transfer actions; connection settings are shared by both lists.
 
 ## Deploy with Project Deployer
 
@@ -74,13 +75,26 @@ The Android client requires HTTPS and does not follow redirects with its token.
 - **Enable editing for 15 minutes** exchanges that same token for an expiring signed edit token.
   This is an accidental-write guard, **not** a separate read-only user role: the account token can
   obtain edit sessions. The UI discards the edit token when closed or locked.
-- Transfers are explicit snapshots, not continuous synchronization. Each update requires the revision
-  previously downloaded/published by this phone. Concurrent edits return HTTP 409; no automatic merge.
-- Uploads include `journey.json`, `track.gpx`, and only the selected photos. Photo associations,
+- Transfers are explicit snapshots, not continuous synchronization. Local photo editing autosaves without
+  an edit token; publication requires an edit session. The editing screens show local-save and server
+  states separately. Each update requires the revision previously downloaded/published by this phone.
+  Concurrent edits return HTTP 409; a stale phone never overwrites newer server changes.
+- Uploads include `journey.json`, `track.gpx` **only for recorded flights**, and selected photos. Planned
+  flights contain their stops, schedules and settings without fabricated GPS measurements. Photo associations,
   spatial placement, adjustments, control points and calibration diagnostics travel in the manifest.
+- Protocol 2 updates preserve server photos omitted from the upload. Submitted photo IDs add or update
+  their own image and metadata, with collision-safe archive filenames. This append occurs under the same
+  revision lock as publication. A past flight cannot accidentally be replaced by an empty plan.
+  Update this server before uploading from the new client; reading older servers remains supported.
 - Terrain, satellite, render caches and models are rejected. Local originals are not deleted when a
   photo is omitted. Downloaded preparations are not automatically armed.
 - Downloading a different server revision creates a **new local copy**, preserving current local edits.
+- Sending never removes local data. A separate confirmed removal action requires a fully published local
+  version (all photos included), a matching fresh server revision and checksum verification of its archive.
+  Active or automatically scheduled flights cannot be removed. Only the private local journal, recording
+  files and unshared private photos are removed; gallery originals and shared offline tiles remain.
+  The removed flight remains listed on the server and can be downloaded again. Partial-photo publication
+  is labelled explicitly and does not enable removal.
 - Each journal retains its current and preceding archive. Older revisions are removed after a
   successful update. The previous ZIP is available for manual operator recovery, not exposed in the UI.
 - Limits: 512 MiB compressed **and decompressed** per journal, 32 MiB JSON, 1000 photos.
