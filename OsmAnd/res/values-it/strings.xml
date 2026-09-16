@@ -1765,7 +1765,7 @@
     <string name="looking_for_tracks_with_waypoints">Cerco tracce con punti intermedi</string>
     <string name="shared_string_more_without_dots">Altro</string>
     <string name="empty_state_osm_edits">Crea o modifica oggetti di OpenStreetMap</string>
-    <string name="empty_state_osm_edits_descr">Crea o modifica PDI OSM, apri o commenta note OSM, e invia tracce GPX registrate.</string>
+    <string name="empty_state_osm_edits_descr">Crea o modifica PDI di OpenStreetMap, apri o commenta note di OSM e invia tracce GPX registrate.</string>
     <string name="shared_string_deleted">Cancellato</string>
     <string name="shared_string_edited">Modificato</string>
     <string name="shared_string_added">Aggiunto</string>
@@ -4475,8 +4475,8 @@
     <string name="add_widget_to_the_left">Aggiungi il widget a sinistra</string>
     <string name="add_widget_below">Aggiungi il widget qui sotto</string>
     <string name="location_radius">Raggio di posizione</string>
-    <string name="delete_widget">Eliminare il widget?</string>
-    <string name="delete_widget_description">Questo widget verrà eliminato. Puoi ripristinarlo più tardi in Configura schermo.</string>
+    <string name="delete_widget">Rimuovere il widget?</string>
+    <string name="delete_widget_description">Questo widget sarà rimosso. Puoi ripristinarlo più tardi in Configura schermo.</string>
     <string name="battery_saving_mode">Modalità di risparmio batteria</string>
     <string name="app_mode_suv">SUV</string>
     <string name="rendering_attr_alpineHiking_name">Grado di difficoltà dei sentieri escursionistici</string>
@@ -4502,7 +4502,7 @@
     <string name="map_3d_mode_action_descr">Cambia l\'inclinazione della mappa.</string>
     <string name="drawer_button_description">Apre il menu principale.</string>
     <string name="configure_map_description">Modifica lo stile della mappa, i livelli o altre impostazioni.</string>
-    <string name="rendering_attr_showDirtbikeTrails_description">Mostra percorsi per motocross</string>
+    <string name="rendering_attr_showDirtbikeTrails_description">Mostra percorsi per moto da enduro</string>
     <string name="contour_layers_action_descr">Cambia i livelli di contorno</string>
     <string name="type_of_activity">Tipo di attività</string>
     <string name="change_activity">Cambia attività</string>
@@ -4662,7 +4662,7 @@
     <string name="third_links">Collegamenti a Terzi</string>
     <string name="quick_action_save_recorded_trip_and_continue_summary">Un pulsante per salvare il percorso correntemente registrato come file GPX e continuare a registrare un nuovo tratto senza interruzioni.</string>
     <string name="liter_per_hour">L/h</string>
-    <string name="rendering_attr_showDirtbikeTrails_name">Sentieri per motocross</string>
+    <string name="rendering_attr_showDirtbikeTrails_name">Sentieri per moto da enduro</string>
     <string name="av_audio_sample_rate">Frequenza di campionamento audio</string>
     <string name="av_audio_sample_rate_descr">Seleziona la frequenza di campionamento audio.</string>
     <string name="connect_new_scanner">Connetti il nuovo scanner</string>
@@ -4915,8 +4915,8 @@
     <string name="rendering_attr_shellsStyle_description">Stile per le conchiglie sul fondale marino</string>
     <string name="rendering_attr_showLNAMmarker_name">Marcatori ENC</string>
     <string name="rendering_attr_showLNAMmarker_description">Mostra i marcatori ENC</string>
-    <string name="rendering_attr_spotSize_name">Dimensioni punto profondità</string>
-    <string name="rendering_attr_spotSize_description">Dimensioni punto profondità</string>
+    <string name="rendering_attr_spotSize_name">Dimensione dei punti di profondità</string>
+    <string name="rendering_attr_spotSize_description">Dimensione dei punti di profondità</string>
     <string name="help_article_navigation_routing_ski_routing_name">Piste da sci e percorsi</string>
     <string name="show_local_names">Mostra i nomi locali</string>
     <string name="rendering_attr_pisteRoutes_name">Discese e percorsi da sci</string>
@@ -5161,8 +5161,8 @@
     <string name="access_pinch_zoom_magnification">Ingrandimento con due dita</string>
     <string name="ais_own_object">Impostazioni per la visualizzazione del proprio oggetto AIS</string>
     <string name="ais_own_mmsi">MMSI personale (identificativo del servizio mobile marittimo)</string>
-    <string name="ais_own_mmsi_description">Identificare l\'MMSI (valore numerico a 9 cifre) del proprio oggetto AIS.</string>
-    <string name="ais_display_own_position">Definire se il proprio oggetto AIS deve essere visualizzato.</string>
+    <string name="ais_own_mmsi_description">Identificare l\'MMSI (codice numerico a 9 cifre) del proprio oggetto AIS.</string>
+    <string name="ais_display_own_position">Definire se il proprio oggetto AIS debba essere visualizzato.</string>
     <string name="ais_display_own_position_description">Normalmente la propria posizione è indicata da OsmAnd. La visualizzazione aggiuntiva del proprio oggetto AIS potrebbe creare confusione e può essere disabilitata qui.</string>
     <string name="ais_receive_in_background">Ricevi i dati AIS anche se OsmAnd è in pausa.</string>
     <string name="ais_receive_in_background_description">Se abilitato, il ricevitore dei messaggi AIS rimane attivo anche se OsmAnd è in pausa o in sottofondo. Se disabilitato, non vengono ricevuti messaggi se OsmAnd è in sottofondo.</string>
@@ -5180,7 +5180,7 @@
     <string name="change_media_storage_full_description">Sposto i file multimediali esistenti nella nuova destinazione?\n%1$s &gt; %2$s</string>
     <string name="media_storage_directory_not_writable">I file multimediali potrebbero non essere salvati nella cartella specificata</string>
     <string name="route_calculation_method">Metodo di calcolo del percorso</string>
-    <string name="route_calculation_method_auto">Automatico (Il più veloce disponibile)</string>
+    <string name="route_calculation_method_auto">Automatico (il più veloce disponibile)</string>
     <string name="route_calculation_method_auto_desc">Tenta di usare il calcolo rapido del percorso. Passa automaticamente al calcolo standard se le date sulla mappa non corrispondono.</string>
     <string name="route_calculation_method_standard_only">Solo standard</string>
     <string name="route_calculation_method_standard_only_desc">Utilizza sempre il calcolo standard del percorso. Più lento, ma consente la navigazione con mappe di date diverse.</string>
@@ -5209,7 +5209,7 @@
     <string name="search_around_my_location_description">Cerca attorno alla tua posizione</string>
     <string name="sort_by_relevance">Rilevanza</string>
     <string name="tracks_backup_promo_button">Ottieni OsmAnd Pro</string>
-    <string name="tracks_backup_promo_description">Sincronizza le tue tracce tra tutti i dispositivi e sul Web con OsmAnd Pro.</string>
+    <string name="tracks_backup_promo_description">Sincronizza le tue tracce tra tutti i dispositivi e il web con OsmAnd Pro.</string>
     <string name="tracks_backup_promo_title">Salva e sincronizza le tue tracce</string>
     <string name="android_auto_missing_maps_desc">Scarica le mappe mancanti per continuare il percorso.</string>
     <string name="android_auto_possible_missing_maps_desc">Mappe potenzialmente mancanti. Prova a utilizzare le mappe esistenti per continuare.</string>
@@ -5277,8 +5277,8 @@
     <string name="history_is_turned_off">La cronologia è disattivata</string>
     <string name="search_and_navigation_history_disabled_descr">Le cronologie della ricerca e della navigazione sono disattivate. Abilitale nelle impostazioni per vedere qui l\'attività recente.</string>
     <string name="open_history_settings">Apri le impostazioni della cronologia</string>
-    <string name="free_download_limit_reached">Limite di download gratuiti raggiunto</string>
-    <string name="free_download_limit_reached_description">Sblocca download e aggiornamenti illimitati delle mappe</string>
+    <string name="free_download_limit_reached">Limite di scaricamenti gratuiti raggiunto</string>
+    <string name="free_download_limit_reached_description">Sblocca scaricamenti e aggiornamenti illimitati delle mappe</string>
     <string name="get_unlimited_downloads">Ottieni download illimitati</string>
     <string name="navigate_point_east_coordinate">Coordinata Est</string>
     <string name="navigate_point_north_coordinate">Coordinata Nord</string>
@@ -5391,4 +5391,8 @@
     <string name="duplicate_map_standard_exists_desc">Hai già la mappa standard per %1$s. Lo scaricamento della mappa con le sole strade duplicherà i dati e potrebbe degradare le prestazioni.\n\nLa sostituzione rimuoverà la ricerca degli indirizzi e i dati dei PDI inclusi nella mappa standard.</string>
     <string name="duplicate_map_road_only_exists_desc">Hai già la mappa con le sole strade per %1$s. Scaricare la mappa standard duplicherà i dati e potrebbe compromettere le prestazioni.</string>
     <string name="astro_eclipse_column_below_horizon">Sotto l\'orizzonte</string>
+    <string name="quick_action_add_track">Aggiungi una traccia</string>
+    <string name="quick_action_tracks_select_descr">Aggiungi una o più tracce per mostrarle o nasconderle sulla mappa con un singolo tocco.</string>
+    <string name="quick_action_tracks_always_ask_descr">Il tocco di questo attivatore apre l\'elenco delle tracce, da cui è possibile mostrarne o nasconderne una o più.</string>
+    <string name="quick_action_all_tracks">Tutte le tracce</string>
 </resources>
