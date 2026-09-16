@@ -121,6 +121,34 @@ class FlightSceneStreamingEngine(
 	private var backgroundGeneration = 0L
 	private var backgroundExecutionGeneration = 0L
 	private var closed = false
+	private var foreground = true
+	private var resumeDemandNeeded = false
+
+	/** Keep the resident scene and demand, but cancel CPU/network work while no view can consume it. */
+	fun setForeground(visible: Boolean) {
+		if (closed || foreground == visible) return
+		foreground = visible
+		repository.setSceneWorkEnabled(visible)
+		if (!visible) {
+			resumeDemandNeeded = activeJob?.isActive == true || settleJob?.isActive == true
+			generation++
+			backgroundExecutionGeneration++
+			activeJob?.cancel()
+			settleJob?.cancel()
+			backgroundJob?.cancel()
+			activeJob = null
+			settleJob = null
+			backgroundJob = null
+			activeDemand = null
+			settleReason = null
+		} else {
+			desiredDemand?.let {
+				submit(it, if (resumeDemandNeeded) FlightSceneDemandReason.RETRY else FlightSceneDemandReason.PAGE)
+			}
+			resumeDemandNeeded = false
+			startBackgroundWorkIfIdle()
+		}
+	}
 
 	val isBusy: Boolean
 		get() = activeJob?.isActive == true || settleJob?.isActive == true || backgroundJob?.isActive == true
@@ -132,6 +160,10 @@ class FlightSceneStreamingEngine(
 		if (closed) return
 		val previousDesired = desiredDemand
 		desiredDemand = demand
+		if (!foreground) {
+			if (demand != previousDesired) resumeDemandNeeded = true
+			return
+		}
 		val scene = residentScene ?: initialScene()
 		val runningDemand = activeDemand.takeIf { activeJob?.isActive == true }
 		val referenceDemand = runningDemand ?: scene?.let { resident ->
@@ -252,6 +284,7 @@ class FlightSceneStreamingEngine(
 	}
 
 	private fun startDesiredDemand() {
+		if (!foreground || closed) return
 		val demand = desiredDemand ?: return
 		preemptBackgroundWork()
 		settleJob?.cancel()
@@ -323,7 +356,7 @@ class FlightSceneStreamingEngine(
 	}
 
 	private fun startBackgroundWorkIfIdle() {
-		if (closed || activeJob?.isActive == true || settleJob?.isActive == true ||
+		if (closed || !foreground || activeJob?.isActive == true || settleJob?.isActive == true ||
 			backgroundJob?.isActive == true
 		) return
 		val work = backgroundWork ?: return

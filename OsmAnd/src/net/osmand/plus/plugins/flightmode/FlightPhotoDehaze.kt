@@ -72,10 +72,10 @@ internal fun rememberDehazedPhoto(
             FlightPhotoDehaze.recipe(settings)
         }
     var result by remember(source) { mutableStateOf(FlightDehazePreview(source)) }
-    LaunchedEffect(source, recipe) {
+    FlightResumedEffect(source, recipe) {
         if (source == null || recipe.amount == 0f) {
             result = FlightDehazePreview(source)
-            return@LaunchedEffect
+            return@FlightResumedEffect
         }
         result = result.copy(busy = true, failed = false)
         delay(180)

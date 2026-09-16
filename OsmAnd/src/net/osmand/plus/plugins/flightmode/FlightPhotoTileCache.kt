@@ -16,6 +16,12 @@ internal object FlightPhotoTileCache {
         }
     private var terrain: FlightTerrainRepository? = null
     private var native: FlightNativeMapTextureRepository? = null
+    private val visibleOwners = mutableSetOf<Any>()
+
+    fun setVisible(owner: Any, visible: Boolean) {
+        if (visible) visibleOwners.add(owner) else visibleOwners.remove(owner)
+        terrain?.setSceneWorkEnabled(visibleOwners.isNotEmpty())
+    }
 
     fun key(satellite: Boolean, tile: TerrainTileId) = "$satellite/${tile.zoom}/${tile.x}/${tile.y}"
 
@@ -33,7 +39,10 @@ internal object FlightPhotoTileCache {
         // Called on Main; repository IO/decoding runs off Main. Sharing also shares file locks.
         val path =
             if (satellite) {
-                val repository = terrain ?: FlightTerrainRepository(app).also { terrain = it }
+                val repository = terrain ?: FlightTerrainRepository(app).also {
+                    terrain = it
+                    it.setSceneWorkEnabled(visibleOwners.isNotEmpty())
+                }
                 repository.calibrationSatellite(tile)
             } else {
                 val repository =

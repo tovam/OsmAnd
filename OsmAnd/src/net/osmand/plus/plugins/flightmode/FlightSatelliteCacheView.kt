@@ -50,7 +50,21 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 			}
 	}
 
-	private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+	private var worker: ExecutorService = Executors.newSingleThreadExecutor()
+	private var workVisible = false
+	private var workGeneration = 0L
+	private val workLifecycle = FlightViewVisibility(this) { visible ->
+		workVisible = visible
+		workGeneration++
+		if (visible) {
+			if (worker.isShutdown) worker = Executors.newSingleThreadExecutor()
+			reload()
+		} else {
+			worker.shutdownNow()
+			queuedKeys.clear()
+			scanRunning = false
+		}
+	}
 	private val bitmapCache = object : LruCache<String, Bitmap>(BITMAP_CACHE_KIB) {
 		override fun sizeOf(key: String, value: Bitmap): Int = (value.allocationByteCount / 1024).coerceAtLeast(1)
 	}
@@ -137,7 +151,7 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 	}
 
 	private fun reload() {
-		if (detached) return
+		if (detached || !workVisible) return
 		scanGeneration++
 		// Keep the previous immutable snapshot visible during rescans. Replacing it
 		// with a loading frame on every downloaded tile caused the visible flashing.
@@ -148,12 +162,14 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 	}
 
 	private fun launchCacheScan() {
-		if (detached) return
+		if (detached || !workVisible) return
 		scanRunning = true
+		val lifecycleGeneration = workGeneration
 		val generation = scanGeneration
 		worker.execute {
 			val snapshot = scanCache()
 			post {
+				if (lifecycleGeneration != workGeneration || !workVisible) return@post
 				scanRunning = false
 				if (detached) return@post
 				if (generation != scanGeneration) {
@@ -230,11 +246,15 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 	}
 
 	private fun scanTileFiles(root: File, extension: String): Map<TerrainTileId, File> = buildMap {
+		if (Thread.currentThread().isInterrupted) return@buildMap
 		root.listFiles().orEmpty().filter(File::isDirectory).forEach zoomLoop@ { zoomDirectory ->
+			if (Thread.currentThread().isInterrupted) return@buildMap
 			val zoom = zoomDirectory.name.toIntOrNull() ?: return@zoomLoop
 			zoomDirectory.listFiles().orEmpty().filter(File::isDirectory).forEach xLoop@ { xDirectory ->
+				if (Thread.currentThread().isInterrupted) return@buildMap
 				val x = xDirectory.name.toIntOrNull() ?: return@xLoop
 				xDirectory.listFiles().orEmpty().forEach { file ->
+					if (Thread.currentThread().isInterrupted) return@buildMap
 					val y = file.nameWithoutExtension.toIntOrNull()
 					if (y != null && file.isFile && file.length() > 0L && file.extension.equals(extension, true)) {
 						put(TerrainTileId(zoom, x, y), file)
@@ -349,14 +369,17 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 		SAMPLE_SIZES.any { sampleSize -> bitmapCache.get(cacheKey(sourceKey, sampleSize)) != null }
 
 	private fun queueBitmap(tile: CachedTile, sampleSize: Int) {
+		if (detached || !workVisible) return
 		val key = cacheKey(tile.sourceKey, sampleSize)
 		if (bitmapCache.get(key) != null || key in failedKeys || key in queuedKeys ||
 			queuedKeys.size >= MAXIMUM_QUEUED_BITMAPS
 		) return
 		queuedKeys += key
+		val generation = workGeneration
 		worker.execute {
 			val bitmap = decodeCombinedTile(tile, sampleSize)
 			post {
+				if (generation != workGeneration || !workVisible) return@post
 				queuedKeys -= key
 				if (detached) return@post
 				if (bitmap != null) bitmapCache.put(key, bitmap) else failedKeys += key
@@ -440,8 +463,15 @@ class FlightSatelliteCacheView @JvmOverloads constructor(
 		return true
 	}
 
+	override fun onAttachedToWindow() {
+		super.onAttachedToWindow()
+		detached = false
+		workLifecycle.attach()
+	}
+
 	override fun onDetachedFromWindow() {
 		detached = true
+		workLifecycle.detach()
 		scanGeneration++
 		worker.shutdownNow()
 		bitmapCache.evictAll()

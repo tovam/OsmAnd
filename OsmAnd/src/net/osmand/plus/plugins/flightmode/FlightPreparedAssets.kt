@@ -79,6 +79,7 @@ internal class FlightPreparedAssets(changed: () -> Unit) : AutoCloseable {
 	fun reconcile(requests: List<PreparedResourceQueue.Request<Key, Asset>>) = queue.reconcile(requests)
 	fun takeGeometry(mesh: FlightTerrainMesh): Geometry? = queue.take(GeometryKey(mesh.vertices, mesh.indices)) as? Geometry
 	fun takeImage(key: ImageKey): Image? = queue.take(key) as? Image
+	fun isReady(key: Key): Boolean = queue.isReady(key)
 	override fun close() = queue.close()
 
 	companion object {

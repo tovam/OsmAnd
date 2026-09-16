@@ -66,8 +66,9 @@ internal fun FlightPlanningScreen(
             FlightTerrainRepository(context.applicationContext as net.osmand.plus.OsmandApplication)
         }
     DisposableEffect(repository) { onDispose { repository.close() } }
-    LaunchedEffect(quote, state.offlinePreloadStatus.phase, section) {
-        if (section != 1) return@LaunchedEffect
+    FlightVisibilityEffect(repository) { repository.setSceneWorkEnabled(it) }
+    FlightResumedEffect(quote, state.offlinePreloadStatus.phase, section) {
+        if (section != 1) return@FlightResumedEffect
         freeBytes = withContext(Dispatchers.IO) { context.filesDir.usableSpace }
         existing = null
         quote?.let { existing = repository.existingPreparationBytes(it) }
@@ -83,8 +84,8 @@ internal fun FlightPlanningScreen(
         )
     // Names and schedules do not change the geographic download manifest.
     val planKey = state.plan.stops.map { it.latitude to it.longitude } to prep.bands
-    LaunchedEffect(planKey, section) {
-        if (section != 1) return@LaunchedEffect
+    FlightResumedEffect(planKey, section) {
+        if (section != 1) return@FlightResumedEffect
         quote = null
         error = null
         quoting = true

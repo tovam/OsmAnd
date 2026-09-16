@@ -57,9 +57,8 @@ internal fun FlightCameraScreen(
     val sensors = remember(context) { FlightCaptureSensors(context) }
     val latestFix by rememberUpdatedState(fix)
     val latestShutter by rememberUpdatedState(onShutter)
-    DisposableEffect(sensors) {
-        sensors.start()
-        onDispose { sensors.stop() }
+    FlightVisibilityEffect(sensors) { visible ->
+        if (visible) sensors.start() else sensors.stop()
     }
     val executor = remember(context) { ContextCompat.getMainExecutor(context) }
     val scope = rememberCoroutineScope()

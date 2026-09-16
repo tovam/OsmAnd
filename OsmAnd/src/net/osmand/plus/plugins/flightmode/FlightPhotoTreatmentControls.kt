@@ -31,9 +31,9 @@ internal fun rememberPhotoDepthGuidance(
     val latestSet by rememberUpdatedState(onSet)
     var busy by remember(photo.id) { mutableStateOf(false) }
     val enabled = photo.imageAdjustments.depthEnabled && photo.imageAdjustments.dehaze > 0f
-    LaunchedEffect(photo.id, signature, scene?.geometryGeneration, enabled, retry) {
+    FlightResumedEffect(photo.id, signature, scene?.geometryGeneration, enabled, retry) {
         busy = false
-        if (!enabled || projection == null || scene == null) return@LaunchedEffect
+        if (!enabled || projection == null || scene == null) return@FlightResumedEffect
         delay(700)
         busy = true
         try {

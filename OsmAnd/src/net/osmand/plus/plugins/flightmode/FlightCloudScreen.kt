@@ -47,7 +47,7 @@ internal fun FlightCloudScreen(
     var removeConfirmation by remember { mutableStateOf<String?>(null) }
     var now by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { controller.refresh() }
-    LaunchedEffect(Unit) {
+    FlightResumedEffect(Unit) {
         while (true) {
             delay(1000)
             now = android.os.SystemClock.elapsedRealtime()

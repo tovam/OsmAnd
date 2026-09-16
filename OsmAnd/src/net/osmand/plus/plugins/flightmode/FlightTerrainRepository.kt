@@ -44,7 +44,19 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	private val satelliteRenderDirectory = File(app.filesDir, FlightSatelliteSource.RENDER_CACHE_DIRECTORY)
 	private val nativeMapTextureRepository = FlightNativeMapTextureRepository(app)
 	private val assetScheduler = FlightAssetScheduler()
-	fun close() = assetScheduler.close()
+	@Volatile private var sceneWorkEnabled = true
+	private val sceneConnections = ConcurrentHashMap.newKeySet<HttpURLConnection>()
+	fun setSceneWorkEnabled(enabled: Boolean) {
+		if (sceneWorkEnabled == enabled) return
+		sceneWorkEnabled = enabled
+		if (!enabled) {
+			cancelPendingAssets()
+			// Disconnect outside the UI thread; prevent new requests immediately above.
+			val sockets = sceneConnections.toList()
+			if (sockets.isNotEmpty()) Thread({ sockets.forEach { runCatching { it.disconnect() } } }, "FlightPauseDownloads").start()
+		}
+	}
+	fun close() { setSceneWorkEnabled(false); assetScheduler.close() }
 	fun cancelPendingAssets() = assetScheduler.reconcile(emptyList())
 
 	/** Calibration never substitutes zero for unavailable relief. */
@@ -1367,6 +1379,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		val cancellation = preparationCancellation.get()
 		try {
 			FlightNetworkAccess.register(connection) { connection.disconnect() }
+			if (cancellation == null) sceneConnections.add(connection)
+			ensureWorkActive()
 			cancellation?.attach(connection)
 			connection.requestMethod = "GET"
 			connection.connectTimeout = connectTimeoutMillis
@@ -1406,6 +1420,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			)
 		} finally {
 			FlightNetworkAccess.unregister(connection)
+			sceneConnections.remove(connection)
 			cancellation?.detach(connection)
 			connection.disconnect()
 			if (partial.exists()) partial.delete()
@@ -1462,7 +1477,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		synchronized(decodedTerrainCache) { decodedTerrainCache[tileId] }
 
 	private fun ensureWorkActive() {
-		if (Thread.currentThread().isInterrupted) {
+		if (Thread.currentThread().isInterrupted || (!sceneWorkEnabled && preparationCancellation.get()==null)) {
 			throw InterruptedIOException("Calcul de tuile obsolète annulé")
 		}
 	}

@@ -47,7 +47,7 @@ class FlightEnvironmentRecorder(
 	private val readingLock = Any()
 	@Volatile
 	private var running = false
-	private var audioRecord: AudioRecord? = null
+	@Volatile private var audioRecord: AudioRecord? = null
 	private var audioThread: Thread? = null
 	private var latestReading = FlightEnvironmentReading()
 	@Volatile
@@ -144,8 +144,20 @@ class FlightEnvironmentRecorder(
 	private fun recordAudio(recorder: AudioRecord) {
 		val buffer = ShortArray(AUDIO_FRAME_SAMPLES)
 		while (running && audioRecord === recorder && !Thread.currentThread().isInterrupted) {
-			val count = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-			if (count <= 0) continue
+			val count = runCatching {
+				recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
+			}.getOrDefault(AudioRecord.ERROR_INVALID_OPERATION)
+			// A dead/stopped input must not turn into an unbounded read/error CPU loop.
+			if (count <= 0) {
+				if (running && audioRecord === recorder) {
+					runCatching { recorder.stop() }
+					synchronized(readingLock) {
+						latestReading = latestReading.copy(soundDb = null, soundSpectrum = null)
+					}
+					emit(android.os.SystemClock.elapsedRealtime())
+				}
+				break
+			}
 			var energy = 0.0
 			for (index in 0 until count) {
 				val value = buffer[index].toDouble()

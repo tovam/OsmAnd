@@ -36,7 +36,46 @@ public final class PreparedResourceQueueTest {
 			while (!disposed.contains("STALE") && System.nanoTime() < deadline) Thread.yield();
 			check(disposed.contains("STALE"), "stale result leaked");
 		}
+		idleAndFailedWorkersSleep();
+		cancelledSameKeyMustNotPoisonResume();
 		System.out.println("PASS queue: budget, reordering, useful-job retention, stale cancellation, resource disposal");
+	}
+	@SuppressWarnings("unchecked")
+	private static void idleAndFailedWorkersSleep() throws Exception {
+		try (PreparedResourceQueue<String, String> queue = new PreparedResourceQueue<>(1, 10, v -> {}, () -> {})) {
+			// Only inspect threads created by this synthetic queue, never application/process state.
+			java.lang.reflect.Field field = PreparedResourceQueue.class.getDeclaredField("workers");
+			field.setAccessible(true);
+			Thread worker = ((List<Thread>) field.get(queue)).get(0);
+			long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+			while (worker.getState() != Thread.State.WAITING && System.nanoTime() < deadline) Thread.sleep(1);
+			check(worker.getState() == Thread.State.WAITING, "idle worker still uses timed polling");
+			AtomicInteger attempts = new AtomicInteger();
+			CountDownLatch retried = new CountDownLatch(1);
+			queue.reconcile(Collections.singletonList(new PreparedResourceQueue.Request<>("retry", 6, () -> {
+				if (attempts.incrementAndGet() == 1) throw new IllegalStateException("synthetic failure");
+				retried.countDown(); return "OK";
+			})));
+			check(retried.await(4, TimeUnit.SECONDS), "timed retry no longer wakes worker");
+			check("OK".equals(await(queue, "retry")), "retry result missing");
+			check(attempts.get() == 2, "failure caused a busy retry loop");
+		}
+	}
+	private static void cancelledSameKeyMustNotPoisonResume() throws Exception {
+		try (PreparedResourceQueue<String, String> queue = new PreparedResourceQueue<>(1, 10, v -> {}, () -> {})) {
+			CountDownLatch started = new CountDownLatch(1), cancelled = new CountDownLatch(1), finish = new CountDownLatch(1);
+			queue.reconcile(Collections.singletonList(new PreparedResourceQueue.Request<>("same", 6, () -> {
+				started.countDown();
+				try { new CountDownLatch(1).await(); } catch (InterruptedException expected) { cancelled.countDown(); }
+				finish.await(); return "STALE";
+			})));
+			check(started.await(2, TimeUnit.SECONDS), "old job not running");
+			queue.reconcile(Collections.emptyList());
+			check(cancelled.await(2, TimeUnit.SECONDS), "old job not cancelled");
+			queue.reconcile(Collections.singletonList(new PreparedResourceQueue.Request<>("same", 6, () -> "FRESH")));
+			finish.countDown();
+			check("FRESH".equals(await(queue, "same")), "cancelled work poisoned resumed demand");
+		}
 	}
 	private static String await(PreparedResourceQueue<String, String> queue, String key) throws Exception {
 		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);

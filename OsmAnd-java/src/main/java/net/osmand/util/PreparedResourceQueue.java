@@ -19,6 +19,7 @@ public final class PreparedResourceQueue<K, V> implements AutoCloseable {
 	private static final class Work<K, V> {
 		final Request<K, V> request;
 		Thread thread;
+		boolean cancelled;
 		Work(Request<K, V> request) { this.request = request; }
 	}
 	private final long budget;
@@ -62,7 +63,10 @@ public final class PreparedResourceQueue<K, V> implements AutoCloseable {
 			}
 		}
 		for (Map.Entry<K, Work<K, V>> entry : running.entrySet()) {
-			if (!wanted.containsKey(entry.getKey())) entry.getValue().thread.interrupt();
+			if (!wanted.containsKey(entry.getKey())) {
+				entry.getValue().cancelled = true;
+				entry.getValue().thread.interrupt();
+			}
 		}
 		retryAfter.keySet().retainAll(wanted.keySet());
 		notifyAll();
@@ -80,13 +84,17 @@ public final class PreparedResourceQueue<K, V> implements AutoCloseable {
 	public synchronized int pendingCount() { return wanted.size(); }
 	public synchronized long failureCount() { return failures; }
 	public synchronized boolean isClosed() { return closed; }
+	public synchronized boolean isReady(K key) { return ready.containsKey(key); }
 
 	private void work() {
 		while (true) {
 			Work<K, V> job;
 			synchronized (this) {
 				while ((job = next()) == null && !closed) {
-					try { wait(250); } catch (InterruptedException ignored) { /* Reconcile cancellation. */ }
+					try {
+						long retryMillis = nextRetryWaitMillis();
+						if (retryMillis > 0) wait(retryMillis); else wait();
+					} catch (InterruptedException ignored) { /* Reconcile cancellation. */ }
 				}
 				if (closed) return;
 			}
@@ -97,10 +105,10 @@ public final class PreparedResourceQueue<K, V> implements AutoCloseable {
 			Thread.interrupted();
 			synchronized (this) {
 				running.remove(job.request.key);
-				if (closed || !wanted.containsKey(job.request.key) || failed) {
+				if (closed || job.cancelled || !wanted.containsKey(job.request.key) || failed) {
 					if (value != null) dispose.accept(value);
 					release(job.request.key);
-					if (!closed && wanted.containsKey(job.request.key) && failed) {
+					if (!closed && !job.cancelled && wanted.containsKey(job.request.key) && failed) {
 						failures++;
 						retryAfter.put(job.request.key, System.nanoTime() + 2_000_000_000L);
 					}
@@ -109,6 +117,17 @@ public final class PreparedResourceQueue<K, V> implements AutoCloseable {
 			}
 			changed.run();
 		}
+	}
+	/** Idle/budget-blocked workers sleep until notified; only failed work needs a timed retry. */
+	private long nextRetryWaitMillis() {
+		long now = System.nanoTime();
+		long earliest = Long.MAX_VALUE;
+		for (Request<K, V> request : wanted.values()) {
+			if (running.containsKey(request.key) || ready.containsKey(request.key) || request.bytes > budget - reserved) continue;
+			Long at = retryAfter.get(request.key);
+			if (at != null) earliest = Math.min(earliest, Math.max(1L, at - now));
+		}
+		return earliest == Long.MAX_VALUE ? 0 : Math.max(1L, (earliest + 999_999L) / 1_000_000L);
 	}
 	private Work<K, V> next() {
 		if (closed) return null;

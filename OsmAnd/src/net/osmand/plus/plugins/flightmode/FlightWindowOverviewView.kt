@@ -39,7 +39,22 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		val detailLayer: Int
 	)
 
-	private val worker = Executors.newSingleThreadExecutor()
+	private var worker = Executors.newSingleThreadExecutor()
+	private var workVisible = false
+	private var workGeneration = 0L
+	private val workLifecycle = FlightViewVisibility(this) { visible ->
+		workVisible = visible
+		workGeneration++
+		if (visible) {
+			if (worker.isShutdown) worker = Executors.newSingleThreadExecutor()
+			reloadTiles()
+			invalidate()
+		} else {
+			worker.shutdownNow()
+			queued.clear()
+			scanRunning = false
+		}
+	}
 	private val bitmaps = object : LruCache<String, Bitmap>(BITMAP_CACHE_KIB) {
 		override fun sizeOf(key: String, value: Bitmap): Int = (value.allocationByteCount / 1_024).coerceAtLeast(1)
 	}
@@ -173,14 +188,15 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	}
 
 	private fun reloadTiles() {
-		if (detached) return
+		if (detached || !workVisible) return
 		scanGeneration++
 		if (!scanRunning) launchTileScan()
 	}
 
 	private fun launchTileScan() {
-		if (detached) return
+		if (detached || !workVisible) return
 		scanRunning = true
+		val lifecycleGeneration = workGeneration
 		val generation = scanGeneration
 		val requestedQuality = quality
 		val requestedBaseZoom = baseZoom
@@ -215,6 +231,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 					)
 				}.sortedWith(compareBy({ it.y }, { it.x }))
 			post {
+				if (lifecycleGeneration != workGeneration || !workVisible) return@post
 				scanRunning = false
 				if (detached) return@post
 				if (generation == scanGeneration) {
@@ -229,9 +246,12 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	}
 
 	private fun scan(root: File, detailLayer: Int): List<CachedTile> {
+		if (Thread.currentThread().isInterrupted) return emptyList()
 		val groups = root.listFiles().orEmpty().filter(File::isDirectory).mapNotNull { zoomDirectory ->
+			if (Thread.currentThread().isInterrupted) return emptyList()
 			val zoom = zoomDirectory.name.toIntOrNull() ?: return@mapNotNull null
 			zoom to zoomDirectory.listFiles().orEmpty().filter(File::isDirectory).flatMap { xDirectory ->
+				if (Thread.currentThread().isInterrupted) return emptyList()
 				val x = xDirectory.name.toIntOrNull() ?: return@flatMap emptyList()
 				xDirectory.listFiles().orEmpty().mapNotNull { file ->
 					val y = file.nameWithoutExtension.toIntOrNull()
@@ -343,12 +363,15 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	}
 
 	private fun queueBitmap(file: File) {
+		if (detached || !workVisible) return
 		val key = file.absolutePath
 		if (bitmaps.get(key) != null || key in queued || key in failed || queued.size >= MAXIMUM_QUEUED_BITMAPS) return
 		queued += key
+		val generation = workGeneration
 		worker.execute {
 			val bitmap = decodeOverviewBitmap(key)
 			post {
+				if (generation != workGeneration || !workVisible) return@post
 				queued -= key
 				if (detached) return@post
 				if (bitmap != null) bitmaps.put(key, bitmap) else failed += key
@@ -392,8 +415,15 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 
 	private fun density(dp: Float): Float = dp * resources.displayMetrics.density
 
+	override fun onAttachedToWindow() {
+		super.onAttachedToWindow()
+		detached = false
+		workLifecycle.attach()
+	}
+
 	override fun onDetachedFromWindow() {
 		detached = true
+		workLifecycle.detach()
 		scanGeneration++
 		worker.shutdownNow()
 		bitmaps.evictAll()

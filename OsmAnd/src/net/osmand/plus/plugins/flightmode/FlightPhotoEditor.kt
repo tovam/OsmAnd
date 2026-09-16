@@ -74,6 +74,10 @@ internal fun FlightPhotoEditor(
     var status by remember(photo.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var solveJob by remember { mutableStateOf<Job?>(null) }
+    FlightVisibilityEffect(repository) { visible ->
+        repository.setSceneWorkEnabled(visible)
+        if (!visible) solveJob?.cancel()
+    }
     var solveProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var showDiagnostics by remember(photo.id) { mutableStateOf(false) }
     var showCalculationInfo by remember(photo.id) { mutableStateOf(false) }

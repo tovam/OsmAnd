@@ -87,6 +87,13 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     private var requestedKey = ""
     private var tilesFramePending = false
     private var released = false
+    private var workVisible = false
+    private val workLifecycle = FlightViewVisibility(this) { visible ->
+        workVisible = visible
+        FlightPhotoTileCache.setVisible(this, visible)
+        if (visible) requestTiles()
+        else runningTiles.values.toList().forEach { it.cancel() }
+    }
     private var attached = false
 
     fun update(
@@ -631,7 +638,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     private fun requestTiles() {
-        if (mode <= 0 || width == 0 || released || tilesFramePending) return
+        if (mode <= 0 || width == 0 || released || !workVisible || tilesFramePending) return
         tilesFramePending = true
         postOnAnimation {
             tilesFramePending = false
@@ -640,7 +647,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     private fun planTiles() {
-        if (mode <= 0 || width == 0 || released || !attached || visibility != VISIBLE) return
+        if (mode <= 0 || width == 0 || released || !workVisible || !attached || visibility != VISIBLE) return
         val z = floor(zoom).toInt().coerceIn(3, if (satellite) 14 else 18)
         val cx = floor(FlightTerrainTilePlanner.longitudeToTileX(longitude, z)).toInt()
         val cy = floor(FlightTerrainTilePlanner.latitudeToTileY(latitude, z)).toInt()
@@ -681,7 +688,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     private fun pumpTiles() {
-        if (released || !attached || visibility != VISIBLE || mode <= 0) return
+        if (released || !workVisible || !attached || visibility != VISIBLE || mode <= 0) return
         val now = android.os.SystemClock.elapsedRealtime()
         for ((source, id) in wantedTiles) {
             if (runningTiles.size >= if (satellite) 3 else 1) break
@@ -730,6 +737,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         attached = true
+        workLifecycle.attach()
         tilesFramePending = false
         requestedKey = ""
         requestTiles()
@@ -737,6 +745,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         attached = false
+        workLifecycle.detach()
         tilesFramePending = false
         touchActive = false
         if (mode == 0 && rotation != calibration.pickerRotation) onRotation(rotation)
@@ -747,6 +756,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
 
     fun release() {
         released = true
+        workLifecycle.detach()
         scope.cancel()
     }
 }
