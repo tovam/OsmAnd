@@ -174,15 +174,23 @@ class FlightJourneyStore(private val context: Context) {
 		.orEmpty()
 		.filter { it.isFile && it.extension == JOURNEY_FILE_EXTENSION }
 
-	private fun summaryFromJson(root: JSONObject, file: File): FlightJourneySummary = FlightJourneySummary(
-		id = root.getString("id"),
-		name = planFromJson(root.optJSONObject("plan")).let { plan ->
-			FlightJourneyNaming.updated(root.optString("name").ifBlank { "Journal de vol" }, plan, plan)
-		},
-		updatedAtMillis = root.optLong("updatedAtMillis", file.lastModified()),
-		sampleCount = root.optJSONObject("trip")?.optJSONArray("samples")?.length() ?: 0,
-		photoCount = root.optJSONArray("photos")?.length() ?: 0
-	)
+	private fun summaryFromJson(root: JSONObject, file: File): FlightJourneySummary {
+		val planJson = root.optJSONObject("plan")
+		val plan = planFromJson(planJson)
+		val assets = root.optJSONObject("offlineAssets")
+		return FlightJourneySummary(
+			id = root.getString("id"),
+			name = FlightJourneyNaming.updated(root.optString("name").ifBlank { "Journal de vol" }, plan, plan),
+			updatedAtMillis = root.optLong("updatedAtMillis", file.lastModified()),
+			sampleCount = root.optJSONObject("trip")?.optJSONArray("samples")?.length() ?: 0,
+			photoCount = root.optJSONArray("photos")?.length() ?: 0,
+			simulation = root.optBoolean("simulation", false),
+			departureMillis = planJson?.optJSONObject("preparation")?.optNullableLong("departure")
+				?.takeIf { it > 0L },
+			terrainTileCount = assets?.optJSONArray("terrainTiles")?.length() ?: 0,
+			satelliteTileCount = assets?.optJSONArray("standardSatelliteTiles")?.length() ?: 0,
+		)
+	}
 
 	fun save(journey: FlightJourney): FlightJourney = save(journey, mergePreviousAssets = true)
 
@@ -208,8 +216,7 @@ class FlightJourneyStore(private val context: Context) {
 		try { stream.write(journeyToJson(storedJourney).toString().toByteArray(Charsets.UTF_8)); atomic.finishWrite(stream) }
 		catch (error: Exception) { atomic.failWrite(stream); throw error }
 		// A disposable index failure must not turn a successful journal write into data loss.
-		runCatching { FlightJournalSummaries.write(destination, FlightJourneySummary(storedJourney.id,
-			storedJourney.name, storedJourney.updatedAtMillis, storedJourney.trip.samples.size, storedJourney.photos.size)) }
+		runCatching { FlightJournalSummaries.write(destination, storedJourney.toLibrarySummary()) }
 		storedJourney
 	}
 

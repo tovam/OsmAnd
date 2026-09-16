@@ -17,7 +17,6 @@ internal object FlightWorkspaceNavigation {
                     FlightPage.SATELLITE,
                     FlightPage.SENSORS,
                     FlightPage.PHOTO,
-                    FlightPage.JOURNAL,
                 )
             FlightSessionMode.LIVE ->
                 listOf(
@@ -40,13 +39,20 @@ internal object FlightWorkspaceNavigation {
             FlightSessionMode.LIVE -> FlightPage.HOME
         }
 
+    fun backPage(state: FlightUiState): FlightPage? =
+        if (state.page == FlightPage.DETAIL) state.detailReturnPage
+            ?.takeIf { it != FlightPage.DETAIL && allows(state.sessionMode, it) }
+            ?: libraryPage(state.sessionMode)
+        else backPage(state.page, state.sessionMode)
+
     fun backPage(page: FlightPage, mode: FlightSessionMode): FlightPage? =
         when (page) {
             FlightPage.HOME -> null
             FlightPage.JOURNEYS,
             FlightPage.PLANS -> FlightPage.HOME
             FlightPage.PREPARE -> FlightPage.PLANS
-            FlightPage.JOURNAL -> FlightPage.MAP
+            FlightPage.DETAIL -> libraryPage(mode)
+            FlightPage.JOURNAL -> FlightPage.DETAIL
             FlightPage.MAP -> libraryPage(mode)
             FlightPage.WINDOW_SETUP -> FlightPage.WINDOW
             else -> FlightPage.MAP
@@ -58,6 +64,8 @@ internal object FlightWorkspaceNavigation {
                 FlightPage.HOME,
                 FlightPage.PLANS,
                 FlightPage.JOURNEYS,
+                FlightPage.DETAIL,
+                FlightPage.JOURNAL,
                 FlightPage.WINDOW_SETUP,
             ) || (page == FlightPage.PREPARE && mode == FlightSessionMode.PREPARE) || page in pages(mode)
 }

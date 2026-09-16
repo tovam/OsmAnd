@@ -18,6 +18,24 @@ internal object FlightScheduleManager {
 
     data class PermissionStatus(val label: Int, val granted: Boolean)
 
+    /** Read the small device-owned alarm registry once, never once per library row. */
+    fun scheduledStarts(context: Context): Map<String, FlightLocalSchedule> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).all.mapNotNull { (id, raw) ->
+            runCatching {
+                val json = JSONObject(raw as String)
+                val preparation = FlightPreparation.fromJson(json) ?: return@runCatching null
+                val at = json.optLong("scheduledStart", preparation.startMillis)
+                if (at > 0) id to FlightLocalSchedule(at, preparation.departureOffsetMinutes) else null
+            }.getOrNull()
+        }.toMap()
+
+    fun observe(context: Context, changed: () -> Unit): () -> Unit {
+        val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> changed() }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        return { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     fun scheduled(context: Context, id: String?): FlightPreparation? {
         if (id == null) return null
         val stored =

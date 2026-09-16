@@ -12,6 +12,7 @@ enum class FlightPage {
 	HOME,
 	PLANS,
 	PREPARE,
+	DETAIL,
 	LIVE,
 	MAP,
 	WINDOW,
@@ -746,29 +747,82 @@ data class FlightJourneySummary(
 	val name: String,
 	val updatedAtMillis: Long,
 	val sampleCount: Int,
-	val photoCount: Int
+	val photoCount: Int,
+	val simulation: Boolean = false,
+	val departureMillis: Long? = null,
+	val terrainTileCount: Int = 0,
+	val satelliteTileCount: Int = 0
 )
+
+enum class FlightRecordingMode {
+	ADAPTIVE,
+	FIXED
+}
 
 data class FlightRecordingPolicy(
 	val cruisePointDistanceMeters: Float = 1_000f,
 	val maximumStraightIntervalSeconds: Float = 20f,
 	val turnAcceleration: Float = 2f,
-	val routeDeviationAcceleration: Float = 2f
+	val routeDeviationAcceleration: Float = 2f,
+	val mode: FlightRecordingMode = FlightRecordingMode.ADAPTIVE,
+	val fixedIntervalSeconds: Float = 60f
 ) {
+	/**
+	 * Keeps policy values safe at every boundary (UI, preferences and service intents). The
+	 * original adaptive defaults and formula remain unchanged; fixed mode only changes the save
+	 * decision and never the GPS acquisition or tracking cadence.
+	 */
+	fun clamped(): FlightRecordingPolicy = copy(
+		cruisePointDistanceMeters = cruisePointDistanceMeters.safeFloat(DEFAULT_CRUISE_DISTANCE_METERS)
+			.coerceIn(MIN_CRUISE_DISTANCE_METERS, MAX_CRUISE_DISTANCE_METERS),
+		maximumStraightIntervalSeconds = maximumStraightIntervalSeconds.safeFloat(DEFAULT_MAXIMUM_INTERVAL_SECONDS)
+			.coerceIn(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS),
+		turnAcceleration = turnAcceleration.safeFloat(DEFAULT_TURN_ACCELERATION).coerceIn(
+			MIN_ACCELERATION,
+			MAX_ACCELERATION
+		),
+		routeDeviationAcceleration = routeDeviationAcceleration.safeFloat(DEFAULT_ROUTE_DEVIATION_ACCELERATION)
+			.coerceIn(MIN_ACCELERATION, MAX_ACCELERATION),
+		fixedIntervalSeconds = fixedIntervalSeconds.safeFloat(DEFAULT_FIXED_INTERVAL_SECONDS)
+			.coerceIn(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS)
+	)
+
 	fun intervalSeconds(
 		speedMetersPerSecond: Float,
 		turnRateDegreesPerSecond: Float = 0f,
 		distanceFromExpectedRouteMeters: Float = 0f
 	): Float {
-		val safeSpeed = max(1f, speedMetersPerSecond)
-		var interval = min(maximumStraightIntervalSeconds, cruisePointDistanceMeters / safeSpeed)
+		val safePolicy = clamped()
+		if (safePolicy.mode == FlightRecordingMode.FIXED) return safePolicy.fixedIntervalSeconds
+
+		val safeSpeed = max(1f, speedMetersPerSecond.takeIf(Float::isFinite) ?: 0f)
+		var interval = min(
+			safePolicy.maximumStraightIntervalSeconds,
+			safePolicy.cruisePointDistanceMeters / safeSpeed
+		)
 		if (turnRateDegreesPerSecond >= 1f) {
-			interval /= max(1f, turnAcceleration)
+			interval /= max(1f, safePolicy.turnAcceleration)
 		}
 		if (distanceFromExpectedRouteMeters >= 5_000f) {
-			interval /= max(1f, routeDeviationAcceleration)
+			interval /= max(1f, safePolicy.routeDeviationAcceleration)
 		}
-		return interval.coerceIn(1f, maximumStraightIntervalSeconds)
+		return interval.coerceIn(MIN_INTERVAL_SECONDS, safePolicy.maximumStraightIntervalSeconds)
+	}
+
+	private fun Float.safeFloat(default: Float): Float = takeIf(Float::isFinite) ?: default
+
+	companion object {
+		const val MIN_CRUISE_DISTANCE_METERS = 100f
+		const val MAX_CRUISE_DISTANCE_METERS = 8_000f
+		const val DEFAULT_CRUISE_DISTANCE_METERS = 1_000f
+		const val MIN_INTERVAL_SECONDS = 1f
+		const val MAX_INTERVAL_SECONDS = 3_600f
+		const val DEFAULT_MAXIMUM_INTERVAL_SECONDS = 20f
+		const val DEFAULT_FIXED_INTERVAL_SECONDS = 60f
+		const val MIN_ACCELERATION = 1f
+		const val MAX_ACCELERATION = 10f
+		const val DEFAULT_TURN_ACCELERATION = 2f
+		const val DEFAULT_ROUTE_DEVIATION_ACCELERATION = 2f
 	}
 }
 
@@ -785,8 +839,12 @@ data class FlightUiState(
 	val simulatedJourney: Boolean = false,
 	val scheduledPreparation: FlightPreparation? = null,
 	val scheduledStartMillis: Long? = null,
+	val localSchedules: Map<String, FlightLocalSchedule> = emptyMap(),
+	val localSchedulesLoaded: Boolean = false,
+	val scheduleRequirementsMet: Boolean = false,
 	val scheduleError: String? = null,
 	val page: FlightPage = FlightPage.HOME,
+	val detailReturnPage: FlightPage? = null,
 	val sessionMode: FlightSessionMode = FlightSessionMode.PREPARE,
 	val plan: FlightPlan = FlightPlan.preview(),
 	val profile: FlightProfile = FlightProfilePlanner.build(FlightPlan.preview()),

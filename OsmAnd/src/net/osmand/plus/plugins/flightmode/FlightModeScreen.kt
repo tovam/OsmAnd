@@ -245,23 +245,24 @@ fun FlightModeScreen(
 	onClearTripLoadError: () -> Unit = {},
 	onDisarmPreparation: () -> Unit = {},
 	onOfflineSimulation: (Boolean) -> Unit = {},
-	onSimulateLive: () -> Unit = {}
+	onSimulateLive: () -> Unit = {},
+	onOpenJourneyDetails: (String) -> Unit = onOpenJourney
 ) {
 	val cloudContext = LocalContext.current.applicationContext
 	val cloudScope = rememberCoroutineScope()
 	val cloud = remember(cloudContext) { FlightCloudController(cloudContext, cloudScope) }
 	var showCloudLibrary by remember { mutableStateOf(false) }
 	var cloudSelectedKey by remember { mutableStateOf<String?>(null) }
+	var preparationSection by remember(state.journeyId) { mutableStateOf(0) }
 	val openCloud: (String?) -> Unit = { cloudSelectedKey = it; showCloudLibrary = true }
 	LaunchedEffect(cloud) { cloud.initialize() }
 	DisposableEffect(cloud) { onDispose { cloud.close() } }
 	LaunchedEffect(state.savedJourneys) { cloud.acceptLocalSummaries(state.savedJourneys) }
 	FlightResumedEffect(state.page, state.offlineSimulation) {
-		if (!state.offlineSimulation && state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refreshIfStale()
+		if (!state.offlineSimulation && state.page in listOf(FlightPage.HOME, FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refreshIfStale()
 	}
 	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney),
 		LocalFlightOfflineAction provides onOfflineSimulation,
-		LocalFlightSimulateAction provides onSimulateLive,
 		LocalFlightCameraAction provides onPhotoAction) {
 	MaterialTheme(
 		colorScheme = darkColorScheme(
@@ -335,14 +336,14 @@ fun FlightModeScreen(
 		) {
 			Column(Modifier.fillMaxSize()) {
 			if (state.page !in listOf(FlightPage.HOME,FlightPage.PLANS,FlightPage.JOURNEYS,FlightPage.PREPARE)) {
-				Row(Modifier.fillMaxWidth().height(34.dp).background(FlightPanelStrong),verticalAlignment=Alignment.CenterVertically) {
+				Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).background(FlightPanelStrong),verticalAlignment=Alignment.CenterVertically) {
 					TextButton(onClick={onPageChange(FlightWorkspaceNavigation.libraryPage(state.sessionMode))},
 						contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=8.dp,vertical=0.dp)) {
 						Text(stringResource(R.string.flight_back_library),fontSize=11.sp)
 					}
 					Text(state.journeyName,Modifier.weight(1f),color=FlightText,fontSize=11.sp,maxLines=1)
-					if(state.sessionMode==FlightSessionMode.PREPARE) TextButton(onClick={onPageChange(FlightPage.PREPARE)}) {
-						Text(stringResource(R.string.flight_edit_plan),fontSize=11.sp)
+					if(state.page != FlightPage.DETAIL) TextButton(onClick={onPageChange(FlightPage.DETAIL)}) {
+						Text(stringResource(R.string.flight_detail_title),fontSize=12.sp)
 					}
 				}
 				val recorder = state.liveState
@@ -356,18 +357,24 @@ fun FlightModeScreen(
 			}
 			Box(Modifier.weight(1f).fillMaxWidth()) {
 			when (state.page) {
-				FlightPage.HOME, FlightPage.PLANS -> FlightWorkspaceHome(state, onPageChange,
-					onOpenJourney, onNewPreparation, onClose, onCloud = openCloud)
+				FlightPage.HOME, FlightPage.PLANS, FlightPage.JOURNEYS -> FlightWorkspaceHome(state, onPageChange,
+					onOpenJourney, onOpenJourneyDetails, onNewPreparation, onImportTrip, onSelectInternalTrack, onClose, openCloud)
+				FlightPage.DETAIL -> FlightDetailScreen(state, { page ->
+					if (page == FlightPage.MAP && state.liveState.running) onReturnLive()
+					onPageChange(page)
+				}, { section -> preparationSection = section; onPageChange(FlightPage.PREPARE) },
+					onSaveJourney, onExportJourney, onUpdateJourneyName, onStartLive, onStopLive,
+					onDisarmPreparation, onSimulateLive, onOfflineSimulation, onSetRecordingPolicy, { onNewPreparation(true) })
 				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
-					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction) }
+					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction,onSetRecordingPolicy) }
 					FlightBottomNavigation(state, onPageChange)
 				}
-				FlightPage.PREPARE -> key(state.journeyId) { FlightPlanningScreen(state,onClose,onUpdatePlan,
+				FlightPage.PREPARE -> key(state.journeyId) { FlightPlanningScreen(state,onUpdatePlan,
 					onSavePreparation,onPreloadPreparation,onCancelPreparationDownload,onRehearsePreparation,
-					onStartLive,onPreparationPermissions,onNewPreparation,
+					onStartLive,onPreparationPermissions,
 					{ onPageChange(FlightPage.PLANS) },
 					onUpdateStop, onSelectCity, onDismissCitySuggestions,
-					onDisarmPreparation, onSimulateLive,
+					onDisarmPreparation, { onPageChange(FlightPage.DETAIL) }, preparationSection,
 					{ FlightBottomNavigation(state, onPageChange) }) }
 				FlightPage.MAP -> MapScreen(
 					state = state,
@@ -459,18 +466,7 @@ fun FlightModeScreen(
 					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onPreparePhotoCalibration = onPreparePhotoCalibration
 				)
-				FlightPage.JOURNEYS, FlightPage.JOURNAL -> JourneysScreen(
-					state = state,
-					onClose = onClose,
-					onPageChange = onPageChange,
-					onImport = onImportTrip,
-					onSelectInternalTrack = onSelectInternalTrack,
-					onUpdateName = onUpdateJourneyName,
-					onSave = onSaveJourney,
-					onExport = onExportJourney,
-					onOpen = onOpenJourney,
-					onCloud = openCloud
-				)
+				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange)
 			}
 
 			}
@@ -1693,8 +1689,6 @@ private fun SensorsScreen(
 	onSetPolicy: (FlightRecordingPolicy) -> Unit
 ) {
 	val sample = state.snapshot?.sample
-	val currentSpeed = sample?.speedMetersPerSecond
-	val interval = currentSpeed?.let(state.recordingPolicy::intervalSeconds)
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_sensors), state.sessionMode, onClose)
 		LazyColumn(Modifier.weight(1f)) {
@@ -1723,37 +1717,7 @@ private fun SensorsScreen(
 			}
 			item {
 				if (state.sessionMode == FlightSessionMode.LIVE) {
-					Text(
-						text = if (interval != null && currentSpeed != null) {
-							stringResource(R.string.flight_mode_recording_now, interval, interval * currentSpeed)
-						} else {
-							stringResource(R.string.flight_mode_recording_waiting)
-						},
-						color = FlightGreen,
-						fontSize = 10.sp,
-						modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-					)
-					PolicySlider(
-						title = stringResource(R.string.flight_mode_cruise_spacing),
-						valueText = "${state.recordingPolicy.cruisePointDistanceMeters.toInt()} m",
-						value = state.recordingPolicy.cruisePointDistanceMeters,
-						range = 250f..4_000f,
-						onValue = { onSetPolicy(state.recordingPolicy.copy(cruisePointDistanceMeters = it)) }
-					)
-					PolicySlider(
-						title = stringResource(R.string.flight_mode_turn_boost, state.recordingPolicy.turnAcceleration),
-						valueText = "≥ 1°/s",
-						value = state.recordingPolicy.turnAcceleration,
-						range = 1f..5f,
-						onValue = { onSetPolicy(state.recordingPolicy.copy(turnAcceleration = it)) }
-					)
-					PolicySlider(
-						title = stringResource(R.string.flight_mode_deviation_boost, state.recordingPolicy.routeDeviationAcceleration),
-						valueText = "> 5 km",
-						value = state.recordingPolicy.routeDeviationAcceleration,
-						range = 1f..5f,
-						onValue = { onSetPolicy(state.recordingPolicy.copy(routeDeviationAcceleration = it)) }
-					)
+					FlightRecordingPolicyControls(state.liveState.policy, onSetPolicy, state.liveState)
 				} else {
 					Text(
 						stringResource(R.string.flight_mode_recording_read_only),
@@ -2105,139 +2069,21 @@ internal fun decodePhotoPreview(file: File, maximumPixels: Int = MAXIMUM_PHOTO_P
 }
 
 @Composable
-private fun JourneysScreen(
-	state: FlightUiState,
-	onClose: () -> Unit,
-	onPageChange: (FlightPage) -> Unit,
-	onImport: () -> Unit,
-	onSelectInternalTrack: () -> Unit,
-	onUpdateName: (String) -> Unit,
-	onSave: () -> Unit,
-	onExport: () -> Unit,
-	onOpen: (String) -> Unit,
-	onCloud: (String?) -> Unit
-) {
-	val cloud = LocalFlightCloudUi.current?.controller
-	val library = state.page == FlightPage.JOURNEYS
-	var filter by remember { mutableStateOf(0) }
-	var showStorage by remember { mutableStateOf(false) }
-	val pastJourneys = flightLibraryRows(state.savedJourneys, cloud, false).filterNot {
-		state.activeRecording.running && it.local?.id == state.activeRecording.journeyId }.filter { it.matchesLocation(filter) }
-	var importMenu by remember { mutableStateOf(false) }
-	Column(Modifier.fillMaxSize().background(FlightBackground)) {
-		FlightTopBar(if (library) stringResource(R.string.flight_workspace_past) else state.journeyName,
-			FlightSessionMode.REPLAY, onClose)
-		PlanAction(stringResource(if (library) R.string.flight_workspace_home else R.string.flight_workspace_past),
-			{ onPageChange(if (library) FlightPage.HOME else FlightPage.JOURNEYS) })
-		if (library) {
-		Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-			Box {
-				PlanAction(stringResource(R.string.flight_sync_import), { importMenu = true })
-				DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
-					PlanAction(stringResource(R.string.flight_mode_load_osmand_track), { importMenu = false; onSelectInternalTrack() })
-					PlanAction(stringResource(R.string.flight_mode_import_journey_or_gpx), { importMenu = false; onImport() })
-				}
-			}
-			PlanAction(stringResource(R.string.flight_cloud_connection), { onCloud(null) })
-			PlanAction(stringResource(R.string.flight_cloud_refresh), { cloud?.refresh() })
-		}
-		FlightLibraryFilters(filter) { filter = it }
-		FlightLibraryServerNotice()
-		}
-		LazyColumn(Modifier.weight(1f)) {
-			if (library) {
-			item { SectionTitle(stringResource(R.string.flight_mode_saved_journeys, pastJourneys.size)) }
-			if (state.savedJourneysLoading) {
-				item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-			}
-			if (pastJourneys.isEmpty() && !state.savedJourneysLoading) {
-				item { Text(stringResource(R.string.flight_mode_no_saved_journey), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
-			} else {
-				itemsIndexed(pastJourneys) { _, journey ->
-					FlightCloudListRow(journey, state, onOpen, onCloud)
-				}
-			}
-			}
-			if (!library && state.sessionMode == FlightSessionMode.REPLAY && state.trip != null) {
-			item { SectionTitle(stringResource(R.string.flight_library_journal)) }
-			item { FlightStorageStatusStrip(state) }
-			item {
-				BasicTextField(
-					value = state.journeyName,
-					onValueChange = onUpdateName,
-					singleLine = true,
-					textStyle = TextStyle(color = FlightText, fontSize = 16.sp),
-					cursorBrush = Brush.verticalGradient(listOf(FlightOrange, FlightOrange)),
-					modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp, vertical = 12.dp)
-				)
-			}
-			item {
-				Text(
-					stringResource(
-						R.string.flight_mode_journey_stats,
-						state.trip?.samples?.size ?: 0,
-						state.photos.size,
-						state.flightSpans.size
-					),
-					color = FlightMuted,
-					fontSize = 10.sp,
-					modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-				)
-			}
-			if (state.offlineAssets.terrainTileCount > 0 || state.offlineAssets.standardSatelliteTileCount > 0) {
-				item {
-					Text(
-						stringResource(
-							R.string.flight_mode_journey_offline_assets,
-							state.offlineAssets.terrainTileCount,
-							state.offlineAssets.standardSatelliteTileCount
-						),
-						color = FlightBlue,
-						fontSize = 9.sp,
-						modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
-					)
-				}
-			}
-			item {
-				Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-					FlatButton(
-						if (state.journeyDirty) stringResource(R.string.flight_mode_save_journey) else stringResource(R.string.flight_mode_journey_saved),
-						Modifier.weight(1f),
-						state.journeyDirty,
-						onSave
-					)
-					FlatButton(stringResource(R.string.flight_mode_export_journey), Modifier.weight(1f), false, onExport)
-				}
-			}
-			}
-			state.journeyMessage?.let { message ->
-				item { Text(message, color = FlightGreen, fontSize = 11.sp, modifier = Modifier.padding(12.dp)) }
-			}
-			if (!library) {
-			item { PlanAction(stringResource(R.string.flight_mode_storage) + if (showStorage) " −" else " +", { showStorage = !showStorage }) }
-			if (showStorage) {
-			item {
-				if (state.storageUsageLoading && state.storageUsage == null) {
-					Row(
-						Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(9.dp)
-					) {
-						CircularProgressIndicator(color = FlightOrange, strokeWidth = 2.dp, modifier = Modifier.size(17.dp))
-						Text(stringResource(R.string.flight_mode_storage_calculating), color = FlightMuted, fontSize = 10.sp)
-					}
-					} else {
-						val usage = state.storageUsage
-						if (usage != null) FlightStorageUsageTable(usage)
-					}
-			}
-			}
-			}
-
-		}
-		if (!library && state.sessionMode == FlightSessionMode.REPLAY && state.trip != null)
-			FlightBottomNavigation(state, onPageChange)
-	}
+private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage) -> Unit) {
+    Column(Modifier.fillMaxSize().background(FlightBackground)) {
+        TextButton(onClick = { onPageChange(FlightPage.DETAIL) }) {
+            Text(stringResource(R.string.flight_detail_title), fontSize = 12.sp)
+        }
+        LazyColumn(Modifier.weight(1f)) {
+            item {
+                if (state.storageUsageLoading) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.flight_mode_storage_calculating), color = FlightMuted, fontSize = 12.sp)
+                }
+                state.storageUsage?.let { FlightStorageUsageTable(it) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -2654,7 +2500,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 			TextButton(onClick=cameraAction,enabled=live.running) { Text(stringResource(R.string.flight_live_camera),fontSize=11.sp) }
 		}
 	}
-	if (state.offlineSimulation || (state.sessionMode==FlightSessionMode.REPLAY && state.snapshot!=null)) {
+	if (state.offlineSimulation && !live.simulation) {
 		val offlineAction=LocalFlightOfflineAction.current
 		Row(Modifier.fillMaxWidth().background(FlightPanelStrong).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
 			Column(Modifier.weight(1f).padding(vertical=4.dp)) {
@@ -2664,12 +2510,8 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 					stringResource(R.string.flight_test_loaded,state.terrainStatus.availableTiles,state.terrainStatus.requestedTiles,
 						state.terrainStatus.satelliteTiles),color=FlightMuted,fontSize=9.sp)
 			}
-			if(state.sessionMode==FlightSessionMode.REPLAY) TextButton(onClick={offlineAction(!state.offlineSimulation)}) {
-				Text(stringResource(if(state.offlineSimulation)R.string.flight_test_exit else R.string.flight_test_start),fontSize=10.sp)
-			}
-			if(state.sessionMode==FlightSessionMode.REPLAY) {
-				val simulate=LocalFlightSimulateAction.current
-				TextButton(onClick=simulate,enabled=!state.activeRecording.running) { Text(stringResource(R.string.flight_immersion_start),fontSize=10.sp) }
+			TextButton(onClick={offlineAction(false)}) {
+				Text(stringResource(R.string.flight_detail_end_offline_test),fontSize=11.sp)
 			}
 		}
 	}
@@ -2701,7 +2543,6 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 }
 
 internal val LocalFlightOfflineAction = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
-internal val LocalFlightSimulateAction = staticCompositionLocalOf<() -> Unit> { {} }
 internal val LocalFlightCameraAction = staticCompositionLocalOf<() -> Unit> { {} }
 
 @Composable
@@ -4044,18 +3885,6 @@ private fun SpectrumStrip(levels: List<Float>?) {
 			)
 		}
 	}
-}
-
-@Composable
-private fun PolicySlider(title: String, valueText: String, value: Float, range: ClosedFloatingPointRange<Float>, onValue: (Float) -> Unit) {
-	Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp)) {
-		Row {
-			Text(title, color = FlightText, fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
-			Text(valueText, color = FlightBlue, fontSize = 9.sp)
-		}
-		Slider(value = value, onValueChange = onValue, valueRange = range, modifier = Modifier.fillMaxWidth().height(27.dp))
-	}
-	Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 10.dp).background(FlightLine))
 }
 
 @Composable

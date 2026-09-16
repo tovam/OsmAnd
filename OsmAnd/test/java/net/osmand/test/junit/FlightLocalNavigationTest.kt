@@ -145,9 +145,28 @@ class FlightLocalNavigationTest {
     }
 
     @Test
+    fun detailReturnsToTheScreenThatOpenedItWithoutBecomingABottomTab() {
+        for (mode in FlightSessionMode.entries) {
+            assertFalse(FlightPage.DETAIL in FlightWorkspaceNavigation.pages(mode))
+            for (origin in listOf(FlightPage.HOME, FlightPage.MAP, FlightPage.WINDOW)) {
+                assertEquals(origin, FlightWorkspaceNavigation.backPage(FlightUiState(
+                    page = FlightPage.DETAIL, sessionMode = mode, detailReturnPage = origin)))
+            }
+        }
+        assertEquals(FlightPage.JOURNEYS, FlightWorkspaceNavigation.backPage(FlightUiState(
+            page = FlightPage.DETAIL, sessionMode = FlightSessionMode.REPLAY,
+            detailReturnPage = FlightPage.PREPARE)))
+    }
+
+    @Test
     fun browserAndSelectedJournalAreNotSiblingTabs() {
         val pages = FlightWorkspaceNavigation.pages(FlightSessionMode.REPLAY)
-        assertTrue(FlightPage.JOURNAL in pages)
+        assertFalse(FlightPage.JOURNAL in pages)
+        assertFalse(FlightPage.DETAIL in pages)
+        for (mode in FlightSessionMode.entries) {
+            assertTrue(FlightWorkspaceNavigation.allows(mode, FlightPage.DETAIL))
+            assertTrue(FlightWorkspaceNavigation.allows(mode, FlightPage.JOURNAL))
+        }
         assertFalse(FlightPage.JOURNEYS in pages)
         assertFalse(
             FlightPage.JOURNAL in FlightWorkspaceNavigation.pages(FlightSessionMode.PREPARE)
@@ -170,7 +189,7 @@ class FlightLocalNavigationTest {
             FlightWorkspaceNavigation.backPage(FlightPage.JOURNEYS, FlightSessionMode.REPLAY),
         )
         assertEquals(
-            FlightPage.MAP,
+            FlightPage.DETAIL,
             FlightWorkspaceNavigation.backPage(FlightPage.JOURNAL, FlightSessionMode.REPLAY),
         )
         assertNull(FlightWorkspaceNavigation.backPage(FlightPage.HOME, FlightSessionMode.REPLAY))

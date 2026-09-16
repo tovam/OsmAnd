@@ -75,7 +75,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 				return
 			}
 			if (viewModel.uiState.page == FlightPage.WINDOW_SETUP) viewModel.saveWindowPlacement()
-			val back = FlightWorkspaceNavigation.backPage(viewModel.uiState.page, viewModel.uiState.sessionMode)
+			val back = FlightWorkspaceNavigation.backPage(viewModel.uiState)
 			if (back == null) close() else viewModel.showPage(back)
 		}
 	}
@@ -173,6 +173,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSaveJourney = viewModel::saveJourney,
 					onExportJourney = { exportJourneyLauncher.launch(viewModel.suggestedExportName()) },
 					onOpenJourney = viewModel::openJourney,
+					onOpenJourneyDetails = viewModel::openJourneyDetails,
 					onConfirmJournalNavigation = viewModel::confirmJournalNavigation,
 					onCancelJournalNavigation = viewModel::cancelJournalNavigation,
 					onClearTripLoadError = viewModel::clearTripLoadError,

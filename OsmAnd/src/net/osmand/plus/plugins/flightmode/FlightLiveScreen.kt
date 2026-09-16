@@ -49,6 +49,7 @@ internal fun FlightLiveScreen(
     onStop: () -> Unit,
     onMicrophone: () -> Unit,
     onPhoto: () -> Unit,
+    onPolicy: (FlightRecordingPolicy) -> Unit,
 ) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     var confirmStop by remember { mutableStateOf(false) }
@@ -116,6 +117,7 @@ internal fun FlightLiveScreen(
                 "${fix?.satellitesUsed?:"—"} / ${fix?.satellitesFound?:"—"}",
             )
             LiveRow(stringResource(R.string.flight_live_points), "${state.trip?.samples?.size?:0}")
+            if (live.running) FlightRecordingPolicyControls(live.policy, onPolicy, live)
             Text(
                 stringResource(R.string.flight_live_prediction_hint),
                 color = Color.LightGray,

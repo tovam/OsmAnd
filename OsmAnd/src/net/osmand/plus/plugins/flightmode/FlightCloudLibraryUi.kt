@@ -25,22 +25,6 @@ internal data class FlightCloudUi(
 internal val LocalFlightCloudUi = staticCompositionLocalOf<FlightCloudUi?> { null }
 
 @Composable
-internal fun FlightLibraryFilters(selected: Int, onSelect: (Int) -> Unit) {
-    Row(Modifier.fillMaxWidth()) {
-        listOf(R.string.flight_cloud_all, R.string.flight_cloud_phone, R.string.flight_cloud_server)
-            .forEachIndexed { index, label ->
-                TextButton(onClick = { onSelect(index) }) {
-                    Text(
-                        stringResource(label),
-                        color = if (selected == index) Color.White else Color.Gray,
-                        fontSize = 12.sp,
-                    )
-                }
-            }
-    }
-}
-
-@Composable
 internal fun FlightLibraryServerNotice() {
     val cloud = LocalFlightCloudUi.current?.controller ?: return
     if (cloud.busy)
@@ -79,10 +63,10 @@ internal fun FlightLibraryServerNotice() {
 internal fun flightLibraryRows(
     local: List<FlightJourneySummary>,
     cloud: FlightCloudController?,
-    planned: Boolean,
+    planned: Boolean?,
 ): List<FlightLibraryRow> {
     return flightCloudRows(local, cloud?.remote.orEmpty(), cloud?.bindings.orEmpty())
-        .filter { ((it.local?.sampleCount ?: it.remote!!.samples) == 0) == planned }
+        .filter { planned == null || it.isPlan() == planned }
         .sortedByDescending { it.local?.updatedAtMillis ?: it.remote!!.updatedAt }
 }
 
@@ -108,102 +92,191 @@ internal fun FlightCloudListRow(
     state: FlightUiState,
     onOpen: (String) -> Unit,
     onManage: (String) -> Unit,
+    onDetails: (String) -> Unit = { onManage("local:$it") },
 ) {
     val cloud = LocalFlightCloudUi.current?.controller
-    val offlineAction = LocalFlightOfflineAction.current
-    val dirty = state.journeyId == row.local?.id && state.journeyDirty
-    val selected = row.local?.id != null && state.journeyId == row.local.id
-    val canOpen =
-        row.canOpenLocal(state, row.local != null && cloud?.removingLocalId == row.local.id)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Text(
-            row.name,
-            color = Color.White,
-            fontSize = 15.sp,
-            modifier =
-                Modifier.fillMaxWidth()
-                    .clickable(enabled = canOpen && row.local != null) {
-                        row.local?.let { onOpen(it.id) }
-                    }
-                    .padding(vertical = 5.dp),
-        )
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            if (row.local != null) FlightStoragePill(stringResource(R.string.flight_cloud_phone))
-            if (selected) FlightStoragePill(stringResource(R.string.flight_library_selected))
-            if (row.remote != null)
+    val local = row.local
+    val dirty = state.journeyId == local?.id && state.journeyDirty
+    val canOpen = row.canOpenLocal(state, local != null && cloud?.removingLocalId == local.id)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            Modifier.weight(1f)
+                .clickable(enabled = canOpen) { local?.let { onOpen(it.id) } }
+                .padding(vertical = 7.dp)
+        ) {
+            Text(
+                row.name,
+                color = Color.White,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 FlightStoragePill(
                     stringResource(
-                        if (cloud?.serverVerified == true) R.string.flight_cloud_server
-                        else R.string.flight_cloud_unverified
+                        when {
+                            local != null && row.remote != null && cloud?.serverVerified == true ->
+                                R.string.flight_library_both
+                            local != null && row.remote != null ->
+                                R.string.flight_library_both_unverified
+                            local != null -> R.string.flight_cloud_phone
+                            cloud?.serverVerified == true -> R.string.flight_cloud_server
+                            else -> R.string.flight_cloud_unverified
+                        }
                     ),
-                    cloud?.serverVerified != true,
+                    row.remote != null && cloud?.serverVerified != true,
                 )
-            if (row.local != null && row.remote != null)
-                FlightStoragePill(
-                    stringResource(row.versionState(dirty, cloud?.serverVerified == true).label()),
-                    row.versionState(dirty, cloud?.serverVerified == true) !=
-                        FlightVersionState.SENT,
-                )
-        }
-        row.local?.let {
-            Text(
-                stringResource(
-                    R.string.flight_sync_local_date,
-                    flightVersionDate(it.updatedAtMillis),
-                ),
-                color = Color.Gray,
-                fontSize = 10.sp,
-            )
-        }
-        row.remote?.let {
-            Text(
-                stringResource(
-                    R.string.flight_sync_remote_date,
-                    flightVersionDate(it.updatedAt),
-                    it.revision.take(8),
-                    it.photoIds.size,
-                ),
-                color = Color.Gray,
-                fontSize = 10.sp,
-            )
-        }
-        FlowRow {
-            row.local?.let {
-                TextButton(onClick = { onOpen(it.id) }, enabled = canOpen) {
-                    Text(
-                        stringResource(
-                            if (selected) R.string.flight_library_resume
-                            else R.string.flight_cloud_open
-                        ),
-                        fontSize = 12.sp,
-                    )
-                }
-                if (state.activeRecording.journeyId != it.id || !state.activeRecording.running)
-                    TextButton(
-                        onClick = {
-                            offlineAction(true)
-                            onOpen(it.id)
-                        },
-                        enabled = canOpen,
-                    ) {
-                        Text(stringResource(R.string.flight_test_start), fontSize = 12.sp)
-                    }
+                FlightLibraryGpsLabel(local?.id, state)
             }
-            if (row.local == null && row.remote != null) {
+            Text(
+                stringResource(
+                    when {
+                        local?.simulation == true -> R.string.flight_library_test_contents
+                        row.isPlan() -> R.string.flight_library_plan_contents
+                        else -> R.string.flight_library_record_contents
+                    },
+                    state.activeRecording
+                        .takeIf { it.journeyId == local?.id && it.running }
+                        ?.trip
+                        ?.samples
+                        ?.size ?: local?.sampleCount ?: row.remote?.samples ?: 0,
+                    local?.photoCount ?: row.remote?.photoIds?.size ?: 0,
+                ) +
+                    if (local != null)
+                        stringResource(
+                            R.string.flight_library_tile_total,
+                            local.terrainTileCount + local.satelliteTileCount,
+                        )
+                    else "",
+                color = Color.LightGray,
+                fontSize = 11.sp,
+            )
+            val version = row.versionState(dirty, cloud?.serverVerified == true)
+            if (
+                dirty || local != null && row.remote != null && version != FlightVersionState.SENT
+            ) {
+                Text(
+                    stringResource(
+                        if (dirty) R.string.flight_sync_local_pending else version.shortLabel()
+                    ),
+                    fontSize = 10.sp,
+                    color =
+                        if (version == FlightVersionState.SENT && !dirty) Color(0xFF88DEBF)
+                        else Color(0xFFFFCC66),
+                )
+            }
+        }
+        if (local != null) {
+            TextButton(onClick = { onDetails(local.id) }, enabled = canOpen) {
+                Text(stringResource(R.string.flight_detail_title), fontSize = 12.sp)
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.End) {
                 TextButton(
-                    onClick = { cloud?.download(row.remote, onOpen) },
+                    onClick = { row.remote?.let { cloud?.download(it, onOpen) } },
                     enabled = cloud?.connection != null && cloud.busy == false && !state.loadingTrip,
                 ) {
-                    Text(stringResource(R.string.flight_cloud_download), fontSize = 12.sp)
+                    Text(stringResource(R.string.flight_library_get), fontSize = 11.sp)
                 }
-            }
-            TextButton(onClick = { onManage(row.key) }) {
-                Text(stringResource(R.string.flight_sync_manage), fontSize = 12.sp)
+                TextButton(onClick = { onManage(row.key) }) {
+                    Text(stringResource(R.string.flight_detail_title), fontSize = 11.sp)
+                }
             }
         }
     }
     HorizontalDivider(color = Color(0xFF293740))
 }
+
+@Composable
+internal fun FlightLibraryGpsLabel(id: String?, state: FlightUiState) {
+    var elapsed by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    var wall by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val active = state.activeRecording
+    val activeHere = active.running && id != null && active.journeyId == id
+    val alarm = state.localSchedules[id]
+    FlightResumedEffect(activeHere, alarm) {
+        do {
+            elapsed = android.os.SystemClock.elapsedRealtime()
+            wall = System.currentTimeMillis()
+            kotlinx.coroutines.delay(if (activeHere) 1000 else 30_000)
+        } while (activeHere || alarm != null)
+    }
+    val status =
+        flightLibraryGpsState(
+            id,
+            active,
+            state.localSchedules,
+            state.localSchedulesLoaded,
+            state.scheduleRequirementsMet,
+            elapsed,
+            wall,
+        )
+    val label =
+        when (status) {
+            FlightLibraryGpsState.RECORDING ->
+                stringResource(
+                    when (active.tracking.phase) {
+                        FlightTrackingPhase.WAITING -> R.string.flight_library_gps_airport
+                        FlightTrackingPhase.AIRBORNE -> R.string.flight_library_gps_airborne
+                        else -> R.string.flight_library_gps_recording
+                    }
+                )
+            FlightLibraryGpsState.WAITING -> stringResource(R.string.flight_library_gps_waiting)
+            FlightLibraryGpsState.STALE -> stringResource(R.string.flight_library_gps_lost)
+            FlightLibraryGpsState.SIMULATING ->
+                stringResource(R.string.flight_library_gps_simulated)
+            FlightLibraryGpsState.SIMULATION_PAUSED ->
+                stringResource(R.string.flight_library_gps_sim_paused)
+            FlightLibraryGpsState.SCHEDULED ->
+                stringResource(
+                    R.string.flight_library_gps_scheduled,
+                    FlightPreparation.dateText(alarm!!.startMillis, alarm.offsetMinutes),
+                    FlightPreparation.offsetText(alarm.offsetMinutes),
+                )
+            FlightLibraryGpsState.SCHEDULE_BLOCKED ->
+                stringResource(R.string.flight_library_gps_blocked)
+            FlightLibraryGpsState.SCHEDULE_OVERDUE ->
+                stringResource(R.string.flight_library_gps_overdue)
+            FlightLibraryGpsState.UNCHECKED -> stringResource(R.string.flight_library_gps_unchecked)
+            FlightLibraryGpsState.ERROR ->
+                stringResource(
+                    if (active.running) R.string.flight_library_gps_active_error
+                    else R.string.flight_library_gps_error
+                )
+            FlightLibraryGpsState.OFF -> stringResource(R.string.flight_library_gps_off)
+        }
+    Text(
+        label,
+        fontSize = 11.sp,
+        color =
+            when (status) {
+                FlightLibraryGpsState.RECORDING -> Color(0xFF88DEBF)
+                FlightLibraryGpsState.SIMULATING,
+                FlightLibraryGpsState.SIMULATION_PAUSED -> Color(0xFF5DD8FF)
+                FlightLibraryGpsState.ERROR,
+                FlightLibraryGpsState.STALE,
+                FlightLibraryGpsState.SCHEDULE_BLOCKED,
+                FlightLibraryGpsState.SCHEDULE_OVERDUE -> Color(0xFFFFCC66)
+                else -> Color.LightGray
+            },
+    )
+}
+
+private fun FlightVersionState.shortLabel(): Int =
+    when (this) {
+        FlightVersionState.SENT -> R.string.flight_library_version_same
+        FlightVersionState.BOTH_CHANGED -> R.string.flight_library_version_both
+        FlightVersionState.SERVER_CHANGED -> R.string.flight_library_version_server
+        FlightVersionState.LOCAL_CHANGED -> R.string.flight_library_version_phone
+        FlightVersionState.PARTIAL -> R.string.flight_library_version_partial
+        else -> label()
+    }
 
 internal fun FlightVersionState.label(): Int =
     when (this) {

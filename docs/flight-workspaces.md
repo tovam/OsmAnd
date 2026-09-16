@@ -1,18 +1,76 @@
 # Flight workspaces and regression checks
 
-The entry page has three destinations. Navigation is defined once in
-`FlightWorkspaceNavigation`. Library pages are outside the selected flight's bottom bar.
+The entry page is one compact library: All / Planned / Past, with a storage filter.
+A persistent active-recorder strip is independent of those filters. Navigation is
+defined once in `FlightWorkspaceNavigation`; collection, flight details and storage
+reports are never competing bottom tabs.
 
 | Workspace | Available pages | Source of positions |
 | --- | --- | --- |
-| Past flight opened locally | Map, Window, Tiles, Sensors, Photo+, Journal | Imported or recorded samples |
+| Past flight opened locally | Map, Window, Tiles, Sensors, Photo+ | Imported or recorded samples |
 | Planned flights | Preparation, Map, Window, Tiles | Display-only great-circle simulation |
 | Current flight | Map, Window, Tiles, Sensors, Photo+, Recorder | Recorder service plus a separate predicted future |
 
-The current-flight entry is disabled unless the recording service is running.
-Opening another journal does not stop the service or cause its updates to replace
-the selected journal. Starting a prepared flight requires confirmation. Creating
-a new plan or previewing it does not start GPS recording.
+Tapping a local row opens it without a server dependency. **Fiche** shows that
+flight's status, explicit recording/test actions and persistence. It is available
+both from the row and inside every flight. Back returns to the screen that opened
+it, rather than unexpectedly leaving the flight. Opening another journal never
+stops or steals the current recording. Real GPS starts only after confirmation or
+an explicitly armed device alarm, never when opening, previewing or testing a plan.
+
+## Unified entry and action model (September 2026)
+
+The review used [visibility, user control and recognition](https://www.nngroup.com/articles/ten-usability-heuristics/)
+and [progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/):
+status stays visible, but uncommon commands live in the flight's details rather than
+being repeated under every map. Density does not justify tiny touch targets; action
+targets stay at least 48 dp and row text grows with accessibility font settings.
+
+| Intent | Path | Side effects / visible status |
+| --- | --- | --- |
+| Find a flight | Mes vols → All / Planned / Past; optional Phone / Server filter | Local list appears independently of the server |
+| Know where it lives | Row storage badge | Phone, Server, Both; stale server information stays marked unverified |
+| Know what is saved | Row counts, then Fiche for terrain/satellite breakdown | Index metadata, never full track or image reads per row |
+| Know whether this phone uses GPS | Row status and active strip | Real GPS acquiring / fresh / lost, simulated / paused, scheduled / blocked / off |
+| Open or resume locally | Tap row | No lease, upload, permissions or GPS start; in-memory cursor is retained |
+| Download a server-only flight | Download | Creates phone copy, then opens it; does not arm an imported schedule |
+| Inspect/save/share it | Fiche | Local save and server revision are separate statuses |
+| Create a plan | New plan → route and dates | Autosave without starting GPS |
+| Preview a plan | View route → Map / Window | Display-only geodesic flight; not recorded measurements |
+| Download coverage | Fiche → Prepare tiles | Existing estimate, explicit download, missing/retry/pause workflow |
+| Test cached coverage | Fiche → Test → Verify offline | Blocks terrain/satellite network first; map and window use local assets |
+| Leave the offline test | Finish test or return to the library | Releases the test's network block |
+| Rehearse the live workflow | Fiche → Test → Test live | Separate marked simulation journal, fake GPS/clock, real camera; no real GPS |
+| Arm an automatic departure | Fiche → Automatic departure settings → Program | Device alarm and required permissions; not a portable plan flag |
+| Change an already armed departure | Edit dates/rules, then explicitly reprogram | Old armed time remains visible with a changed-settings warning |
+| Disable automatic departure | Fiche → Cancel automatic departure | Cancels only that journal's alarm |
+| Start early | Fiche → Start GPS now → confirm | Real service starts immediately; cannot redirect controls to another flight |
+| Rejoin an automatically started flight | Active strip → View live | Attaches to existing service, without restarting it or changing another open journal |
+| Change cadence live | Fiche or Recorder → cadence | Scoped to active journey; also saved as the phone's next-flight default |
+| Stop or inspect a completed flight | Stop → confirm; later Past → row | Keeps recorded points/photos; replay is read-only for recording controls |
+| Reuse a route | Fiche → Duplicate route | Independent plan identity, no armed departure; not shown on active/test journals |
+| Inspect storage | Fiche → Storage | Size calculation on demand, not while rendering the library |
+
+`FlightJournalSummary` indexes simulation kind, sample/photo counts, planned departure
+and verified-at-save tile references. A schema-versioned sidecar is regenerated once
+for older journals; subsequent listings read just the summary. Requested-but-missing
+tiles are not counted. Counts do **not** assert complete offline coverage. Device
+alarms are read in one background operation and observed for changes, never per row.
+Simulation journals with zero points remain simulations, not new real-flight plans.
+
+Recording has two explicit policies, both editable with validated numeric fields:
+
+- Adaptive defaults: 1,000 m cruise spacing, maximum 20 s; frequency ×2 at a turn
+  of at least 1°/s and ×2 when at least 5 km from the planned route. Both boosts may
+  combine. The interval is clamped to 1 s through the configured maximum.
+- Fixed: 10 s / 60 s / 600 s presets or any interval from 1–3,600 s. Geometry does
+  not shorten this interval. The first fix, final flush and landing remain special.
+
+These are **saved-point** intervals. GPS acquisition, live display and takeoff/landing
+detection continue around 1 Hz; choosing ten minutes does not turn GPS off between
+points. The UI states this explicitly. Policies are device-wide defaults, not cloud
+per-flight settings. Applying one in a different selected journal cannot alter the
+active recorder. Global idle writes are serialized; the last applied policy wins.
 
 ## Local opening and library audit (September 2026)
 
@@ -53,7 +111,7 @@ Additional findings addressed:
 
 | User action | Expected result | Server dependency |
 | --- | --- | --- |
-| Enter flight tracking | Home: past, planned, current; no implicit GPS start | None |
+| Enter flight tracking | Compact library and independent active-recorder strip; no implicit GPS start | None |
 | Browse past or planned flights | Separate collection; All / Phone / Server filters; storage badges | Server listing is optional |
 | Open a phone copy | Save pending local edits, then open from disk | None |
 | Open a phone copy with server conflicts | Same local open; show differing revisions separately | None |
@@ -70,7 +128,7 @@ Additional findings addressed:
 | Rename, retouch or calibrate a photo, mark flight spans | Local autosave with visible saving/error state | None |
 | Use Back from Map | Return to the appropriate library (or Home for live) | None |
 | Use Back from a library | Home, not a different selected-flight tab | None |
-| Open Journal | Only this flight: rename, local save, export, expandable storage details | None |
+| Open Fiche | Only this flight: status, rename, local save, tests, explicit departure, versions and storage | None |
 | Open Versions and send | Only the selected flight's phone/server versions and explicit transfers | Listing/update requires connection |
 | Download a server-only flight | Download and open a new phone copy; no edit lease | Read token + network |
 | Fetch a differing server version | Confirmation; separate local copy, no overwrite of local edits | Read token + network |
@@ -86,8 +144,9 @@ cases with network disabled, an unexpired/expired edit lease and two independent
 
 ## Data boundaries
 
-- A simulation is never saved as recorded samples. Saving a prepared journal
-  saves its plan, shared tile references and its original (empty) recorded trip.
+- A display-only plan preview is never saved as recorded samples. Saving a prepared
+  journal saves its plan, shared tile references and its original empty trip.
+  Immersive rehearsals instead record a separate journal marked `simulation=true`.
 - `liveTimeline` is display-only. The recorder, exports and photo associations
   continue to use the measured `trip`.
 - Scrubbing a live flight retains an absolute cursor time when a new GPS fix

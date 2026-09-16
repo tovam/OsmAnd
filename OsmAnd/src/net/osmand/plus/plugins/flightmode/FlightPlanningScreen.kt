@@ -30,7 +30,6 @@ import net.osmand.plus.R
 @Composable
 internal fun FlightPlanningScreen(
     state: FlightUiState,
-    onClose: () -> Unit,
     onUpdate: (FlightPlan) -> Unit,
     onSave: (Boolean) -> Unit,
     onPreload: (FlightOfflineQuote) -> Unit,
@@ -38,13 +37,13 @@ internal fun FlightPlanningScreen(
     onSimulate: () -> Unit,
     onStart: () -> Unit,
     onPermissions: () -> Unit,
-    onNew: (Boolean) -> Unit,
     onJournals: () -> Unit,
     onUpdateStop: (Int, String) -> Unit,
     onSelectCity: (Int, FlightCitySuggestion) -> Unit,
     onDismissCity: (Int) -> Unit,
     onDisarm: () -> Unit,
-    onSimulateLive: () -> Unit,
+    onDetails: () -> Unit,
+    initialSection: Int = 0,
     bottomNavigation: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -53,7 +52,7 @@ internal fun FlightPlanningScreen(
     var quoting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var mapEditor by remember { mutableStateOf(false) }
-    var section by remember { mutableStateOf(0) }
+    var section by remember { mutableStateOf(initialSection.coerceIn(0, 2)) }
     var showSaveError by remember { mutableStateOf(false) }
     val canSimulate = FlightOfflinePreparation.canSimulate(state.plan)
     var confirmStart by remember { mutableStateOf(false) }
@@ -139,7 +138,7 @@ internal fun FlightPlanningScreen(
                 modifier = Modifier.weight(1f).padding(8.dp),
                 maxLines = 2,
             )
-            PlanAction(stringResource(R.string.flight_mode_close), onClose)
+            PlanAction(stringResource(R.string.flight_detail_title), onDetails)
         }
         Row(Modifier.fillMaxWidth()) {
             PlanAction(
@@ -150,7 +149,7 @@ internal fun FlightPlanningScreen(
             PlanAction(
                 stringResource(
                     if (state.simulationLoading) R.string.flight_test_preparing
-                    else R.string.flight_test_start
+                    else R.string.flight_detail_view_plan
                 ),
                 onSimulate,
                 enabled = canSimulate && !state.simulationLoading,
@@ -185,8 +184,6 @@ internal fun FlightPlanningScreen(
                 fontSize = 11.sp,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
-        PlanAction(stringResource(R.string.flight_immersion_start),onSimulateLive,
-            enabled=canSimulate && !state.simulationLoading && !state.activeRecording.running)
         state.simulationError?.let { Text(it, color = Color(0xFFFFBD39), fontSize = 11.sp) }
         state.journeySaveError?.let { errorText ->
             TextButton(onClick = { showSaveError = !showSaveError }) {
@@ -320,10 +317,6 @@ internal fun FlightPlanningScreen(
                             prep.arrivalOffsetMinutes,
                         ) { millis, offset ->
                             change(prep.copy(arrivalMillis = millis, arrivalOffsetMinutes = offset))
-                        }
-                        Row {
-                            PlanAction(stringResource(R.string.flight_plan_new), { onNew(false) })
-                            PlanAction(stringResource(R.string.flight_plan_repeat), { onNew(true) })
                         }
                     }
                 }
@@ -680,20 +673,15 @@ internal fun FlightPlanningScreen(
                             )
                         Row {
                             PlanAction(
-                                stringResource(R.string.flight_plan_save),
-                                { onSave(false) },
-                                enabled = !state.savingPreparation,
-                            )
-                            PlanAction(
                                 stringResource(R.string.flight_plan_arm),
                                 { onSave(true) },
                                 enabled = !state.savingPreparation && validSchedule && canSimulate,
                             )
                         }
                         PlanAction(
-                            stringResource(R.string.flight_plan_start_now),
+                            stringResource(R.string.flight_detail_start_real),
                             { confirmStart = true },
-                            enabled = canSimulate,
+                            enabled = canSimulate && !state.activeRecording.running,
                         )
                     }
                 }

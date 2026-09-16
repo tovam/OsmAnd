@@ -73,7 +73,7 @@ class FlightRecordingService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action in listOf(STOP, MICROPHONE, SIMULATION_CONTROL, CONFIRM_AIRBORNE) &&
+        if (intent?.action in listOf(STOP, MICROPHONE, SIMULATION_CONTROL, CONFIRM_AIRBORNE, POLICY) &&
             (realHandoffPending || !targetsCurrentJourney(intent))) {
             if (!startRequested && !updates.value.running) stopSelf()
             return restartMode()
@@ -149,20 +149,31 @@ class FlightRecordingService : Service(), LocationListener {
         }
         if (intent?.action == POLICY) {
             worker.post {
-                recordingPolicy =
-                    FlightRecordingPolicy(
-                        intent.getFloatExtra("distance", 1000f).coerceIn(100f, 8000f),
-                        intent.getFloatExtra("interval", 20f).coerceIn(1f, 120f),
-                        intent.getFloatExtra("turn", 2f).coerceIn(1f, 10f),
-                        intent.getFloatExtra("deviation", 2f).coerceIn(1f, 10f),
+                if (!targetsCurrentJourney(intent)) return@post
+                val current = recordingPolicy
+                recordingPolicy = FlightRecordingPolicy(
+                    cruisePointDistanceMeters = intent.getFloatExtra(
+                        POLICY_DISTANCE,
+                        current.cruisePointDistanceMeters
+                    ),
+                    maximumStraightIntervalSeconds = intent.getFloatExtra(
+                        POLICY_INTERVAL,
+                        current.maximumStraightIntervalSeconds
+                    ),
+                    turnAcceleration = intent.getFloatExtra(POLICY_TURN, current.turnAcceleration),
+                    routeDeviationAcceleration = intent.getFloatExtra(
+                        POLICY_DEVIATION,
+                        current.routeDeviationAcceleration
+                    ),
+                    mode = intent.getStringExtra(POLICY_MODE)?.let { raw ->
+                        runCatching { FlightRecordingMode.valueOf(raw) }.getOrNull()
+                    } ?: current.mode,
+                    fixedIntervalSeconds = intent.getFloatExtra(
+                        POLICY_FIXED_INTERVAL,
+                        current.fixedIntervalSeconds
                     )
-                getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .edit()
-                    .putFloat("distance", recordingPolicy.cruisePointDistanceMeters)
-                    .putFloat("interval", recordingPolicy.maximumStraightIntervalSeconds)
-                    .putFloat("turn", recordingPolicy.turnAcceleration)
-                    .putFloat("deviation", recordingPolicy.routeDeviationAcceleration)
-                    .apply()
+                ).clamped()
+                saveRecordingPolicy(recordingPolicy)
                 updates.value = updates.value.copy(policy = recordingPolicy)
                 if (!updates.value.running) stopSelf()
             }
@@ -275,13 +286,7 @@ class FlightRecordingService : Service(), LocationListener {
                             baselineAltitude = samples.firstNotNullOfOrNull { it.altitudeMeters }
                         )
                 if (!simulatedStart) prefs.edit().putString("active", id).apply()
-                recordingPolicy =
-                    FlightRecordingPolicy(
-                        prefs.getFloat("distance", 1000f).coerceIn(100f, 8000f),
-                        prefs.getFloat("interval", 20f).coerceIn(1f, 120f),
-                        prefs.getFloat("turn", 2f).coerceIn(1f, 10f),
-                        prefs.getFloat("deviation", 2f).coerceIn(1f, 10f),
-                    )
+                recordingPolicy = readRecordingPolicy(prefs)
                 updates.value =
                     FlightLiveState(
                         id,
@@ -313,6 +318,13 @@ class FlightRecordingService : Service(), LocationListener {
     }
 
     private fun restartMode() = if (realHandoffPending || (startRequested && !simulatedStart)) START_STICKY else START_NOT_STICKY
+
+    private fun readRecordingPolicy(prefs: SharedPreferences): FlightRecordingPolicy =
+        Companion.readPolicyFromPrefs(prefs)
+
+    private fun saveRecordingPolicy(policy: FlightRecordingPolicy) {
+        savePolicy(this, policy)
+    }
 
     private fun targetsCurrentJourney(intent: Intent?) =
         FlightWorkPolicy.acceptsControl(intent?.getStringExtra("journey"), updates.value.journeyId)
@@ -660,10 +672,62 @@ class FlightRecordingService : Service(), LocationListener {
         const val MICROPHONE = "flight.microphone"
         const val CONFIRM_AIRBORNE = "flight.confirm.airborne"
         const val SIMULATION_CONTROL = "flight.simulation.control"
+        private const val POLICY_DISTANCE = "distance"
+        private const val POLICY_INTERVAL = "interval"
+        private const val POLICY_TURN = "turn"
+        private const val POLICY_DEVIATION = "deviation"
+        private const val POLICY_MODE = "mode"
+        private const val POLICY_FIXED_INTERVAL = "fixedInterval"
         private const val CHANNEL = "flight-recording"
         private const val NOTIFICATION = 19472
         private val updates = MutableStateFlow(FlightLiveState())
         val state = updates.asStateFlow()
+
+        /** Reads the global next-flight policy without starting or touching the recorder. */
+        internal fun readPolicy(context: Context): FlightRecordingPolicy =
+            readPolicyFromPrefs(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))
+
+        /** Stores the global next-flight policy without starting or touching the recorder. */
+        internal fun savePolicy(context: Context, policy: FlightRecordingPolicy) {
+            val safe = policy.clamped()
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putFloat(POLICY_DISTANCE, safe.cruisePointDistanceMeters)
+                .putFloat(POLICY_INTERVAL, safe.maximumStraightIntervalSeconds)
+                .putFloat(POLICY_TURN, safe.turnAcceleration)
+                .putFloat(POLICY_DEVIATION, safe.routeDeviationAcceleration)
+                .putString(POLICY_MODE, safe.mode.name)
+                .putFloat(POLICY_FIXED_INTERVAL, safe.fixedIntervalSeconds)
+                .apply()
+        }
+
+        private fun readPolicyFromPrefs(prefs: SharedPreferences): FlightRecordingPolicy {
+            val mode = prefs.getString(POLICY_MODE, FlightRecordingMode.ADAPTIVE.name)
+                ?.let { raw -> runCatching { FlightRecordingMode.valueOf(raw) }.getOrNull() }
+                ?: FlightRecordingMode.ADAPTIVE
+            return FlightRecordingPolicy(
+                cruisePointDistanceMeters = prefs.getFloat(
+                    POLICY_DISTANCE,
+                    FlightRecordingPolicy.DEFAULT_CRUISE_DISTANCE_METERS
+                ),
+                maximumStraightIntervalSeconds = prefs.getFloat(
+                    POLICY_INTERVAL,
+                    FlightRecordingPolicy.DEFAULT_MAXIMUM_INTERVAL_SECONDS
+                ),
+                turnAcceleration = prefs.getFloat(
+                    POLICY_TURN,
+                    FlightRecordingPolicy.DEFAULT_TURN_ACCELERATION
+                ),
+                routeDeviationAcceleration = prefs.getFloat(
+                    POLICY_DEVIATION,
+                    FlightRecordingPolicy.DEFAULT_ROUTE_DEVIATION_ACCELERATION
+                ),
+                mode = mode,
+                fixedIntervalSeconds = prefs.getFloat(
+                    POLICY_FIXED_INTERVAL,
+                    FlightRecordingPolicy.DEFAULT_FIXED_INTERVAL_SECONDS
+                )
+            ).clamped()
+        }
 
         fun start(context: Context, id: String) =
             ContextCompat.startForegroundService(
@@ -704,6 +768,21 @@ class FlightRecordingService : Service(), LocationListener {
                     .putExtra("journey", journeyId)
                     .putExtra("enabled", enabled)
             )
+
+        fun policy(context: Context, policy: FlightRecordingPolicy, journeyId: String?) {
+            val safe = policy.clamped()
+            context.startService(
+                Intent(context, FlightRecordingService::class.java)
+                    .setAction(POLICY)
+                    .putExtra("journey", journeyId)
+                    .putExtra(POLICY_DISTANCE, safe.cruisePointDistanceMeters)
+                    .putExtra(POLICY_INTERVAL, safe.maximumStraightIntervalSeconds)
+                    .putExtra(POLICY_TURN, safe.turnAcceleration)
+                    .putExtra(POLICY_DEVIATION, safe.routeDeviationAcceleration)
+                    .putExtra(POLICY_MODE, safe.mode.name)
+                    .putExtra(POLICY_FIXED_INTERVAL, safe.fixedIntervalSeconds)
+            )
+        }
 
         private fun absAngle(a: Float, b: Float): Float {
             val d = kotlin.math.abs(a - b) % 360f

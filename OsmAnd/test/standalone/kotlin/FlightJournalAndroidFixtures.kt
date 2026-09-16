@@ -5,6 +5,7 @@ import java.io.FileOutputStream
 
 // Android's streaming reader has the same API used here. No Android runtime or user files.
 typealias JsonReader = com.google.gson.stream.JsonReader
+typealias JsonToken = com.google.gson.stream.JsonToken
 
 class AtomicFile(val baseFile: File) {
     private val pending = File(baseFile.path + ".new")
