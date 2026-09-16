@@ -1,22 +1,31 @@
 package net.osmand.plus.plugins.flightmode
 
 import android.annotation.SuppressLint
+import android.os.Build
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -27,10 +36,14 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.osmand.plus.R
 
 /** The modal owns only its camera use cases. Dismissal never tears down flight recording. */
 @SuppressLint("ClickableViewAccessibility")
+@androidx.annotation.OptIn(markerClass = [ExperimentalCamera2Interop::class])
 @Composable
 internal fun FlightCameraScreen(
     owner: LifecycleOwner,
@@ -49,6 +62,7 @@ internal fun FlightCameraScreen(
         onDispose { sensors.stop() }
     }
     val executor = remember(context) { ContextCompat.getMainExecutor(context) }
+    val scope = rememberCoroutineScope()
     val previewView =
         remember(context) {
             PreviewView(context).apply {
@@ -56,15 +70,15 @@ internal fun FlightCameraScreen(
             }
         }
     var provider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
-    var cameras by remember { mutableStateOf<List<CameraInfo>>(emptyList()) }
+    var cameras by remember { mutableStateOf<List<FlightCameraLens>>(emptyList()) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var capture by remember { mutableStateOf<ImageCapture?>(null) }
     var selected by remember { mutableIntStateOf(0) }
     var zoom by remember { mutableFloatStateOf(1f) }
     var minZoom by remember { mutableFloatStateOf(1f) }
     var maxZoom by remember { mutableFloatStateOf(1f) }
-    var exposure by remember { mutableIntStateOf(0) }
-    var manualExposure by remember { mutableStateOf(false) }
+    var manualFocus by remember { mutableStateOf(false) }
+    var focusStatus by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var saved by remember { mutableIntStateOf(0) }
@@ -74,11 +88,23 @@ internal fun FlightCameraScreen(
         future.addListener(
             {
                 if (active)
-                    try {
-                        provider = future.get()
-                        cameras = provider!!.availableCameraInfos
-                    } catch (e: Exception) {
-                        error = e.message
+                    scope.launch {
+                        try {
+                            val ready = future.get()
+                            val lenses =
+                                withContext(Dispatchers.IO) {
+                                    flightCameraLenses(context, ready.availableCameraInfos)
+                                }
+                            if (active) {
+                                cameras = lenses
+                                selected = defaultFlightLens(lenses)
+                                provider = ready
+                            }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            if (active) error = e.message
+                        }
                     }
             },
             executor,
@@ -87,24 +113,52 @@ internal fun FlightCameraScreen(
     }
     DisposableEffect(provider, cameras, selected, owner) {
         val p = provider
+        val lens = cameras.getOrNull(selected)
+        val previewBuilder = Preview.Builder()
+        val imageBuilder =
+            ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+        if (Build.VERSION.SDK_INT >= 28)
+            lens?.physicalId?.let { id ->
+                // Pin BOTH streams. Pinning preview alone would still allow a different capture
+                // lens.
+                Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(id)
+                Camera2Interop.Extender(imageBuilder).setPhysicalCameraId(id)
+            }
         val preview =
-            Preview.Builder().build().apply { setSurfaceProvider(previewView.surfaceProvider) }
-        val image =
-            ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
+            previewBuilder.build().apply { setSurfaceProvider(previewView.surfaceProvider) }
+        val image = imageBuilder.build()
         var bound: Camera? = null
         val zoomObserver =
             Observer<ZoomState> { z ->
                 if (z != null) {
                     zoom = z.zoomRatio
-                    minZoom = z.minZoomRatio
-                    maxZoom = z.maxZoomRatio
+                    minZoom =
+                        if (lens?.locked == true) maxOf(1f, z.minZoomRatio) else z.minZoomRatio
+                    maxZoom =
+                        if (lens?.locked == true)
+                            minOf(
+                                    z.maxZoomRatio,
+                                    lens.characteristics[
+                                            android.hardware.camera2.CameraCharacteristics
+                                                .SCALER_AVAILABLE_MAX_DIGITAL_ZOOM]
+                                        ?: z.maxZoomRatio,
+                                )
+                                .coerceAtLeast(minZoom)
+                        else z.maxZoomRatio
                 }
+            }
+        val stateObserver =
+            Observer<CameraState> { state ->
+                if (state.error != null) {
+                    error =
+                        context.getString(R.string.flight_camera_lens_failed, lens?.title ?: "?") +
+                            " (${state.error?.code})"
+                    capture = null
+                } else if (state.type == CameraState.Type.OPEN) capture = image
             }
         try {
             if (p != null && cameras.isNotEmpty()) {
-                val info = cameras[selected.coerceIn(cameras.indices)]
+                val info = cameras[selected.coerceIn(cameras.indices)].parent
                 val selector =
                     CameraSelector.Builder()
                         .addCameraFilter { infos -> infos.filter { it == info } }
@@ -113,17 +167,26 @@ internal fun FlightCameraScreen(
                 camera = bound
                 capture = image
                 error = null
-                exposure = bound.cameraInfo.exposureState.exposureCompensationIndex
+                focusStatus = null
+                manualFocus = false
                 bound.cameraInfo.zoomState.observe(owner, zoomObserver)
+                bound.cameraInfo.cameraState.observe(owner, stateObserver)
+                bound.cameraControl.setZoomRatio(1f)
             }
         } catch (e: Exception) {
-            error = e.message
+            error =
+                context.getString(R.string.flight_camera_lens_failed, lens?.title ?: "?") +
+                    "\n" +
+                    e.message
             camera = null
             capture = null
         }
         onDispose {
             bound?.cameraInfo?.zoomState?.removeObserver(zoomObserver)
+            bound?.cameraInfo?.cameraState?.removeObserver(stateObserver)
             p?.unbind(preview, image)
+            camera = null
+            capture = null
         }
     }
     fun changeZoom(value: Float) {
@@ -132,8 +195,11 @@ internal fun FlightCameraScreen(
     }
     val currentZoom by rememberUpdatedState(zoom)
     val currentCamera by rememberUpdatedState(camera)
+    val currentManualFocus by rememberUpdatedState(manualFocus)
+    val currentBusy by rememberUpdatedState(busy)
     val zoomAction by rememberUpdatedState<(Float) -> Unit>({ changeZoom(it) })
     DisposableEffect(previewView) {
+        var usedMultiplePointers = false
         val pinch =
             ScaleGestureDetector(
                 context,
@@ -151,21 +217,47 @@ internal fun FlightCameraScreen(
                     override fun onDown(e: MotionEvent) = true
 
                     override fun onSingleTapUp(e: MotionEvent): Boolean {
+                        if (currentBusy || pinch.isInProgress || usedMultiplePointers) return true
+                        if (currentManualFocus) {
+                            focusStatus =
+                                context.getString(R.string.flight_camera_focus_manual_hint)
+                            return true
+                        }
                         val point = previewView.meteringPointFactory.createPoint(e.x, e.y)
-                        currentCamera
-                            ?.cameraControl
-                            ?.startFocusAndMetering(
+                        val requestedCamera = currentCamera ?: return true
+                        focusStatus = context.getString(R.string.flight_camera_focusing)
+                        val result =
+                            requestedCamera.cameraControl.startFocusAndMetering(
                                 FocusMeteringAction.Builder(point)
                                     .setAutoCancelDuration(5, TimeUnit.SECONDS)
                                     .build()
                             )
+                        result.addListener(
+                            {
+                                if (currentCamera === requestedCamera) {
+                                    val ok =
+                                        runCatching { result.get().isFocusSuccessful }
+                                            .getOrDefault(false)
+                                    focusStatus =
+                                        context.getString(
+                                            if (ok) R.string.flight_camera_focus_ok
+                                            else R.string.flight_camera_focus_failed
+                                        )
+                                }
+                            },
+                            executor,
+                        )
                         return true
                     }
                 },
             )
         previewView.setOnTouchListener { _, event ->
-            pinch.onTouchEvent(event)
-            taps.onTouchEvent(event)
+            if (!currentBusy) {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) usedMultiplePointers = false
+                if (event.pointerCount > 1) usedMultiplePointers = true
+                pinch.onTouchEvent(event)
+                if (event.pointerCount == 1 && !pinch.isInProgress) taps.onTouchEvent(event)
+            }
             true
         }
         onDispose { previewView.setOnTouchListener(null) }
@@ -194,80 +286,106 @@ internal fun FlightCameraScreen(
                 PlanAction(stringResource(R.string.shared_string_close), onClose, enabled = !busy)
             }
             AndroidView(factory = { previewView }, modifier = Modifier.weight(1f).fillMaxWidth())
-            Text(
-                stringResource(R.string.flight_camera_hint),
-                color = Color.LightGray,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                cameras.indices.forEach { index ->
-                    PlanAction(
-                        stringResource(R.string.flight_camera_lens, index + 1),
-                        { selected = index },
-                        selected == index,
-                        !busy,
-                    )
-                }
-            }
-            Row(Modifier.padding(horizontal = 8.dp)) {
-                Text(
-                    "%.1f×".format(zoom),
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    modifier = Modifier.width(44.dp),
-                )
-                if (maxZoom > minZoom)
-                    Slider(
-                        zoom,
-                        { changeZoom(it) },
-                        valueRange = minZoom..maxZoom,
-                        modifier = Modifier.weight(1f),
-                        enabled = !busy,
-                    )
-            }
-            camera?.let { FlightCameraControls(it,!busy,{manualExposure=it},{error=it}) }
-            camera?.takeUnless { manualExposure }
-                ?.cameraInfo
-                ?.exposureState
-                ?.takeIf { it.isExposureCompensationSupported }
-                ?.let { e ->
-                    Row {
-                        PlanAction(
-                            "− EV",
-                            {
-                                exposure =
-                                    (exposure - 1).coerceAtLeast(e.exposureCompensationRange.lower)
-                                camera?.cameraControl?.setExposureCompensationIndex(exposure)
-                            },
-                            enabled = !busy,
-                        )
-                        Text(
-                            "%+.1f EV".format(exposure * e.exposureCompensationStep.toFloat()),
-                            color = Color.White,
-                            fontSize = 12.sp,
-                        )
-                        PlanAction(
-                            "+ EV",
-                            {
-                                exposure =
-                                    (exposure + 1).coerceAtMost(e.exposureCompensationRange.upper)
-                                camera?.cameraControl?.setExposureCompensationIndex(exposure)
-                            },
-                            enabled = !busy,
-                        )
+            // Bound the control panel: extra manual controls must never squeeze preview/shutter
+            // away.
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 270.dp).verticalScroll(rememberScrollState())
+            ) {
+                Row(Modifier.fillMaxWidth().selectableGroup()) {
+                    cameras.indices.forEach { index ->
+                        Box(
+                            Modifier.weight(1f)
+                                .heightIn(min = 52.dp)
+                                .padding(2.dp)
+                                .background(
+                                    if (selected == index) Color(0xFF344A50) else Color.Black
+                                )
+                                .border(
+                                    1.dp,
+                                    if (selected == index) Color(0xFF80CBC4) else Color.DarkGray,
+                                )
+                                .selectable(
+                                    selected == index,
+                                    enabled = !busy,
+                                    role = Role.RadioButton,
+                                    onClick = { selected = index },
+                                )
+                                .padding(horizontal = 3.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                cameras[index].title,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 }
-            error?.let { Text(it, color = Color(0xFFFFBD39), fontSize = 12.sp) }
+                Text(
+                    stringResource(
+                        if (cameras.getOrNull(selected)?.locked == true)
+                            R.string.flight_camera_lens_locked
+                        else R.string.flight_camera_lens_unlocked
+                    ),
+                    color = Color.LightGray,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+                Row(Modifier.padding(horizontal = 8.dp)) {
+                    Text(
+                        stringResource(R.string.flight_camera_zoom_label, zoom),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.width(105.dp),
+                    )
+                    if (maxZoom > minZoom)
+                        Slider(
+                            zoom,
+                            { changeZoom(it) },
+                            valueRange = minZoom..maxZoom,
+                            modifier = Modifier.weight(1f),
+                            enabled = !busy,
+                        )
+                }
+                camera?.let { active ->
+                    cameras.getOrNull(selected)?.let { lens ->
+                        key(selected) {
+                            FlightCameraControls(
+                                active,
+                                lens,
+                                !busy,
+                                { manualFocus = it },
+                                { error = it },
+                            )
+                        }
+                    }
+                }
+                focusStatus?.let {
+                    Text(
+                        it,
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+            }
+            error?.let {
+                Text(
+                    it,
+                    color = Color(0xFFFFBD39),
+                    fontSize = 12.sp,
+                    modifier = Modifier.heightIn(max = 76.dp).verticalScroll(rememberScrollState()),
+                )
+            }
             if (saved > 0)
                 Text(
                     stringResource(R.string.flight_camera_saved, saved),
                     color = Color(0xFF2CDBBE),
                     fontSize = 12.sp,
                 )
-            PlanAction(
-                stringResource(R.string.flight_camera_shutter),
-                {
+            Button(
+                onClick = {
                     val image = capture
                     if (image != null && !busy)
                         try {
@@ -323,7 +441,18 @@ internal fun FlightCameraScreen(
                         }
                 },
                 enabled = capture != null && !busy,
-            )
+                modifier =
+                    Modifier.align(Alignment.CenterHorizontally)
+                        .height(52.dp)
+                        .padding(vertical = 3.dp),
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = Color.Black,
+                    ),
+            ) {
+                Text(stringResource(R.string.flight_camera_shutter))
+            }
         }
     }
 }

@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_camera_main">Principal</string>
+    <string name="flight_camera_ultrawide">Ultra-grand-angle</string>
+    <string name="flight_camera_telephoto">Téléobjectif</string>
+    <string name="flight_camera_front">Selfie</string>
+    <string name="flight_camera_system_lens">Système · non verrouillable</string>
+    <string name="flight_camera_lens_locked">Objectif fixe · zoom par recadrage</string>
+    <string name="flight_camera_lens_unlocked">Android ne donne pas accès aux objectifs séparés : changement automatique possible.</string>
+    <string name="flight_camera_lens_failed">Objectif indisponible : %1$s. Aucun autre objectif sélectionné automatiquement.</string>
+    <string name="flight_camera_exposure_tab">Exposition</string>
+    <string name="flight_camera_focus_tab">Netteté</string>
+    <string name="flight_camera_color_tab">Couleur</string>
+    <string name="flight_camera_mode_auto">Auto</string>
+    <string name="flight_camera_mode_manual">Manuel</string>
+    <string name="flight_camera_focus_limit">Distance minimale déclarée : ≈ %1$.0f cm</string>
+    <string name="flight_camera_focus_unknown">Distance minimale non fournie par Android</string>
+    <string name="flight_camera_focus_fixed">Objectif à mise au point fixe</string>
+    <string name="flight_camera_focusing">Mise au point…</string>
+    <string name="flight_camera_focus_ok">Mise au point réussie</string>
+    <string name="flight_camera_focus_failed">Mise au point impossible ici · essaie un autre objectif ou éloigne-toi</string>
+    <string name="flight_camera_focus_manual_hint">Mise au point manuelle · touche Auto dans Netteté pour viser au doigt</string>
+    <string name="flight_camera_zoom_label">Recadrage %1$.1f×</string>
     <string name="flight_camera_settings_failed">Réglage refusé par l’appareil photo</string>
     <string name="flight_camera_manual">Exposition manuelle</string>
     <string name="flight_camera_auto">Exposition auto</string>

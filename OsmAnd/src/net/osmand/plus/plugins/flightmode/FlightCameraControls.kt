@@ -3,20 +3,26 @@ package net.osmand.plus.plugins.flightmode
 import android.hardware.camera2.CameraCharacteristics as C
 import android.hardware.camera2.CaptureRequest as Rq
 import androidx.camera.camera2.interop.Camera2CameraControl
-import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -28,29 +34,23 @@ import net.osmand.plus.R
 @Composable
 internal fun FlightCameraControls(
     camera: Camera,
+    lens: FlightCameraLens,
     enabled: Boolean,
-    onManual: (Boolean) -> Unit,
+    onManualFocus: (Boolean) -> Unit,
     onError: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    val info = remember(camera) { Camera2CameraInfo.from(camera.cameraInfo) }
-    val isoRange = remember(info) { info.getCameraCharacteristic(C.SENSOR_INFO_SENSITIVITY_RANGE) }
-    val timeRange =
-        remember(info) { info.getCameraCharacteristic(C.SENSOR_INFO_EXPOSURE_TIME_RANGE) }
+    val info = lens.characteristics
+    val isoRange = remember(info) { info[C.SENSOR_INFO_SENSITIVITY_RANGE] }
+    val timeRange = remember(info) { info[C.SENSOR_INFO_EXPOSURE_TIME_RANGE] }
     val manualSupported =
         remember(info) {
-            info
-                .getCameraCharacteristic(C.REQUEST_AVAILABLE_CAPABILITIES)
-                ?.contains(C.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true &&
-                isoRange != null &&
-                timeRange != null
+            info[C.REQUEST_AVAILABLE_CAPABILITIES]?.contains(
+                C.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR
+            ) == true && isoRange != null && timeRange != null
         }
-    val focusMax =
-        remember(info) { info.getCameraCharacteristic(C.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f }
-    val wbModes =
-        remember(info) {
-            info.getCameraCharacteristic(C.CONTROL_AWB_AVAILABLE_MODES)?.toSet().orEmpty()
-        }
+    val focusMax = remember(info) { info[C.LENS_INFO_MINIMUM_FOCUS_DISTANCE] ?: 0f }
+    val wbModes = remember(info) { info[C.CONTROL_AWB_AVAILABLE_MODES]?.toSet().orEmpty() }
     var manual by remember(camera) { mutableStateOf(false) }
     var iso by
         remember(camera) {
@@ -65,9 +65,14 @@ internal fun FlightCameraControls(
     var infinity by remember(camera) { mutableStateOf(false) }
     var focus by remember(camera) { mutableFloatStateOf(0f) }
     var wb by remember(camera) { mutableIntStateOf(Rq.CONTROL_AWB_MODE_AUTO) }
+    var tab by remember { mutableIntStateOf(0) }
+    var exposure by
+        remember(camera) {
+            mutableIntStateOf(camera.cameraInfo.exposureState.exposureCompensationIndex)
+        }
     val errorAction by rememberUpdatedState(onError)
-    LaunchedEffect(manual, camera) { onManual(manual) }
-    DisposableEffect(camera) { onDispose { onManual(false) } }
+    LaunchedEffect(infinity, camera) { onManualFocus(infinity) }
+    DisposableEffect(camera) { onDispose { onManualFocus(false) } }
     LaunchedEffect(camera, manual, iso, exposureNs, infinity, focus, wb) {
         val options =
             CaptureRequestOptions.Builder().setCaptureRequestOption(Rq.CONTROL_AWB_MODE, wb)
@@ -107,41 +112,74 @@ internal fun FlightCameraControls(
             errorAction(e.message ?: context.getString(R.string.flight_camera_settings_failed))
         }
     }
-    Row(Modifier.horizontalScroll(rememberScrollState())) {
-        if (manualSupported)
-            PlanAction(
-                stringResource(
-                    if (manual) R.string.flight_camera_manual else R.string.flight_camera_auto
-                ),
-                { manual = !manual },
-                manual,
-                enabled,
-            )
-        if (focusMax > 0f)
-            PlanAction(
-                stringResource(
-                    if (infinity) R.string.flight_camera_focus_manual
-                    else R.string.flight_camera_focus_auto
-                ),
-                {
-                    infinity = !infinity
-                    focus = 0f
-                },
-                infinity,
-                enabled,
-            )
+    TabRow(selectedTabIndex = tab, containerColor = Color.Black, contentColor = Color.White) {
         listOf(
-                Rq.CONTROL_AWB_MODE_AUTO to R.string.flight_camera_wb_auto,
-                Rq.CONTROL_AWB_MODE_DAYLIGHT to R.string.flight_camera_wb_day,
-                Rq.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT to R.string.flight_camera_wb_cloud,
-                Rq.CONTROL_AWB_MODE_INCANDESCENT to R.string.flight_camera_wb_warm,
+                R.string.flight_camera_exposure_tab,
+                R.string.flight_camera_focus_tab,
+                R.string.flight_camera_color_tab,
             )
-            .filter { it.first in wbModes }
-            .forEach { (mode, label) ->
-                PlanAction(stringResource(label), { wb = mode }, wb == mode, enabled)
+            .forEachIndexed { index, label ->
+                Tab(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    text = { Text(stringResource(label), fontSize = 12.sp) },
+                )
             }
     }
-    if (manual && isoRange != null && timeRange != null) {
+    if (tab == 0 && manualSupported)
+        CameraSingleChoice(
+            listOf(
+                stringResource(R.string.flight_camera_mode_auto),
+                stringResource(R.string.flight_camera_mode_manual),
+            ),
+            if (manual) 1 else 0,
+            enabled,
+        ) {
+            manual = it == 1
+        }
+    if (tab == 1) {
+        if (focusMax > 0f)
+            CameraSingleChoice(
+                listOf(
+                    stringResource(R.string.flight_camera_mode_auto),
+                    stringResource(R.string.flight_camera_mode_manual),
+                ),
+                if (infinity) 1 else 0,
+                enabled,
+            ) {
+                infinity = it == 1
+            }
+        Text(
+            stringResource(
+                if (focusMax > 0f) R.string.flight_camera_focus_limit
+                else if (info[C.LENS_INFO_MINIMUM_FOCUS_DISTANCE] == 0f)
+                    R.string.flight_camera_focus_fixed
+                else R.string.flight_camera_focus_unknown,
+                100f / focusMax.coerceAtLeast(0.001f),
+            ),
+            color = Color.LightGray,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+    }
+    if (tab == 2) {
+        val modes =
+            listOf(
+                    Rq.CONTROL_AWB_MODE_AUTO to R.string.flight_camera_wb_auto,
+                    Rq.CONTROL_AWB_MODE_DAYLIGHT to R.string.flight_camera_wb_day,
+                    Rq.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT to R.string.flight_camera_wb_cloud,
+                    Rq.CONTROL_AWB_MODE_INCANDESCENT to R.string.flight_camera_wb_warm,
+                )
+                .filter { it.first in wbModes }
+        CameraSingleChoice(
+            modes.map { stringResource(it.second) },
+            modes.indexOfFirst { it.first == wb },
+            enabled,
+        ) {
+            wb = modes[it].first
+        }
+    }
+    if (tab == 0 && manual && isoRange != null && timeRange != null) {
         Row(Modifier.height(40.dp).padding(horizontal = 8.dp)) {
             Text(
                 "ISO $iso",
@@ -189,7 +227,35 @@ internal fun FlightCameraControls(
                 )
         }
     }
-    if (infinity && focusMax > 0f)
+    if (tab == 0 && !manual) {
+        val e = camera.cameraInfo.exposureState
+        if (e.isExposureCompensationSupported)
+            Row(
+                Modifier.padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "%+.1f EV".format(exposure * e.exposureCompensationStep.toFloat()),
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    modifier = Modifier.width(75.dp),
+                )
+                Slider(
+                    exposure.toFloat(),
+                    {
+                        exposure = it.roundToInt()
+                        camera.cameraControl.setExposureCompensationIndex(exposure)
+                    },
+                    valueRange =
+                        e.exposureCompensationRange.lower.toFloat()..e.exposureCompensationRange
+                                .upper
+                                .toFloat(),
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+    }
+    if (tab == 1 && infinity && focusMax > 0f)
         Row(Modifier.height(40.dp).padding(horizontal = 8.dp)) {
             Text(
                 if (focus < 0.01f) "∞" else "%.2f m".format(1 / focus),
@@ -205,4 +271,37 @@ internal fun FlightCameraControls(
                 modifier = Modifier.weight(1f),
             )
         }
+}
+
+/** Radio semantics make exclusive choices explicit; these are not independent toggles. */
+@Composable
+private fun CameraSingleChoice(
+    labels: List<String>,
+    selected: Int,
+    enabled: Boolean,
+    onSelect: (Int) -> Unit,
+) {
+    Row(Modifier.horizontalScroll(rememberScrollState()).selectableGroup()) {
+        labels.forEachIndexed { index, label ->
+            Row(
+                Modifier.heightIn(min = 48.dp)
+                    .selectable(
+                        selected == index,
+                        enabled = enabled,
+                        role = Role.RadioButton,
+                        onClick = { onSelect(index) },
+                    )
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected == index, onClick = null, enabled = enabled)
+                Text(
+                    label,
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
+        }
+    }
 }
