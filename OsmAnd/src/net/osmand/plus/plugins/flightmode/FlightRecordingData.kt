@@ -14,6 +14,7 @@ data class FlightLiveState(
     val simulation: Boolean = false,
     val simulationRate: Int = 60,
     val simulationPaused: Boolean = false,
+    val simulationBackgroundPaused: Boolean = false,
     val simulationProgress: Float = 0f,
     val simulationPlan: FlightPlan? = null,
 )

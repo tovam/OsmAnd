@@ -52,7 +52,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		ActivityResultContracts.RequestPermission()
 	) { granted ->
 		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
-			FlightRecordingService.microphone(requireContext(),granted)
+			FlightRecordingService.microphone(requireContext(),granted,viewModel.uiState.journeyId)
 		}
 	}
 	private val openTripLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -186,7 +186,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onRehearsePreparation = { viewModel.rehearsePreparation() },
 					onSimulateLive = viewModel::startLiveSimulation,
 					onPreparationPermissions = ::showPreparationPermissions,
-					onStopLive = { FlightRecordingService.stop(requireContext()) },
+					onStopLive = { FlightRecordingService.stop(requireContext(),viewModel.uiState.journeyId) },
 					onToggleLiveMicrophone = ::toggleLiveMicrophone,
 					onLocalJourneyRemoved = viewModel::localJourneyRemoved
 				)
@@ -208,9 +208,9 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	}
 
 	private fun toggleLiveMicrophone() {
-		if (FlightRecordingService.state.value.microphone) FlightRecordingService.microphone(requireContext(),false)
+		if (viewModel.uiState.liveState.microphone) FlightRecordingService.microphone(requireContext(),false,viewModel.uiState.journeyId)
 		else if(ContextCompat.checkSelfPermission(requireContext(),Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
-			FlightRecordingService.microphone(requireContext(),true)
+			FlightRecordingService.microphone(requireContext(),true,viewModel.uiState.journeyId)
 		else microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
 	}
 
@@ -246,6 +246,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	}
 
 	override fun onDestroyView() {
+		viewModel.setUiVisible(false)
 		// onPause normally performs this cleanup. Repeating it here is deliberate:
 		// a fragment transaction or activity recreation must never leave a flight
 		// layer or an unfinished gesture attached to OsmAnd's shared map view.
@@ -292,7 +293,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		photos: List<FlightPhotoAttachment>
 	) {
 		// Photo editing must not rebuild the hidden native flight layer on every finger movement.
-		if (viewModel.uiState.page != FlightPage.MAP) return
+		if (!isResumed || viewModel.uiState.page != FlightPage.MAP) return
 		replayMapLayer?.update(trip, sample, showPoints, photos)
 		replayMapLayer?.updateHypothesis(if(viewModel.uiState.sessionMode==FlightSessionMode.LIVE) viewModel.uiState.plan else null,
 			viewModel.uiState.liveState.latest)

@@ -10,8 +10,10 @@ import android.location.*
 import android.os.*
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import net.osmand.plus.R
 
 /** GPS, persistence and stop detection outlive every map/photo screen. All disk work is serial. */
@@ -35,7 +37,11 @@ class FlightRecordingService : Service(), LocationListener {
     private var simulation: FlightLiveSimulation? = null
     private var simulationClock: FlightSimulationClock? = null
     private var nextSimulatedFix = 0L
-    private var simulatedStart = false
+    @Volatile private var simulatedStart = false
+    private var startRequested = false
+    @Volatile private var realHandoffPending = false
+    private var simulationActive = false
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val satellites =
         object : GnssStatus.Callback() {
             override fun onSatelliteStatusChanged(status: GnssStatus) {
@@ -52,6 +58,9 @@ class FlightRecordingService : Service(), LocationListener {
         thread.start()
         worker = Handler(thread.looper)
         manager = getSystemService(LOCATION_SERVICE) as LocationManager
+        serviceScope.launch {
+            FlightUiActivity.journeys.collect { worker.post { updateSimulationActivity() } }
+        }
         if (Build.VERSION.SDK_INT >= 26)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(
@@ -64,22 +73,48 @@ class FlightRecordingService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == SIMULATION_CONTROL) {
+        if (intent?.action in listOf(STOP, MICROPHONE, SIMULATION_CONTROL, CONFIRM_AIRBORNE) &&
+            (realHandoffPending || !targetsCurrentJourney(intent))) {
+            if (!startRequested && !updates.value.running) stopSelf()
+            return restartMode()
+        }
+        if (intent?.action == CONFIRM_AIRBORNE) {
+            if (!startRequested && !updates.value.running) stopSelf()
             worker.post {
+                if (!updates.value.running || stopping || !targetsCurrentJourney(intent)) return@post
+                val sample = updates.value.latest ?: return@post
+                val next = tracking.confirmAirborne(sample,
+                    if (simulatedStart) sample.timestampMillis else System.currentTimeMillis(),
+                    journey?.plan?.preparation ?: FlightPreparation())
+                if (next != tracking) try {
+                    store!!.writeState(next)
+                    tracking = next
+                    updates.value = updates.value.copy(tracking = next)
+                } catch (e: Exception) { fail(e) }
+            }
+            return restartMode()
+        }
+        if (intent?.action == SIMULATION_CONTROL) {
+            if (!updates.value.running) {
+                if (!startRequested) stopSelf()
+                return restartMode()
+            }
+            worker.post {
+                if (!targetsCurrentJourney(intent)) return@post
                 simulationClock?.let { clock ->
                     clock.advance(SystemClock.elapsedRealtime())
                     clock.rate = intent.getIntExtra("rate", clock.rate).coerceIn(1, 300)
                     clock.paused = intent.getBooleanExtra("paused", clock.paused)
-                    updates.value = updates.value.copy(simulationRate=clock.rate, simulationPaused=clock.paused)
+                    updateSimulationActivity()
                 }
             }
-            return START_NOT_STICKY
+            return restartMode()
         }
         if (intent?.action == MICROPHONE) {
             val enabled = intent.getBooleanExtra("enabled", false)
             if (!state.value.running) {
-                stopSelf()
-                return START_NOT_STICKY
+                if (!startRequested) stopSelf()
+                return restartMode()
             }
             try {
                 if (enabled)
@@ -91,24 +126,26 @@ class FlightRecordingService : Service(), LocationListener {
                     startForeground(
                         NOTIFICATION,
                         notification(),
-                        (if (simulatedStart) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) or
+                        (if (simulatedStart) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                        else ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) or
                             if (enabled && Build.VERSION.SDK_INT >= 30)
                                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                             else 0,
                     )
                 worker.post {
+                    if (!targetsCurrentJourney(intent)) return@post
                     recorder?.stop()
-                    recorder?.start(enabled)
+                    if (!simulatedStart || simulationActive) recorder?.start(enabled)
                     updates.value = updates.value.copy(microphone = enabled)
                 }
             } catch (e: Exception) {
                 updates.value = updates.value.copy(error = e.message)
             }
-            return START_STICKY
+            return restartMode()
         }
         if (intent?.action == STOP) {
-            worker.post { stopRecording(FlightTrackingPhase.STOPPED) }
-            return START_NOT_STICKY
+            worker.post { if (targetsCurrentJourney(intent)) stopRecording(FlightTrackingPhase.STOPPED) }
+            return if (realHandoffPending) START_STICKY else START_NOT_STICKY
         }
         if (intent?.action == POLICY) {
             worker.post {
@@ -127,34 +164,69 @@ class FlightRecordingService : Service(), LocationListener {
                     .putFloat("deviation", recordingPolicy.routeDeviationAcceleration)
                     .apply()
                 updates.value = updates.value.copy(policy = recordingPolicy)
+                if (!updates.value.running) stopSelf()
             }
-            return START_STICKY
+            return restartMode()
         }
-        // A second start request must never switch a running real recorder to simulated GPS.
-        if (updates.value.running) return if (simulatedStart) START_NOT_STICKY else START_STICKY
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        simulatedStart = intent?.getBooleanExtra("simulation", false) == true
         val id = intent?.getStringExtra("journey") ?: prefs.getString("active", null)
         if (id == null) {
-            stopSelf()
-            return START_NOT_STICKY
+            if (!startRequested) stopSelf()
+            return if (simulatedStart || !startRequested) START_NOT_STICKY else START_STICKY
         }
+        val requestedSimulation = intent?.getBooleanExtra("simulation", false) == true
+        val activeSimulation = when {
+            realHandoffPending -> false
+            startRequested || updates.value.running -> simulatedStart
+            else -> null
+        }
+        val disposition = FlightWorkPolicy.startDisposition(activeSimulation, requestedSimulation)
+        if (disposition == FlightStartDisposition.KEEP_CURRENT)
+            return if (activeSimulation == true) START_NOT_STICKY else START_STICKY
+        val replaceSimulation = disposition == FlightStartDisposition.REPLACE_SIMULATION
+        if (replaceSimulation) realHandoffPending = true else simulatedStart = requestedSimulation
+        startRequested = true
         try {
-            val notification = notification()
+            val notification = notification(requestedSimulation)
             if (Build.VERSION.SDK_INT >= 29)
                 startForeground(
                     NOTIFICATION,
                     notification,
-                    if (simulatedStart) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+                    if (requestedSimulation) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    else ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
                 )
             else startForeground(NOTIFICATION, notification)
         } catch (e: Exception) {
-            updates.value = updates.value.copy(journeyId = id, error = e.message, running = false)
-            prefs.edit().putString("error", e.message).remove("active").apply()
+            val message = e.message ?: e.javaClass.simpleName
+            // Never label the previous simulation's measurements with the new real journal ID.
+            updates.value = FlightLiveState(journeyId = id, error = message, simulation = requestedSimulation)
+            prefs.edit().putString("error", message).remove("active").apply()
             stopSelf()
             return START_NOT_STICKY
         }
         worker.post {
+            if (replaceSimulation) {
+                // Serialized handoff: save the test journal before opening the real recording.
+                // Keep this foreground service alive, retaining the alarm's start exemption.
+                stopRecording(FlightTrackingPhase.STOPPED, endService = false)
+                runCatching { recorder?.stop() }
+                recorder = null
+                worker.removeCallbacks(batteryTick)
+                worker.removeCallbacks(simulationTick)
+                FlightNetworkAccess.release(ownerToken)
+                simulation = null
+                simulationClock = null
+                simulationActive = false
+                journey = null
+                store = null
+                environment = FlightEnvironmentReading()
+                used = null
+                found = null
+                lastStateSave = 0L
+                simulatedStart = false
+                stopping = false
+                realHandoffPending = false
+            }
             if (journey?.id == id) return@post
             if (journey != null) {
                 updates.value =
@@ -165,11 +237,22 @@ class FlightRecordingService : Service(), LocationListener {
                 journey = FlightJourneyStore(this).load(id)
                 if (simulatedStart) {
                     check(journey!!.simulation) { "Simulation requires a separate test journal" }
-                    simulation = FlightLiveSimulation(journey!!.plan, journey!!.trip, System.currentTimeMillis())
+                    simulation =
+                        FlightLiveSimulation(
+                            journey!!.plan,
+                            journey!!.trip,
+                            System.currentTimeMillis(),
+                        )
                     simulationClock = FlightSimulationClock(simulation!!.beginning)
                     nextSimulatedFix = simulation!!.beginning
-                    journey = FlightJourneyStore(this).save(journey!!.copy(plan=simulation!!.activePlan,
-                        trip=recordedFlightTrip(journey!!.name, emptyList())))
+                    journey =
+                        FlightJourneyStore(this)
+                            .save(
+                                journey!!.copy(
+                                    plan = simulation!!.activePlan,
+                                    trip = recordedFlightTrip(journey!!.name, emptyList()),
+                                )
+                            )
                     FlightNetworkAccess.block(ownerToken).forEach { runCatching { it() } }
                 }
                 store = FlightRecordingStore(this, id)
@@ -178,6 +261,8 @@ class FlightRecordingService : Service(), LocationListener {
                     tracking.phase == FlightTrackingPhase.LANDED ||
                         tracking.phase == FlightTrackingPhase.STOPPED
                 ) {
+                    prefs.edit().remove("active").apply()
+                    updates.value = updates.value.copy(running = false)
                     stopSelf()
                     return@post
                 }
@@ -209,19 +294,28 @@ class FlightRecordingService : Service(), LocationListener {
                         simulation = simulatedStart,
                         simulationPlan = simulation?.activePlan,
                     )
-                if (simulatedStart) worker.post(simulationTick) else requestGps()
+                if (!simulatedStart) requestGps()
                 recorder =
                     FlightEnvironmentRecorder(this, worker) { reading ->
-                            worker.post { environment = reading }
-                        }
-                        .also { it.start(false) }
-                worker.post(batteryTick)
+                        worker.post { environment = reading }
+                    }
+                if (simulatedStart) updateSimulationActivity()
+                else {
+                    recorder?.start(false)
+                    worker.post(batteryTick)
+                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION, notification())
+                }
             } catch (e: Exception) {
-                fail(e)
+                fail(e, id)
             }
         }
-        return if (simulatedStart) START_NOT_STICKY else START_STICKY
+        return if (requestedSimulation) START_NOT_STICKY else START_STICKY
     }
+
+    private fun restartMode() = if (realHandoffPending || (startRequested && !simulatedStart)) START_STICKY else START_NOT_STICKY
+
+    private fun targetsCurrentJourney(intent: Intent?) =
+        FlightWorkPolicy.acceptsControl(intent?.getStringExtra("journey"), updates.value.journeyId)
 
     @SuppressLint("MissingPermission")
     private fun requestGps() {
@@ -276,14 +370,14 @@ class FlightRecordingService : Service(), LocationListener {
                     soundSpectrum = environment.soundSpectrum.takeIf { updates.value.microphone },
                     vibrationHz = environment.vibrationHz,
                 )
-            acceptSample(sample, System.currentTimeMillis())
+            acceptSample(sample, System.currentTimeMillis(), location.elapsedRealtimeNanos / 1_000_000)
         } catch (e: Exception) {
             fail(e)
         }
     }
 
     /** Both GPS and the simulator use this exact persistence, sampling and phase-detection path. */
-    private fun acceptSample(sample: FlightSample, nowMillis: Long) {
+    private fun acceptSample(sample: FlightSample, nowMillis: Long, fixReceivedAt: Long = SystemClock.elapsedRealtime()) {
         if (stopping) return
         try {
             val previousState = tracking
@@ -329,7 +423,7 @@ class FlightRecordingService : Service(), LocationListener {
                         else updates.value.trip,
                     latest = sample,
                     tracking = tracking,
-                    lastFixElapsed = SystemClock.elapsedRealtime(),
+                    lastFixElapsed = fixReceivedAt,
                     error = null,
                 )
             if (tracking.phase == FlightTrackingPhase.LANDED)
@@ -339,28 +433,76 @@ class FlightRecordingService : Service(), LocationListener {
         }
     }
 
-    private val simulationTick = object : Runnable {
-        override fun run() {
-            if (stopping) return
-            val scenario = simulation ?: return
-            val clock = simulationClock ?: return
-            try {
-                val target = clock.advance(SystemClock.elapsedRealtime()).coerceAtMost(scenario.end)
-                // Feed every virtual second: accelerated playback must still test the real 30-minute rule.
-                while (nextSimulatedFix <= target && !stopping) {
-                    val sample = scenario.sampleAt(nextSimulatedFix).copy(index=samples.size,
-                        soundDb=environment.soundDb.takeIf { updates.value.microphone },
-                        soundSpectrum=environment.soundSpectrum.takeIf { updates.value.microphone },
-                        vibrationHz=environment.vibrationHz)
-                    acceptSample(sample, nextSimulatedFix)
-                    nextSimulatedFix += 1000
-                }
-                updates.value = updates.value.copy(simulationProgress=scenario.progress(target))
-                if (target >= scenario.end && !stopping) stopRecording(FlightTrackingPhase.STOPPED)
-                if (!stopping) worker.postDelayed(this, 100)
-            } catch (e: Exception) { fail(e) }
+    /** Real recording outlives the UI; a rehearsal runs only while its flight is being viewed. */
+    private fun updateSimulationActivity() {
+        if (!simulatedStart || stopping) return
+        val clock = simulationClock ?: return
+        val visible = journey?.id in FlightUiActivity.journeys.value
+        val active = FlightWorkPolicy.recordingActive(true, visible, clock.paused)
+        clock.backgroundPaused = !visible
+        clock.rebase(SystemClock.elapsedRealtime())
+        worker.removeCallbacks(simulationTick)
+        worker.removeCallbacks(batteryTick)
+        if (active != simulationActive) {
+            simulationActive = active
+            recorder?.stop()
+            environment = FlightEnvironmentReading()
+            if (active) recorder?.start(updates.value.microphone)
         }
+        updates.value =
+            updates.value.copy(
+                simulationPaused = !active,
+                simulationRate = clock.rate,
+                simulationBackgroundPaused = !visible,
+            )
+        if (active) {
+            worker.post(simulationTick)
+            worker.post(batteryTick)
+        }
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(
+            NOTIFICATION,
+            notification(),
+        )
     }
+
+    private val simulationTick =
+        object : Runnable {
+            override fun run() {
+                if (stopping || !simulationActive) return
+                val scenario = simulation ?: return
+                val clock = simulationClock ?: return
+                try {
+                    val target =
+                        clock.advance(SystemClock.elapsedRealtime()).coerceAtMost(scenario.end)
+                    // Feed every virtual second: accelerated playback must still test the real
+                    // 30-minute rule.
+                    while (nextSimulatedFix <= target && !stopping) {
+                        val sample =
+                            scenario
+                                .sampleAt(nextSimulatedFix)
+                                .copy(
+                                    index = samples.size,
+                                    soundDb =
+                                        environment.soundDb.takeIf { updates.value.microphone },
+                                    soundSpectrum =
+                                        environment.soundSpectrum.takeIf {
+                                            updates.value.microphone
+                                        },
+                                    vibrationHz = environment.vibrationHz,
+                                )
+                        acceptSample(sample, nextSimulatedFix)
+                        nextSimulatedFix += 1000
+                    }
+                    updates.value =
+                        updates.value.copy(simulationProgress = scenario.progress(target))
+                    if (target >= scenario.end && !stopping)
+                        stopRecording(FlightTrackingPhase.STOPPED)
+                    if (!stopping && simulationActive) worker.postDelayed(this, 100)
+                } catch (e: Exception) {
+                    fail(e)
+                }
+            }
+        }
 
     private val batteryTick =
         object : Runnable {
@@ -390,9 +532,18 @@ class FlightRecordingService : Service(), LocationListener {
             }
         }
 
-    private fun stopRecording(phase: FlightTrackingPhase) {
+    private fun stopRecording(phase: FlightTrackingPhase, endService: Boolean = true) {
         if (stopping) return
         stopping = true
+        runCatching {
+            FlightLiveSafety.finalFix(samples.lastOrNull(), updates.value.latest)?.let { sample ->
+                store?.append(sample)
+                samples += sample
+                journey?.let { j ->
+                    updates.value = updates.value.copy(trip = recordedFlightTrip(j.name, samples.toList()))
+                }
+            }
+        }.onFailure { updates.value = updates.value.copy(error = it.message) }
         tracking = tracking.copy(phase = phase, slowSinceMillis = null)
         runCatching { store?.writeState(tracking) }
             .onFailure { updates.value = updates.value.copy(error = it.message) }
@@ -414,13 +565,16 @@ class FlightRecordingService : Service(), LocationListener {
         }
         updates.value = updates.value.copy(running = false, tracking = tracking)
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("active").apply()
-        journey?.let { FlightScheduleManager.cancel(this, it.id) }
-        stopSelf()
+        journey?.let { j -> runCatching { FlightScheduleManager.cancel(this, j.id) }
+            .onFailure { updates.value = updates.value.copy(error = it.message) } }
+        if (endService && !realHandoffPending) stopSelf()
     }
 
-    private fun fail(e: Exception) {
+    private fun fail(e: Exception, journeyId: String? = updates.value.journeyId) {
+        val failed = updates.value.takeIf { it.journeyId == journeyId }
+            ?: FlightLiveState(journeyId = journeyId, simulation = simulatedStart)
         updates.value =
-            updates.value.copy(error = e.message ?: e.javaClass.simpleName, running = false)
+            failed.copy(error = e.message ?: e.javaClass.simpleName, running = false)
         getSharedPreferences(PREFS, MODE_PRIVATE)
             .edit()
             .putString("error", e.message ?: e.javaClass.simpleName)
@@ -432,17 +586,19 @@ class FlightRecordingService : Service(), LocationListener {
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         // Android 15 limits background data-sync sessions; persist the rehearsal before stopping.
-        worker.post { if (!stopping) stopRecording(FlightTrackingPhase.STOPPED) }
+        worker.post { if (simulatedStart && !stopping) stopRecording(FlightTrackingPhase.STOPPED) }
     }
 
     override fun onDestroy() {
         stopping = true
+        serviceScope.cancel()
         worker.post {
             if (!simulatedStart) {
-                manager.removeUpdates(this)
-                manager.unregisterGnssStatusCallback(satellites)
+                // Permission revocation must not skip the remaining sensor/network cleanup.
+                runCatching { manager.removeUpdates(this) }
+                runCatching { manager.unregisterGnssStatusCallback(satellites) }
             }
-            recorder?.stop()
+            runCatching { recorder?.stop() }
             worker.removeCallbacks(batteryTick)
             worker.removeCallbacks(simulationTick)
             FlightNetworkAccess.release(ownerToken)
@@ -463,7 +619,7 @@ class FlightRecordingService : Service(), LocationListener {
     @Deprecated("Legacy callback")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
-    private fun notification(): Notification {
+    private fun notification(simulationNotice: Boolean = simulatedStart): Notification {
         val launch = packageManager.getLaunchIntentForPackage(packageName)
         val open =
             launch?.let {
@@ -477,8 +633,20 @@ class FlightRecordingService : Service(), LocationListener {
         // Stop is intentionally in the app behind confirmation, not an accidental notification tap.
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_action_gps_info)
-            .setContentTitle(getString(if (simulatedStart) R.string.flight_immersion_title else R.string.flight_live_recording))
-            .setContentText(getString(R.string.flight_live_background))
+            .setContentTitle(
+                getString(
+                    if (simulationNotice) R.string.flight_immersion_title
+                    else R.string.flight_live_recording
+                )
+            )
+            .setContentText(
+                getString(
+                    if (simulationNotice) {
+                        if (simulationActive) R.string.flight_simulation_running_notice
+                        else R.string.flight_simulation_paused_notice
+                    } else R.string.flight_live_background
+                )
+            )
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -490,6 +658,7 @@ class FlightRecordingService : Service(), LocationListener {
         const val STOP = "flight.stop"
         const val POLICY = "flight.policy"
         const val MICROPHONE = "flight.microphone"
+        const val CONFIRM_AIRBORNE = "flight.confirm.airborne"
         const val SIMULATION_CONTROL = "flight.simulation.control"
         private const val CHANNEL = "flight-recording"
         private const val NOTIFICATION = 19472
@@ -502,22 +671,37 @@ class FlightRecordingService : Service(), LocationListener {
                 Intent(context, FlightRecordingService::class.java).putExtra("journey", id),
             )
 
-        fun simulate(context: Context, id: String) = ContextCompat.startForegroundService(context,
-            Intent(context, FlightRecordingService::class.java).putExtra("journey", id).putExtra("simulation", true))
-
-        fun simulationControl(context: Context, rate: Int, paused: Boolean) = context.startService(
-            Intent(context, FlightRecordingService::class.java).setAction(SIMULATION_CONTROL)
-                .putExtra("rate", rate).putExtra("paused", paused))
-
-        fun stop(context: Context) =
-            context.startService(
-                Intent(context, FlightRecordingService::class.java).setAction(STOP)
+        fun simulate(context: Context, id: String) =
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, FlightRecordingService::class.java)
+                    .putExtra("journey", id)
+                    .putExtra("simulation", true),
             )
 
-        fun microphone(context: Context, enabled: Boolean) =
+        fun simulationControl(context: Context, rate: Int, paused: Boolean, journeyId: String?) =
+            context.startService(
+                Intent(context, FlightRecordingService::class.java)
+                    .setAction(SIMULATION_CONTROL)
+                    .putExtra("journey", journeyId)
+                    .putExtra("rate", rate)
+                    .putExtra("paused", paused)
+            )
+
+        fun stop(context: Context, journeyId: String?) =
+            context.startService(
+                Intent(context, FlightRecordingService::class.java).setAction(STOP).putExtra("journey", journeyId)
+            )
+
+        fun confirmAirborne(context: Context, journeyId: String?) = context.startService(
+            Intent(context, FlightRecordingService::class.java).setAction(CONFIRM_AIRBORNE).putExtra("journey", journeyId)
+        )
+
+        fun microphone(context: Context, enabled: Boolean, journeyId: String?) =
             context.startService(
                 Intent(context, FlightRecordingService::class.java)
                     .setAction(MICROPHONE)
+                    .putExtra("journey", journeyId)
                     .putExtra("enabled", enabled)
             )
 

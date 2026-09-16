@@ -8,10 +8,12 @@ for lib in ktfmt json coroutines junit hamcrest gson; do test -s "$test_libs/$li
 output_parent="$repo_root/OsmAnd/build"
 mkdir -p "$output_parent"
 test_output=$(mktemp -d "$output_parent/flight-logic.XXXXXXXX")
+echo "Flight logic check classes: $test_output"
 sources="$repo_root/OsmAnd/src/net/osmand/plus/plugins/flightmode"
 classpath="$test_output:$test_libs/ktfmt.jar:$test_libs/json.jar:$test_libs/coroutines.jar:$test_libs/junit.jar:$test_libs/hamcrest.jar:$test_libs/gson.jar"
 javac -d "$test_output" "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseSolver.java" \
   "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPlaneGeometry.java" \
+  "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PreparedResourceQueue.java" \
   "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseDiagnostics.java"
 javac -d "$test_output" \
   "$repo_root/OsmAnd/test/standalone/java/flight-download/Log.java" \
@@ -30,6 +32,8 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$sources/FlightNetworkAccess.kt" "$sources/FlightRasterDownloadAccess.kt" "$sources/FlightJournalSummaries.kt" "$sources/FlightPreparationSave.kt" \
   "$sources/FlightCloudArchive.kt" "$sources/FlightCloudClient.kt" "$sources/FlightJourneyNaming.kt" "$sources/FlightCloudVersions.kt" \
   "$sources/FlightOfflinePreparation.kt" "$sources/FlightLivePredictor.kt" "$sources/FlightLiveSimulation.kt" \
+  "$sources/FlightWorkPolicy.kt" "$sources/FlightAssetScheduler.kt" "$sources/FlightDisplaySafety.kt" \
+  "$sources/FlightSceneStreamingEngine.kt" \
   "$sources/FlightRouteHypothesis.kt" "$sources/FlightTerrainTilePlanner.kt" \
   "$sources/FlightTerrainModels.kt" "$sources/FlightProfilePlanner.kt" "$sources/FlightTrackMath.kt" \
   "$sources/FlightRecordingLines.kt" \
@@ -41,6 +45,7 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalAndroidFixtures.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightCloudArchiveTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightRecordingLinesTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightStreamingVisibilityTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPreparationLogicTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoCalibrationPersistenceTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoDepthTest.kt" \
@@ -50,9 +55,12 @@ java -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightLocalNavigationTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightOfflineJourneyTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightLiveSimulationTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightWorkPolicyTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightDisplaySafetyTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightAssetSchedulerTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCameraOpticsTest.kt"
 cd "$repo_root"
 java -cp "$test_output:$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest net.osmand.test.junit.FlightLocalNavigationTest net.osmand.test.junit.FlightPhotoCalibrationPersistenceTest net.osmand.test.junit.FlightPhotoDepthTest net.osmand.test.junit.FlightDownloadCancellationTest net.osmand.test.junit.FlightPhotoFitDiagnosticsTest net.osmand.test.junit.FlightCloudArchiveTest net.osmand.test.junit.FlightOfflineJourneyTest
-java -cp "$test_output:$classpath" org.junit.runner.JUnitCore net.osmand.test.junit.FlightLiveSimulationTest net.osmand.test.junit.FlightCameraOpticsTest
+java -cp "$test_output:$classpath" org.junit.runner.JUnitCore net.osmand.test.junit.FlightLiveSimulationTest net.osmand.test.junit.FlightCameraOpticsTest net.osmand.test.junit.FlightWorkPolicyTest net.osmand.test.junit.FlightAssetSchedulerTest net.osmand.test.junit.FlightStreamingVisibilityTest net.osmand.test.junit.FlightDisplaySafetyTest
 echo "Flight logic check classes: $test_output"

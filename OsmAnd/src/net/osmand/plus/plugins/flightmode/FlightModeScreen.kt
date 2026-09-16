@@ -256,7 +256,7 @@ fun FlightModeScreen(
 	LaunchedEffect(cloud) { cloud.initialize() }
 	DisposableEffect(cloud) { onDispose { cloud.close() } }
 	LaunchedEffect(state.savedJourneys) { cloud.acceptLocalSummaries(state.savedJourneys) }
-	LaunchedEffect(state.page, state.offlineSimulation) {
+	FlightResumedEffect(state.page, state.offlineSimulation) {
 		if (!state.offlineSimulation && state.page in listOf(FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refreshIfStale()
 	}
 	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney),
@@ -277,14 +277,14 @@ fun FlightModeScreen(
 		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney,
 			cloud, cloudSelectedKey, when (state.page) { FlightPage.PLANS -> 1; FlightPage.JOURNEYS -> 2; else -> 0 }, onLocalJourneyRemoved,
 			initialSettings = cloudSelectedKey == null)
-		LaunchedEffect(state.replayPlaying, state.replaySpeed) {
+		FlightResumedEffect(state.replayPlaying, state.replaySpeed) {
 			while (state.replayPlaying) {
 				delay(100)
 				onAdvanceReplay(100)
 			}
 		}
 		val mapSample = state.snapshot?.sample
-		LaunchedEffect(
+		FlightResumedEffect(
 			state.trip,
 			mapSample,
 			state.showTrackPoints,
@@ -301,7 +301,7 @@ fun FlightModeScreen(
 				(state.photos + state.pendingPhotos).sortedWith(PHOTO_TIME_COMPARATOR)
 			)
 		}
-		LaunchedEffect(state.page, state.terrainScene, state.terrainStatus.phase) {
+		FlightResumedEffect(state.page, state.terrainScene, state.terrainStatus.phase) {
 			val terrainPage = state.page == FlightPage.WINDOW
 			val idle = state.terrainStatus.phase == FlightTerrainPhase.IDLE ||
 				state.terrainStatus.phase == FlightTerrainPhase.READY
@@ -343,6 +343,14 @@ fun FlightModeScreen(
 					Text(state.journeyName,Modifier.weight(1f),color=FlightText,fontSize=11.sp,maxLines=1)
 					if(state.sessionMode==FlightSessionMode.PREPARE) TextButton(onClick={onPageChange(FlightPage.PREPARE)}) {
 						Text(stringResource(R.string.flight_edit_plan),fontSize=11.sp)
+					}
+				}
+				val recorder = state.liveState
+				if (!recorder.running && recorder.journeyId != null && recorder.journeyId == state.journeyId) {
+					recorder.error?.let { error ->
+						Text(stringResource(R.string.flight_live_recording_failed, error),
+							color=FlightWarning, fontSize=12.sp,
+							modifier=Modifier.fillMaxWidth().background(FlightPanelStrong).padding(6.dp))
 					}
 				}
 			}
@@ -751,7 +759,7 @@ private fun MapScreen(
 	var mapRotation by remember(mapView) { mutableStateOf(mapView?.rotate ?: 0f) }
 	var mapElevation by remember(mapView) { mutableStateOf(mapView?.elevationAngle ?: 90f) }
 	var openGlRendererAttached by remember(mapView) { mutableStateOf(mapView?.hasMapRenderer() == true) }
-	LaunchedEffect(mapView, targetScalePixels) {
+	FlightResumedEffect(mapView, targetScalePixels) {
 		while (true) {
 			mapView?.let { view ->
 				val tileBox = view.currentRotatedTileBox
@@ -1026,6 +1034,8 @@ private fun CompactAction(text: String, color: Color, onClick: () -> Unit, modif
 
 @Composable
 private fun LiveTimelineAction(state: FlightUiState, onReturnLive: () -> Unit) {
+	Column(Modifier.fillMaxWidth().background(FlightPanelStrong)) {
+	FlightLiveFixNotice(state.liveState)
 	Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
 		val future = (state.snapshot?.sample?.timestampMillis ?: 0L) >
 			(state.liveState.latest?.timestampMillis ?: Long.MAX_VALUE)
@@ -1034,6 +1044,7 @@ private fun LiveTimelineAction(state: FlightUiState, onReturnLive: () -> Unit) {
 			color = if (future) FlightWarning else FlightGreen, fontSize = 10.sp,
 			modifier = Modifier.weight(1f).padding(horizontal = 6.dp))
 		CompactAction(stringResource(R.string.flight_return_live), FlightGreen, onReturnLive)
+	}
 	}
 }
 
@@ -1078,9 +1089,9 @@ private fun WindowScreen(
 	val overlayPhoto = state.windowPhotoOverlay.photoId?.let { photoId ->
 		(state.photos + state.pendingPhotos).firstOrNull { it.id == photoId }
 	}
-	val photoProgress = remember(state.trip, state.photos, state.pendingPhotos) {
+	val photoProgress = remember(state.trip, state.liveTimeline, state.photos, state.pendingPhotos) {
 		(state.photos + state.pendingPhotos).mapNotNull { photo ->
-			FlightSampleInterpolator.progressAt(state.trip, photo.matchedSamplePosition)
+			state.progressForRecordedPhoto(photo.matchedSamplePosition)
 		}.filter(Float::isFinite).distinct().sorted()
 	}
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
@@ -1094,6 +1105,7 @@ private fun WindowScreen(
 				sample = state.snapshot?.sample,
 				scene = state.terrainScene,
 				terrainStatus = state.terrainStatus,
+				rendererRecovery = state.terrainRendererRecovery,
 				terrainRenderStats = state.terrainRenderStats,
 				altitudeOverrideMeters = state.windowAltitudeOverrideMeters,
 				shadingEnabled = state.plan.shadowsEnabled,
@@ -2629,12 +2641,12 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 		Row(Modifier.fillMaxWidth().background(FlightPanelStrong),verticalAlignment=Alignment.CenterVertically) {
 			if(live.simulation) {
 				Text(stringResource(R.string.flight_immersion_title),color=FlightOrange,fontSize=10.sp)
-				TextButton(onClick={FlightRecordingService.simulationControl(context,live.simulationRate,!live.simulationPaused)}) {
+				TextButton(onClick={FlightRecordingService.simulationControl(context,live.simulationRate,!live.simulationPaused,live.journeyId)}) {
 					Text(if(live.simulationPaused) "▶" else "Ⅱ",fontSize=12.sp)
 				}
 				TextButton(onClick={
 					val rates=listOf(1,10,60,300)
-					FlightRecordingService.simulationControl(context,rates[(rates.indexOf(live.simulationRate)+1)%rates.size],live.simulationPaused)
+					FlightRecordingService.simulationControl(context,rates[(rates.indexOf(live.simulationRate)+1)%rates.size],live.simulationPaused,live.journeyId)
 				}) { Text("×${live.simulationRate}",fontSize=11.sp) }
 			}
 			Spacer(Modifier.weight(1f))
@@ -3010,6 +3022,7 @@ private fun FlightWindowScene(
 	sample: FlightSample?,
 	scene: FlightTerrainScene?,
 	terrainStatus: FlightTerrainStatus,
+	rendererRecovery: FlightRendererRecovery,
 	terrainRenderStats: FlightTerrainRenderStats,
 	altitudeOverrideMeters: Float?,
 	shadingEnabled: Boolean,
@@ -3116,6 +3129,7 @@ private fun FlightWindowScene(
 			}
 	) {
 		FlightTerrainSurface(
+			rendererRevision = rendererRecovery.revision,
 			scene = scene,
 			sample = sample,
 			windowPlacement = placement,
@@ -3141,6 +3155,26 @@ private fun FlightWindowScene(
 		}
 		if (!placement.cabinHidden) {
 			FlightCabinWindowOverlay(placement, look, Modifier.fillMaxSize())
+		}
+		val aperture = FlightWindowAperture.project(placement, look, sceneAspectRatio)
+		val message = when {
+			rendererRecovery.error != null -> stringResource(R.string.flight_window_renderer_failed, rendererRecovery.error)
+			sample == null -> stringResource(R.string.flight_window_waiting_position)
+			scene == null && terrainStatus.phase != FlightTerrainPhase.ERROR -> stringResource(R.string.flight_window_loading_scene)
+			!placement.cabinHidden && !placement.cabinTransparent && !aperture.visible -> stringResource(R.string.flight_window_looking_at_cabin)
+			else -> null
+		}
+		if (message != null) {
+			Column(Modifier.align(Alignment.Center).background(Color(0xE611181E)).padding(8.dp),
+				horizontalAlignment = Alignment.CenterHorizontally) {
+				Text(message, color = FlightText, fontSize = 12.sp, textAlign = TextAlign.Center,
+					maxLines = 5, overflow = TextOverflow.Ellipsis)
+				if (rendererRecovery.error != null) TextButton(onClick = onRetryTerrain) {
+					Text(stringResource(R.string.flight_window_retry_renderer))
+				} else if (sample != null && scene != null && !aperture.visible) {
+					TextButton(onClick = onRecenterLook) { Text(stringResource(R.string.flight_mode_recenter_short)) }
+				}
+			}
 		}
 		FlightCompassOverlay(placement, look, sample, altitudeOverrideMeters, Modifier.fillMaxSize())
 		FlightAircraftForwardOverlay(placement, look, sample, Modifier.fillMaxSize())
@@ -3187,7 +3221,7 @@ private fun FlightWindowScene(
 			)
 		}
 		TerrainStatusOverlay(
-			status = terrainStatus,
+			status = rendererRecovery.error?.let { terrainStatus.copy(phase = FlightTerrainPhase.ERROR, message = it) } ?: terrainStatus,
 			scene = scene,
 			sample = sample,
 			renderStats = terrainRenderStats,
@@ -3416,30 +3450,12 @@ private fun FlightCabinWindowOverlay(
 	modifier: Modifier = Modifier
 ) {
 	Canvas(modifier) {
-		val geometry = placement.geometry()
-		val distance = geometry.eyeToWindowDistanceMeters.coerceAtLeast(0.2f)
-		val fieldOfViewDegrees = placement.verticalFieldOfViewDegrees()
-		val halfFieldOfView = Math.toRadians((fieldOfViewDegrees / 2f).toDouble()).toFloat()
-		val physicalRadius = FlightWindowPlacement.WINDOW_DIAMETER_METERS / 2f
-		val projectedDiameter = (size.height * (physicalRadius / distance) / tan(halfFieldOfView))
-			.coerceIn(size.height * 0.16f, size.height * 0.82f)
-		val horizontalIncidence = geometry.horizontalIncidence.coerceIn(0.30f, 1f)
-		val verticalIncidence = geometry.verticalIncidence.coerceIn(0.45f, 1f)
-		val radiusX = projectedDiameter * horizontalIncidence / 2f
-		val radiusY = projectedDiameter * verticalIncidence / 2f
-		val shear = (placement.forwardOffsetMeters * placement.verticalOffsetMeters /
-			(FlightWindowPlacement.WALL_DISTANCE_METERS * FlightWindowPlacement.WALL_DISTANCE_METERS))
-			.coerceIn(-0.45f, 0.45f) * radiusX
-		val aspect = size.width / size.height.coerceAtLeast(1f)
-		val horizontalFieldOfView = 2f * atan(tan(halfFieldOfView) * aspect)
-		val center = Offset(
-			size.width / 2f - Math.toRadians(look.yawDegrees.toDouble()).toFloat() /
-				horizontalFieldOfView.coerceAtLeast(0.01f) * size.width,
-			size.height / 2f + Math.toRadians(look.pitchDegrees.toDouble()).toFloat() /
-				(halfFieldOfView * 2f).coerceAtLeast(0.01f) * size.height
-		)
-		val windowVisible = center.x + radiusX >= 0f && center.x - radiusX <= size.width &&
-			center.y + radiusY >= 0f && center.y - radiusY <= size.height
+		val aperture = FlightWindowAperture.project(placement, look, size.width / size.height.coerceAtLeast(1f))
+		val center = Offset(aperture.centerX * size.height, aperture.centerY * size.height)
+		val radiusX = aperture.radiusX * size.height
+		val radiusY = aperture.radiusY * size.height
+		val shear = aperture.shear * size.height
+		val windowVisible = aperture.visible
 		val windowPath = Path()
 		if (windowVisible) {
 			for (step in 0..48) {
@@ -3638,6 +3654,7 @@ private fun TerrainStatusOverlay(
 				expanded -> terrainCurrentTileDetails(scene, sample) + "\n" +
 					terrainRuntimeStatusText(status, renderStats) + "\nTOUCHER POUR REFERMER"
 				working -> terrainStatusText(status) + "\n" + terrainCurrentTileSummary(scene, sample)
+				scene != null && scene.meshes.none { it.terrainAvailable } -> stringResource(R.string.flight_window_no_terrain)
 				else -> terrainCurrentTileSummary(scene, sample)
 			},
 			color = if (status.phase == FlightTerrainPhase.ERROR || tileWarning) FlightWarning else FlightText,

@@ -65,4 +65,28 @@ class FlightLiveSimulationTest {
         assertEquals(165_000L, clock.advance(3500))
         assertEquals(175_000L, clock.advance(500_000))
     }
+
+    @Test
+    fun invisibleSimulationCannotAdvanceAndResumeDoesNotCatchUp() {
+        val clock = FlightSimulationClock(100_000)
+        clock.rebase(1000)
+        assertEquals(160_000L, clock.advance(2000))
+        clock.backgroundPaused = true
+        assertEquals(160_000L, clock.advance(3_600_000))
+        clock.backgroundPaused = false
+        clock.rebase(7_200_000)
+        assertEquals(166_000L, clock.advance(7_200_100))
+    }
+
+    @Test
+    fun returningToForegroundNeverClearsManualPause() {
+        val clock = FlightSimulationClock(100_000)
+        clock.paused = true
+        clock.backgroundPaused = true
+        clock.rebase(1000)
+        clock.backgroundPaused = false
+        clock.rebase(100_000)
+        assertEquals(100_000L, clock.advance(101_000))
+        assertTrue(clock.paused)
+    }
 }

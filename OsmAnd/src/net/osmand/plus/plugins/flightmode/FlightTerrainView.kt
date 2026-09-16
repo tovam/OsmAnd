@@ -29,11 +29,22 @@ class FlightTerrainView @JvmOverloads constructor(
 
 	private var rendererErrorListener: ((String) -> Unit)? = null
 	private var renderStatsListener: ((FlightTerrainRenderStats) -> Unit)? = null
+	private var paused = false
+	private val retryFrame = Runnable { if (!paused && isAttachedToWindow) requestRender() }
 	private val terrainRenderer = TerrainRenderer(
 		onError = { message -> post { rendererErrorListener?.invoke(message) } },
 		onStats = { stats -> post { renderStatsListener?.invoke(stats) } },
-		requestFrame = { post { requestRender() } }
+		requestFrame = { post { if (!paused && isAttachedToWindow) requestRender() } },
+		requestRetryFrame = { post { if (!paused) { removeCallbacks(retryFrame); postDelayed(retryFrame, 1_000L) } } }
 	)
+
+	fun release() {
+		// Pending callbacks from a replaced GL surface must not poison its replacement.
+		rendererErrorListener = null
+		renderStatsListener = null
+		onPause()
+		terrainRenderer.stopPreparation()
+	}
 
 	init {
 		setEGLContextClientVersion(2)
@@ -44,8 +55,25 @@ class FlightTerrainView @JvmOverloads constructor(
 	}
 
 	override fun onDetachedFromWindow() {
+		removeCallbacks(retryFrame)
 		super.onDetachedFromWindow()
 		terrainRenderer.stopPreparation()
+	}
+
+	override fun onPause() {
+		if (paused) return
+		paused = true
+		removeCallbacks(retryFrame)
+		// Wait for the GL thread before closing staging: it must not reopen the queue mid-pause.
+		super.onPause()
+		terrainRenderer.stopPreparation()
+	}
+
+	override fun onResume() {
+		paused = false
+		super.onResume()
+		// onDrawFrame reopens staging; the resident GL textures/meshes remain reusable.
+		requestRender()
 	}
 
 	fun updateScene(
@@ -82,13 +110,14 @@ class FlightTerrainView @JvmOverloads constructor(
 			spatialPhoto,
 			inspection
 		)
-		requestRender()
+		if (!paused) requestRender()
 	}
 
 	private class TerrainRenderer(
 		private val onError: (String) -> Unit,
 		private val onStats: (FlightTerrainRenderStats) -> Unit,
-		private val requestFrame: () -> Unit
+		private val requestFrame: () -> Unit,
+		private val requestRetryFrame: () -> Unit
 	) : GLSurfaceView.Renderer {
 
 		@Volatile
@@ -202,11 +231,21 @@ class FlightTerrainView @JvmOverloads constructor(
 		}
 
 		override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+			// Context loss invalidates every GL name. Clear the default surface even on init failure.
+			shadowFrameBuffer = 0
+			shadowDepthBuffer = 0
+			shadowTexture = 0
+			shadowAvailable = false
+			clearDefaultFrameBuffer(floatArrayOf(SKY_RED, SKY_GREEN, SKY_BLUE))
 			try {
 				program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
-				shadowProgram = createProgram(SHADOW_VERTEX_SHADER, SHADOW_FRAGMENT_SHADER)
-				photoProgram = createProgram(PHOTO_VERTEX_SHADER, PHOTO_FRAGMENT_SHADER)
-				inspectionRenderer = FlightInspectionRenderer()
+				// Optional effects must not take the terrain down with them.
+				shadowProgram = optionalProgram("Shadows", SHADOW_VERTEX_SHADER, SHADOW_FRAGMENT_SHADER)
+				photoProgram = optionalProgram("Photo", PHOTO_VERTEX_SHADER, PHOTO_FRAGMENT_SHADER)
+				inspectionRenderer = try { FlightInspectionRenderer() } catch (error: RuntimeException) {
+					onError("Photo inspection: ${error.message}")
+					null
+				}
 				positionLocation = GLES20.glGetAttribLocation(program, "aPosition")
 				normalLocation = GLES20.glGetAttribLocation(program, "aNormal")
 				elevationLocation = GLES20.glGetAttribLocation(program, "aElevation")
@@ -245,7 +284,12 @@ class FlightTerrainView @JvmOverloads constructor(
 				photoColorOffsetLocation = GLES20.glGetUniformLocation(photoProgram, "uColorOffset")
 				shadowPositionLocation = GLES20.glGetAttribLocation(shadowProgram, "aPosition")
 				shadowMvpLocation = GLES20.glGetUniformLocation(shadowProgram, "uLightMvp")
-				shadowAvailable = createShadowResources()
+				shadowAvailable = shadowProgram != 0 && try { createShadowResources() } catch (error: RuntimeException) {
+					releaseShadowResources()
+					onError("Shadows: ${error.message}")
+					false
+				}
+				GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
 				uploadedGeneration = Long.MIN_VALUE
 				displayedScene = null
 				retryUploadAfterNanos = 0L
@@ -275,6 +319,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			}
 		}
 
+		private fun optionalProgram(label: String, vertex: String, fragment: String): Int = try {
+			createProgram(vertex, fragment)
+		} catch (error: RuntimeException) {
+			onError("$label: ${error.message}")
+			0
+		}
+
 		override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
 			surfaceWidth = width.coerceAtLeast(1)
 			surfaceHeight = height.coerceAtLeast(1)
@@ -282,8 +333,19 @@ class FlightTerrainView @JvmOverloads constructor(
 		}
 
 		override fun onDrawFrame(gl: GL10?) {
+			try {
+				drawFrame()
+			} catch (error: RuntimeException) {
+				// Keep the GL thread alive so an explicit retry can replace this surface.
+				program = 0
+				clearDefaultFrameBuffer(floatArrayOf(SKY_RED, SKY_GREEN, SKY_BLUE))
+				onError(error.message ?: "OpenGL rendering failed")
+			}
+		}
+
+		private fun drawFrame() {
 			if (program == 0) {
-				GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+				clearDefaultFrameBuffer(floatArrayOf(SKY_RED, SKY_GREEN, SKY_BLUE))
 				return
 			}
 			val currentViewState = viewState
@@ -331,21 +393,28 @@ class FlightTerrainView @JvmOverloads constructor(
 					// Keep every last-good resource and its coordinate origin; retry this revision.
 					retryUploadAfterNanos = System.nanoTime() + 1_000_000_000L
 					onError(error.message ?: "Terrain GPU upload failed")
+					requestRetryFrame()
 				}
 			}
 			if (uploadedGeneration != currentScene.generation) {
+				// Workers wake us when data arrives. Only already-ready uploads need another frame.
+				if (System.nanoTime() >= retryUploadAfterNanos && currentScene.meshes.any { mesh ->
+					val key = FlightPreparedAssets.GeometryKey(mesh.vertices, mesh.indices)
+					key !in geometryCache && preparation.isReady(key)
+				}) requestFrame()
 				currentScene = displayedScene ?: currentScene
-				requestFrame()
 			}
 			processTextureUploads()
 			publishRenderStats()
 			if (renderMeshes.isEmpty()) {
 				clearDefaultFrameBuffer(sky)
-				if (pendingTextureUploads.isNotEmpty()) requestFrame()
+				requestReadyTextureFrame()
 				return
 			}
 
-			val ground = currentScene.centerGroundElevationMeters ?: 0f
+			// The aircraft can move 8 km before retargeting. The old centre may be a valley,
+			// so using its elevation can put a low-altitude camera inside the new hillside.
+			val ground = FlightTerrainFloor.elevationAt(currentScene.meshes, latitude, longitude) ?: 0f
 			val reportedAltitude = currentViewState.altitudeOverrideMeters
 				?: currentSample?.altitudeMeters?.toFloat()
 				?: DEFAULT_FLIGHT_ALTITUDE_METERS
@@ -481,7 +550,13 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 			drawSpatialPhoto(currentScene, currentSpatialPhoto, mvp)
 			inspection?.let { inspectionRenderer?.draw(it, coordinates, camera, mvp) }
-			if (pendingTextureUploads.isNotEmpty()) requestFrame()
+			requestReadyTextureFrame()
+		}
+
+		private fun requestReadyTextureFrame() {
+			if (preparationDirty || pendingTextureUploads.any { path ->
+				imageKeys[path]?.let(preparation::isReady) == true
+			}) requestFrame()
 		}
 
 		private fun windowProjection(placement: FlightWindowPlacement, radiusKm: Int): FloatArray {

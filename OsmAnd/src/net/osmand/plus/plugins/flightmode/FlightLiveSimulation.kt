@@ -90,13 +90,19 @@ internal class FlightSimulationClock(val start: Long) {
 
     var rate: Int = 60
     var paused: Boolean = false
+    var backgroundPaused: Boolean = false
+
+    fun rebase(elapsed: Long) {
+        previousElapsed = elapsed
+    }
+
     private var previousElapsed: Long? = null
 
     fun advance(elapsed: Long): Long {
         val previous = previousElapsed
         previousElapsed = elapsed
         // Do not replay hours in one worker turn after Android suspends the process.
-        if (previous != null && !paused)
+        if (previous != null && !paused && !backgroundPaused)
             time += (elapsed - previous).coerceIn(0, 1000) * rate.coerceIn(1, 300)
         return time
     }

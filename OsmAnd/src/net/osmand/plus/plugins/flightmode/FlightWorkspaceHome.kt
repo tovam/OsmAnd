@@ -100,7 +100,7 @@ internal fun FlightWorkspaceHome(
             }
         }
         if (state.loadingTrip) LinearProgressIndicator(Modifier.fillMaxWidth())
-        (state.tripLoadError ?: state.journeyMessage)?.let {
+        (state.tripLoadError ?: state.activeRecording.error ?: state.journeyMessage)?.let {
             Text(it, color = Color(0xFFFFCC66), fontSize = 12.sp, modifier = Modifier.padding(8.dp))
         }
     }

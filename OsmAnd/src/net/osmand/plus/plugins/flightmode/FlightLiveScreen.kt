@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -17,6 +18,29 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.*
 import kotlinx.coroutines.delay
 import net.osmand.plus.R
+
+/** Visible in both Map and Window: a stopped fix is not an apparently healthy live flight. */
+@Composable
+internal fun FlightLiveFixNotice(live: FlightLiveState) {
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    FlightResumedEffect(live.running) {
+        while (live.running) { now = SystemClock.elapsedRealtime(); delay(1000) }
+    }
+    if (!live.running) return
+    val health = FlightLiveSafety.fixHealth(live.latest, live.lastFixElapsed, now)
+    val accuracy = live.latest?.horizontalAccuracyMeters
+    val message = when {
+        live.error != null -> live.error
+        live.simulation -> null
+        health == FlightFixHealth.WAITING -> stringResource(R.string.flight_live_waiting_fix_notice)
+        health == FlightFixHealth.STALE -> stringResource(R.string.flight_live_stale_fix_notice)
+        accuracy != null && accuracy > 100f -> stringResource(R.string.flight_live_inaccurate_fix_notice, accuracy)
+        live.latest?.altitudeMeters == null -> stringResource(R.string.flight_live_altitude_missing_notice)
+        else -> null
+    }
+    if (message != null) Text(message, color = Color(0xFFFFBD39), fontSize = 11.sp,
+        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+}
 
 /** A compact cockpit observes the recorder; disposing this page never stops the service. */
 @Composable
@@ -28,7 +52,9 @@ internal fun FlightLiveScreen(
 ) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     var confirmStop by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+    var confirmAirborne by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    FlightResumedEffect(Unit) {
         while (true) {
             delay(1000)
             now = SystemClock.elapsedRealtime()
@@ -59,6 +85,11 @@ internal fun FlightLiveScreen(
                 color = if (live.running) Color(0xFF2CDBBE) else Color.LightGray,
                 fontSize = 13.sp,
             )
+            if (live.running && live.tracking.phase == FlightTrackingPhase.WAITING &&
+                fix?.speedMetersPerSecond?.let { it * 3.6 > (state.plan.preparation ?: FlightPreparation()).airborneSpeedKmh } == true) {
+                PlanAction(stringResource(R.string.flight_live_confirm_airborne), { confirmAirborne = true },
+                    enabled = age != null && age <= 15 && fix?.horizontalAccuracyMeters?.let { it in 0f..100f } == true)
+            }
             LiveRow(
                 stringResource(R.string.flight_live_speed),
                 fix?.speedMetersPerSecond?.let { "%.0f km/h".format(it * 3.6) } ?: "—",
@@ -153,6 +184,16 @@ internal fun FlightLiveScreen(
         if (live.running)
             PlanAction(stringResource(R.string.flight_live_stop), { confirmStop = true })
     }
+    if (confirmAirborne) AlertDialog(
+        onDismissRequest = { confirmAirborne = false },
+        title = { Text(stringResource(R.string.flight_live_confirm_airborne)) },
+        text = { Text(stringResource(R.string.flight_live_confirm_airborne_hint)) },
+        confirmButton = { PlanAction(stringResource(R.string.shared_string_ok), {
+            confirmAirborne = false
+            FlightRecordingService.confirmAirborne(context, state.journeyId)
+        }) },
+        dismissButton = { PlanAction(stringResource(R.string.shared_string_cancel), { confirmAirborne = false }) },
+    )
     if (confirmStop)
         AlertDialog(
             onDismissRequest = { confirmStop = false },

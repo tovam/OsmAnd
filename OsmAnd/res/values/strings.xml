@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_live_recording_failed">Enregistrement inactif : %1$s</string>
+    <string name="flight_live_confirm_airborne">Déjà en vol</string>
+    <string name="flight_live_confirm_airborne_hint">GPS acquis après le décollage ? Confirmer le vol active la détection automatique de fin à l’atterrissage.</string>
+    <string name="flight_window_renderer_failed">Affichage 3D interrompu : %1$s</string>
+    <string name="flight_window_retry_renderer">Relancer l’affichage 3D</string>
+    <string name="flight_window_waiting_position">En attente de position · aucun paysage calculable</string>
+    <string name="flight_window_loading_scene">Préparation du paysage…</string>
+    <string name="flight_window_no_terrain">Relief indisponible ici · vérifier les tuiles hors ligne</string>
+    <string name="flight_window_looking_at_cabin">Regard vers la carlingue · recentrer sur le hublot</string>
+    <string name="flight_live_waiting_fix_notice">GPS : en attente du premier point</string>
+    <string name="flight_live_stale_fix_notice">GPS perdu · dernière position conservée</string>
+    <string name="flight_live_inaccurate_fix_notice">GPS imprécis : ±%1$.0f m</string>
+    <string name="flight_live_altitude_missing_notice">Altitude GPS absente · hauteur 3D estimée</string>
+    <string name="flight_simulation_running_notice">Simulation visible · GPS réel désactivé</string>
+    <string name="flight_simulation_paused_notice">Simulation suspendue · capteurs arrêtés</string>
     <string name="flight_camera_main">Principal</string>
     <string name="flight_camera_ultrawide">Ultra-grand-angle</string>
     <string name="flight_camera_telephoto">Téléobjectif</string>

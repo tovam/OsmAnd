@@ -6,22 +6,32 @@ import kotlin.math.*
 internal class FlightLivePredictor {
     private var fix: FlightSample? = null
     private var receivedAt = 0L
+    private var correctedAt = 0L
     private var correctionFrom: FlightSample? = null
     private var timeScale = 1.0
 
     fun reset() {
         fix = null
         receivedAt = 0
+        correctedAt = 0
         correctionFrom = null
         timeScale = 1.0
     }
 
-    fun accept(sample: FlightSample, elapsed: Long, rate: Double = 1.0) {
-        timeScale = rate.coerceIn(0.0, 300.0)
+    fun accept(
+        sample: FlightSample,
+        elapsed: Long,
+        rate: Double = 1.0,
+        fixReceivedAt: Long? = elapsed,
+    ) {
+        val previousPosition = position(elapsed)
+        timeScale = if (fixReceivedAt != null) rate.coerceIn(0.0, 300.0) else 0.0
         if (sample.timestampMillis == fix?.timestampMillis) return
-        correctionFrom = position(elapsed)
+        correctionFrom = previousPosition
         fix = sample
-        receivedAt = elapsed
+        correctedAt = elapsed
+        // Reopening the UI must not make a restored/old fix fresh again.
+        receivedAt = fixReceivedAt ?: elapsed
     }
 
     fun position(elapsed: Long): FlightSample? {
@@ -46,7 +56,8 @@ internal class FlightLivePredictor {
                 longitude = ((Math.toDegrees(newLon) + 540) % 360) - 180,
             )
         val from = correctionFrom ?: return predicted
-        val blend = (realSeconds / if(timeScale == 1.0) 1.2 else 0.12).coerceIn(0.0, 1.0)
+        val correctionSeconds = ((elapsed - correctedAt) / 1000.0).coerceAtLeast(0.0)
+        val blend = (correctionSeconds / if (timeScale == 1.0) 1.2 else 0.12).coerceIn(0.0, 1.0)
         val point =
             FlightTerrainTilePlanner.greatCircleInterpolate(
                 from.latitude to from.longitude,

@@ -137,6 +137,16 @@ data class FlightTrackingState(
     val slowSinceMillis: Long? = null,
     val lastFixMillis: Long? = null,
 ) {
+    /** Explicit recovery when the first usable GPS fix arrives after takeoff. */
+    fun confirmAirborne(sample: FlightSample, nowMillis: Long, plan: FlightPreparation): FlightTrackingState {
+        if (phase != FlightTrackingPhase.WAITING ||
+            nowMillis - sample.timestampMillis !in -2000..15_000 ||
+            sample.horizontalAccuracyMeters?.let { it in 0f..100f } != true ||
+            sample.speedMetersPerSecond?.let { it.isFinite() && it * 3.6 > plan.airborneSpeedKmh } != true
+        ) return this
+        return copy(phase = FlightTrackingPhase.AIRBORNE, slowSinceMillis = null, lastFixMillis = sample.timestampMillis)
+    }
+
     fun accept(
         sample: FlightSample,
         nowMillis: Long,
@@ -145,7 +155,7 @@ data class FlightTrackingState(
         if (phase == FlightTrackingPhase.LANDED || phase == FlightTrackingPhase.STOPPED) return this
         val age = nowMillis - sample.timestampMillis
         val reliable =
-            age in -2000..15_000 && sample.horizontalAccuracyMeters?.let { it <= 100f } == true
+            age in -2000..15_000 && sample.horizontalAccuracyMeters?.let { it in 0f..100f } == true
         if (!reliable || (lastFixMillis != null && sample.timestampMillis <= lastFixMillis))
             return copy(slowSinceMillis = null)
         val baseline = baselineAltitude ?: sample.altitudeMeters
