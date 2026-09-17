@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_cal_local_relief_missing">Relief hors ligne absent pour le repère (%1$.5f, %2$.5f). Précharge cette zone avant le vol. Aucun téléchargement n’est lancé par le calcul.</string>
     <string name="flight_journey_logical_id">ID voyage · %1$s</string>
     <string name="flight_export_separate_track_note">L’export crée une archive de vol avec GPX. Le suivi GPS de ce vol n’est pas ajouté aux traces OsmAnd ordinaires.</string>
     <string name="flight_local_saving_metadata">Points GPS déjà enregistrés · sauvegarde des modifications</string>
