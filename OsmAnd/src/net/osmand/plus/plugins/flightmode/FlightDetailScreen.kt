@@ -291,6 +291,11 @@ internal fun FlightDetailScreen(
                         Text(stringResource(R.string.flight_detail_clone), fontSize = 12.sp)
                     }
             }
+            Text(
+                stringResource(R.string.flight_export_separate_track_note),
+                color = Color.LightGray,
+                fontSize = 10.sp,
+            )
         }
     }
     if (confirmStart)
