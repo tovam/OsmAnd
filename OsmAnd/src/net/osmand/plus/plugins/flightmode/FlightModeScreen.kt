@@ -880,6 +880,7 @@ private fun MapScreen(
 			FlightProfileView(
 				profile = altitudeProfile.profile,
 				progress = altitudeProfile.progress(sample?.timestampMillis, state.replayProgress),
+				futureStartProgress = flightProfileFutureStart(altitudeProfile.trip, state.liveState.latest?.timestampMillis),
 				flightSpans = state.flightSpans,
 				pendingStartProgress = state.pendingFlightStartProgress,
 				modifier = Modifier.fillMaxWidth().height(122.dp).background(FlightHudPanel).padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1180,6 +1181,7 @@ private fun WindowScreen(
 					FlightProfileView(
 						profile = altitudeProfile.profile,
 						progress = altitudeProfile.progress(state.snapshot?.sample?.timestampMillis, state.replayProgress),
+						futureStartProgress = flightProfileFutureStart(altitudeProfile.trip, state.liveState.latest?.timestampMillis),
 						flightSpans = state.flightSpans,
 						photoProgress = photoProgress,
 						modifier = Modifier.fillMaxWidth().height(66.dp).background(FlightPanelStrong)
@@ -2843,6 +2845,7 @@ private fun AltitudeProfileSelector(includeFuture: Boolean, onChange: (Boolean) 
 private fun FlightProfileView(
 	profile: FlightProfile,
 	progress: Float?,
+	futureStartProgress: Float? = null,
 	flightSpans: List<FlightSpan> = emptyList(),
 	pendingStartProgress: Float? = null,
 	photoProgress: List<Float> = emptyList(),
@@ -2884,14 +2887,19 @@ private fun FlightProfileView(
 			drawLine(FlightLine.copy(alpha = 0.7f), Offset(left, y), Offset(right, y), 1.dp.toPx())
 		}
 		profile.legs.forEach { leg ->
-			val path = Path()
-			leg.points.forEachIndexed { pointIndex, point ->
-				val x = left + (right - left) * point.progress
-				val y = bottom - chartHeight * (point.altitudeMeters / maxAltitude)
-				if (pointIndex == 0) path.moveTo(x, y) else path.lineTo(x, y)
-			}
 			val lineColor = if (profile.recorded) FlightBlue else if (leg.index % 2 == 0) FlightOrange else FlightBlue
-			drawPath(path, lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+			val (measured, future) = splitFlightProfilePoints(leg.points, futureStartProgress)
+			listOf(measured, future).forEachIndexed { sectionIndex, points ->
+				val path = Path()
+				points.forEachIndexed { pointIndex, point ->
+					val x = left + (right - left) * point.progress
+					val y = bottom - chartHeight * (point.altitudeMeters / maxAltitude)
+					if (pointIndex == 0) path.moveTo(x, y) else path.lineTo(x, y)
+				}
+				drawPath(path, lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round,
+					pathEffect = if (sectionIndex == 1) androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+						floatArrayOf(2.dp.toPx(), 4.dp.toPx())) else null))
+			}
 			if (!profile.recorded && leg.index < profile.legs.lastIndex) {
 				val stopX = left + (right - left) * leg.endProgress
 				drawLine(FlightWarning.copy(alpha = 0.65f), Offset(stopX, top), Offset(stopX, bottom), 1.dp.toPx())
