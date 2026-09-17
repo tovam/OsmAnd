@@ -207,6 +207,8 @@ internal fun FlightLibraryGpsLabel(id: String?, state: FlightUiState) {
             kotlinx.coroutines.delay(if (activeHere) 1000 else 30_000)
         } while (activeHere || alarm != null)
     }
+    // The one-second timer can precede a just-received fix. Read the clock at display time.
+    val displayElapsed = flightDisplayElapsed(elapsed, android.os.SystemClock.elapsedRealtime())
     val status =
         flightLibraryGpsState(
             id,
@@ -214,7 +216,7 @@ internal fun FlightLibraryGpsLabel(id: String?, state: FlightUiState) {
             state.localSchedules,
             state.localSchedulesLoaded,
             state.scheduleRequirementsMet,
-            elapsed,
+            displayElapsed,
             wall,
         )
     val label =

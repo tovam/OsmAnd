@@ -27,7 +27,7 @@ internal fun FlightLiveFixNotice(live: FlightLiveState) {
         while (live.running) { now = SystemClock.elapsedRealtime(); delay(1000) }
     }
     if (!live.running) return
-    val health = FlightLiveSafety.fixHealth(live.latest, live.lastFixElapsed, now)
+    val health = FlightLiveSafety.fixHealth(live.latest, live.lastFixElapsed, flightDisplayElapsed(now, SystemClock.elapsedRealtime()))
     val accuracy = live.latest?.horizontalAccuracyMeters
     val message = when {
         live.error != null -> live.error
