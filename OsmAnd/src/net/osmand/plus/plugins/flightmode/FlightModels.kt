@@ -16,6 +16,7 @@ enum class FlightPage {
 	LIVE,
 	MAP,
 	WINDOW,
+	MIXED,
 	WINDOW_SETUP,
 	SATELLITE,
 	SENSORS,

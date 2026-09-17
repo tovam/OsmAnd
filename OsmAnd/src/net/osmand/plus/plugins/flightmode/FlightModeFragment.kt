@@ -34,6 +34,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private var previousHudVisibility = View.VISIBLE
 	private var previousMapState: MapState? = null
 	private var lastMapRefreshMillis = 0L
+	private var splitMapViewport: FlightSplitMapViewport? = null
+	private var splitMapBounds: android.graphics.Rect? = null
 	private var mapInteractionBlockerLayer: FlightMapInteractionBlockerLayer? = null
 	private var replayMapLayer: FlightReplayMapLayer? = null
 	private var previousGpxObjectsDelegate: OsmandMapLayer.CustomMapObjects<SelectedGpxFile>? = null
@@ -128,6 +130,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onToggleReplay = viewModel::toggleReplayPlaying,
 					onAdvanceReplay = viewModel::advanceReplay,
 					onMapState = ::showReplayStateOnMap,
+					onSplitMapBounds = ::updateSplitMapBounds,
 					onSetWindowAltitudeOverride = viewModel::setWindowAltitudeOverride,
 					onMoveWindow = viewModel::moveWindow,
 					onSaveWindowPlacement = viewModel::saveWindowPlacement,
@@ -235,6 +238,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		disableNativeFlightRelief()
 		suppressSurfaceGpxTracks()
 		installMapInteractionGuard()
+		splitMapBounds?.let(::updateSplitMapBounds)
 		activity.refreshMap()
 	}
 
@@ -242,6 +246,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		viewModel.setUiVisible(false)
 		viewModel.saveWindowPlacement()
 		cancelNativeMapGesture()
+		splitMapViewport?.restore()
 		removeMapInteractionGuard()
 		restoreSurfaceGpxTracks()
 		restoreMapState()
@@ -260,6 +265,9 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		// a fragment transaction or activity recreation must never leave a flight
 		// layer or an unfinished gesture attached to OsmAnd's shared map view.
 		cancelNativeMapGesture()
+		splitMapViewport?.dispose()
+		splitMapViewport = null
+		splitMapBounds = null
 		removeMapInteractionGuard()
 		restoreSurfaceGpxTracks()
 		restoreMapState()
@@ -295,6 +303,20 @@ class FlightModeFragment : BaseFullScreenFragment() {
 
 	override fun getInsetTargets(): InsetTargetsCollection = InsetTargetsCollection()
 
+	private fun updateSplitMapBounds(bounds: android.graphics.Rect?) {
+		splitMapBounds = bounds?.let { android.graphics.Rect(it) }
+		if (bounds == null) {
+			cancelNativeMapGesture()
+			splitMapViewport?.restore()
+			return
+		}
+		if (!isResumed || viewModel.uiState.page != FlightPage.MIXED) return
+		val activity = requireMapActivity()
+		val viewport = splitMapViewport ?: FlightSplitMapViewport(activity,
+			activity.findViewById(R.id.map_view_with_layers), activity.mapPositionManager).also { splitMapViewport = it }
+		viewport.updateBounds(bounds)
+	}
+
 	private fun showReplayStateOnMap(
 		trip: FlightTrip?,
 		sample: FlightSample?,
@@ -302,11 +324,11 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		photos: List<FlightPhotoAttachment>
 	) {
 		// Photo editing must not rebuild the hidden native flight layer on every finger movement.
-		if (!isResumed || viewModel.uiState.page != FlightPage.MAP) return
+		if (!isResumed || viewModel.uiState.page !in listOf(FlightPage.MAP, FlightPage.MIXED)) return
 		replayMapLayer?.update(trip, sample, showPoints, photos)
 		replayMapLayer?.updateHypothesis(if(viewModel.uiState.sessionMode==FlightSessionMode.LIVE) viewModel.uiState.plan else null,
 			viewModel.uiState.liveState.latest)
-		if (sample == null || viewModel.uiState.page != FlightPage.MAP || !viewModel.uiState.mapFollowing) return
+		if (sample == null || !viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
 		if (viewModel.uiState.mapCenterLocked) {
 			mapView.setTarget31(net.osmand.util.MapUtils.get31TileNumberX(sample.longitude),

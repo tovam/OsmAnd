@@ -87,7 +87,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		} else FlightNetworkAccess.release(offlineOwner)
 		terrainStreamingEngine.reset()
 		uiState = uiState.copy(offlineSimulation = enabled, terrainStatus = FlightTerrainStatus())
-		if (uiState.page in listOf(FlightPage.MAP,FlightPage.WINDOW,FlightPage.WINDOW_SETUP)) {
+		if (uiState.page in listOf(FlightPage.MAP,FlightPage.WINDOW,FlightPage.MIXED,FlightPage.WINDOW_SETUP)) {
 			uiState.snapshot?.sample?.let { terrainStreamingEngine.retry(sceneDemand(it)) }
 		}
 	}
@@ -269,7 +269,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		viewModelScope.launch {
 			snapshotFlow {
 				visualWorkActive && uiState.sessionMode == FlightSessionMode.LIVE && !uiState.browsingLiveTimeline &&
-					uiState.page in listOf(FlightPage.MAP, FlightPage.WINDOW)
+					uiState.page in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED)
 			}.collectLatest { active ->
 				if (!active) return@collectLatest
 				var lastTerrain = 0L
@@ -349,7 +349,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun rebuildLiveTimeline(live: FlightLiveState) {
-		if (!visualWorkActive || uiState.page !in listOf(FlightPage.MAP, FlightPage.WINDOW)) return
+		if (!visualWorkActive || uiState.page !in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED)) return
 		val fix = live.latest ?: return
 		if (liveTimelineJob?.isActive == true) return
 		val plan = uiState.plan
@@ -542,8 +542,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (!FlightWorkspaceNavigation.allows(uiState.sessionMode, page)) return
 		if (page == FlightPage.DETAIL && uiState.page !in listOf(FlightPage.DETAIL, FlightPage.JOURNAL))
 			uiState = uiState.copy(detailReturnPage = uiState.page)
-		if (page !in listOf(FlightPage.MAP, FlightPage.WINDOW)) uiState = uiState.copy(replayPlaying = false)
-		if (page in listOf(FlightPage.MAP, FlightPage.WINDOW) && uiState.sessionMode == FlightSessionMode.PREPARE &&
+		if (page !in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED)) uiState = uiState.copy(replayPlaying = false)
+		if (page in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED) && uiState.sessionMode == FlightSessionMode.PREPARE &&
 			uiState.snapshot == null) {
 			rehearsePreparation(page)
 			return
@@ -585,8 +585,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (page in listOf(FlightPage.HOME, FlightPage.PLANS, FlightPage.JOURNEYS, FlightPage.DETAIL, FlightPage.PREPARE))
 			refreshDeviceState()
 		if (page == FlightPage.JOURNAL) refreshStorageUsage()
+		if (page == FlightPage.MIXED) scheduleTerrainDetailFocus()
 		if (uiState.journeyDirty) schedulePhotoPersistence()
-		if (uiState.sessionMode == FlightSessionMode.LIVE && page in listOf(FlightPage.MAP, FlightPage.WINDOW)) {
+		if (uiState.sessionMode == FlightSessionMode.LIVE && page in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED)) {
 			rebuildLiveTimeline(uiState.liveState)
 		}
 	}
@@ -1207,7 +1208,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	) {
 		if (!visualWorkActive) return
 		// Editing dates/bands is not a 3D consumer. Keep resident data, but do not compete with typing.
-		if (uiState.page !in listOf(FlightPage.MAP,FlightPage.WINDOW,FlightPage.WINDOW_SETUP)) return
+		if (uiState.page !in listOf(FlightPage.MAP,FlightPage.WINDOW,FlightPage.MIXED,FlightPage.WINDOW_SETUP)) return
 		terrainStreamingEngine.submit(sceneDemand(sample), reason)
 	}
 
@@ -1232,6 +1233,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					FlightSceneConsumer.BACKGROUND
 				)
 				FlightPage.WINDOW_SETUP -> setOf(FlightSceneConsumer.WINDOW, FlightSceneConsumer.BACKGROUND)
+				FlightPage.MIXED -> setOf(FlightSceneConsumer.MAP, FlightSceneConsumer.WINDOW, FlightSceneConsumer.BACKGROUND)
 				else -> setOf(FlightSceneConsumer.BACKGROUND)
 			},
 			motion = when {
@@ -1248,7 +1250,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	 * optical axis has remained untouched for the streaming engine's settling interval.
 	 */
 	private fun scheduleTerrainDetailFocus() {
-		if (uiState.page != FlightPage.WINDOW) return
+		if (uiState.page !in listOf(FlightPage.WINDOW, FlightPage.MIXED)) return
 		val sample = uiState.snapshot?.sample ?: previewFlightSample() ?: return
 		val focus = FlightViewGeometry.groundDetailFocus(
 			sample = sample,
@@ -1264,7 +1266,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	/** Once a live focus is stable, let it follow the aircraft without touch jitter. */
 	private fun followTerrainDetailFocus(sample: FlightSample) {
-		if (uiState.page != FlightPage.WINDOW) return
+		if (uiState.page !in listOf(FlightPage.WINDOW, FlightPage.MIXED)) return
 		val current = uiState.terrainDetailFocus
 		if (current == null) {
 			scheduleTerrainDetailFocus()

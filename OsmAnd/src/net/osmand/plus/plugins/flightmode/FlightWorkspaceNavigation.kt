@@ -8,12 +8,14 @@ internal object FlightWorkspaceNavigation {
                 listOf(
                     FlightPage.MAP,
                     FlightPage.WINDOW,
+                    FlightPage.MIXED,
                     FlightPage.SATELLITE,
                 )
             FlightSessionMode.REPLAY ->
                 listOf(
                     FlightPage.MAP,
                     FlightPage.WINDOW,
+                    FlightPage.MIXED,
                     FlightPage.SATELLITE,
                     FlightPage.SENSORS,
                     FlightPage.PHOTO,
@@ -22,6 +24,7 @@ internal object FlightWorkspaceNavigation {
                 listOf(
                     FlightPage.MAP,
                     FlightPage.WINDOW,
+                    FlightPage.MIXED,
                     FlightPage.SATELLITE,
                     FlightPage.SENSORS,
                     FlightPage.PHOTO,

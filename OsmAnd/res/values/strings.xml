@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_mode_mixed">Mixte</string>
     <string name="flight_cadence_current">Point conservé toutes les ~%1$.1f s · %2$s</string>
     <string name="flight_cadence_received">%1$d positions reçues depuis le démarrage GPS · acquisition demandée : 1 s</string>
     <string name="flight_cadence_fixed">intervalle fixe</string>

@@ -247,7 +247,8 @@ fun FlightModeScreen(
 	onOfflineSimulation: (Boolean) -> Unit = {},
 	onSimulateLive: () -> Unit = {},
 	onOpenJourneyDetails: (String) -> Unit = onOpenJourney,
-	onImportPhotos: () -> Unit = onPhotoAction
+	onImportPhotos: () -> Unit = onPhotoAction,
+	onSplitMapBounds: (android.graphics.Rect?) -> Unit = {}
 ) {
 	val cloudContext = LocalContext.current.applicationContext
 	val cloudScope = rememberCoroutineScope()
@@ -308,7 +309,7 @@ fun FlightModeScreen(
 			)
 		}
 		FlightResumedEffect(state.page, state.terrainScene, state.terrainStatus.phase) {
-			val terrainPage = state.page == FlightPage.WINDOW
+			val terrainPage = state.page in listOf(FlightPage.WINDOW, FlightPage.MIXED)
 			val idle = state.terrainStatus.phase == FlightTerrainPhase.IDLE ||
 				state.terrainStatus.phase == FlightTerrainPhase.READY
 			val missingScene = terrainPage && state.terrainScene == null && idle
@@ -320,9 +321,9 @@ fun FlightModeScreen(
 		Box(
 			modifier = Modifier
 				.fillMaxSize()
-				.background(if (state.page == FlightPage.MAP) Color.Transparent else FlightBackground)
+				.background(if (state.page in listOf(FlightPage.MAP, FlightPage.MIXED)) Color.Transparent else FlightBackground)
 				.drawBehind {
-					if (state.page == FlightPage.MAP) {
+					if (state.page in listOf(FlightPage.MAP, FlightPage.MIXED)) {
 						val topInset = safeDrawingInsets.getTop(this).toFloat()
 						val bottomInset = safeDrawingInsets.getBottom(this).toFloat()
 						if (topInset > 0f) {
@@ -438,6 +439,9 @@ fun FlightModeScreen(
 					onTerrainRendererError = onTerrainRendererError,
 					onTerrainRenderStats = onTerrainRenderStats
 				)
+				FlightPage.MIXED -> FlightMixedScreen(state, mapView, onPageChange,
+					{ onSetMapFollowing(false) }, onSplitMapBounds, onMoveWindowLook, onChangeWindowZoom,
+					onRecenterWindowLook, onRetryTerrain, onTerrainRendererError, onTerrainRenderStats)
 				FlightPage.WINDOW_SETUP -> WindowSetupScreen(
 					state = state,
 					onBack = { onPageChange(FlightPage.WINDOW) },
@@ -2528,7 +2532,7 @@ private fun ReplayStepButton(text: String, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPage) -> Unit, overlay: Boolean = false) {
+internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPage) -> Unit, overlay: Boolean = false, minimalChrome: Boolean = false) {
 	val selected = state.page
 	val pages = FlightWorkspaceNavigation.pages(state.sessionMode).map { page ->
 		page to stringResource(when (page) {
@@ -2537,6 +2541,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 			FlightPage.LIVE -> R.string.flight_live_title
 			FlightPage.MAP -> R.string.flight_mode_map
 			FlightPage.WINDOW -> R.string.flight_mode_window
+			FlightPage.MIXED -> R.string.flight_mode_mixed
 			FlightPage.SATELLITE -> R.string.flight_mode_cached_tiles_short
 			FlightPage.SENSORS -> R.string.flight_mode_sensors
 			FlightPage.PHOTO -> R.string.flight_mode_photo
@@ -2547,10 +2552,10 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 	Column {
 	val context=LocalContext.current
 	val live=state.recordingForSelectedFlight()
-	if(live.simulation && !live.running && live.tracking.phase in listOf(FlightTrackingPhase.LANDED,FlightTrackingPhase.STOPPED))
+	if(!minimalChrome && live.simulation && !live.running && live.tracking.phase in listOf(FlightTrackingPhase.LANDED,FlightTrackingPhase.STOPPED))
 		Text(stringResource(if(live.tracking.phase==FlightTrackingPhase.LANDED)R.string.flight_immersion_landed else R.string.flight_immersion_stopped),
 			color=FlightGreen,fontSize=11.sp,modifier=Modifier.fillMaxWidth().background(FlightPanelStrong).padding(4.dp))
-	if(state.sessionMode==FlightSessionMode.LIVE) {
+	if(!minimalChrome && state.sessionMode==FlightSessionMode.LIVE) {
 		Row(Modifier.fillMaxWidth().background(FlightPanelStrong),verticalAlignment=Alignment.CenterVertically) {
 			if(live.simulation) {
 				Text(stringResource(R.string.flight_immersion_title),color=FlightOrange,fontSize=10.sp)
@@ -2572,7 +2577,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 			FlightOfflineProgressPanel(state, compact = true,
 				modifier = Modifier.background(FlightPanelStrong).clickable { onSelected(FlightPage.SATELLITE) })
 	}
-	if (state.offlineSimulation && !live.simulation) {
+	if (!minimalChrome && state.offlineSimulation && !live.simulation) {
 		val offlineAction=LocalFlightOfflineAction.current
 		Row(Modifier.fillMaxWidth().background(FlightPanelStrong).padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
 			Column(Modifier.weight(1f).padding(vertical=4.dp)) {
@@ -2595,7 +2600,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 		pages.forEach { (page, label) ->
 			Box(
 				modifier = Modifier.weight(1f).fillMaxHeight().clickable(
-					enabled = page !in listOf(FlightPage.MAP, FlightPage.WINDOW) || state.snapshot != null ||
+					enabled = page !in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED) || state.snapshot != null ||
 						(state.sessionMode==FlightSessionMode.PREPARE && FlightOfflinePreparation.canSimulate(state.plan))
 				) { onSelected(page) },
 				contentAlignment = Alignment.Center
@@ -2947,7 +2952,7 @@ private fun FlightProfileView(
 }
 
 @Composable
-private fun FlightWindowScene(
+internal fun FlightWindowScene(
 	placement: FlightWindowPlacement,
 	look: FlightWindowLook,
 	trip: FlightTrip?,
@@ -2981,6 +2986,7 @@ private fun FlightWindowScene(
 	onRendererError: (String) -> Unit,
 	onRenderStats: (FlightTerrainRenderStats) -> Unit,
 	showTerrainDiagnostics: Boolean = false,
+	gesturesOnly: Boolean = false,
 	modifier: Modifier = Modifier
 ) {
 	val latestPlacement by rememberUpdatedState(placement)
@@ -3111,7 +3117,7 @@ private fun FlightWindowScene(
 		}
 		FlightCompassOverlay(placement, look, sample, altitudeOverrideMeters, Modifier.fillMaxSize())
 		FlightAircraftForwardOverlay(placement, look, sample, Modifier.fillMaxSize())
-		WindowQuickControls(
+		if (!gesturesOnly) WindowQuickControls(
 			placement = placement,
 			look = look,
 			shadowsEnabled = shadingEnabled,
@@ -3120,7 +3126,7 @@ private fun FlightWindowScene(
 			onSetShadowsEnabled = onSetShadowsEnabled,
 			modifier = Modifier.align(Alignment.TopCenter).padding(top = 7.dp)
 		)
-		if (sample != null) {
+		if (sample != null && !gesturesOnly) {
 			AndroidView(
 				modifier = Modifier
 					.align(Alignment.TopEnd)

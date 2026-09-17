@@ -94,6 +94,7 @@ class FlightWorkspaceTest {
             listOf(
                 FlightPage.MAP,
                 FlightPage.WINDOW,
+                FlightPage.MIXED,
                 FlightPage.SATELLITE,
             ),
             FlightWorkspaceNavigation.pages(FlightSessionMode.PREPARE),
