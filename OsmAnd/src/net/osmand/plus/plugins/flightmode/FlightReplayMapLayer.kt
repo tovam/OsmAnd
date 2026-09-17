@@ -60,6 +60,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private var nativeTrip: FlightTrip? = null
 	private var nativeHeights = FloatArray(0)
 	private var routeLinesCollection: VectorLinesCollection? = null
+	private data class RouteStroke(val core: VectorLine, val tube: VectorLine)
+	private val routeStrokes = mutableListOf<RouteStroke>()
 	private var hypothesisCollection: VectorLinesCollection? = null
 	private var hypothesisPlan: FlightPlan? = null
 	private var hypothesisSample: FlightSample? = null
@@ -84,6 +86,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		hypothesisCollection=collection
 	}
 	private var pointMarkersCollection: MapMarkersCollection? = null
+	private val recordedPointMarkers = mutableListOf<MapMarker>()
+	private var recordedPointImage: net.osmand.core.jni.SingleSkImage? = null
+	private var recordedPointImageDensity = Float.NaN
 	private var photoMarkersCollection: MapMarkersCollection? = null
 	private var aircraftLinesCollection: VectorLinesCollection? = null
 	private var aircraftMarkerCollection: MapMarkersCollection? = null
@@ -272,20 +277,35 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	}
 
 	private fun rebuildRoute(trip: FlightTrip?) {
-		clearRouteCollection()
 		nativeTrip = trip
 		nativeHeights = trip?.samples?.let(::resolveVisualHeights) ?: FloatArray(0)
 		val samples = trip?.samples.orEmpty()
 		if (samples.size < 2) {
+			routeStrokes.forEach { stroke ->
+				stroke.core.setIsHidden(true)
+				stroke.tube.setIsHidden(true)
+			}
 			routeGeometryDirty = false
 			return
 		}
 
-		val collection = VectorLinesCollection(true)
+		// The renderer observes VectorLine mutations inside this collection. Keeping the provider
+		// alive lets a live trip grow without removing the visible path before its replacement is
+		// compiled, which previously made it blink independently of the point markers.
+		val collection = routeLinesCollection ?: VectorLinesCollection(true).also {
+			routeLinesCollection = it
+		}
 		val lineScale = GeometryWayDrawer.getVectorLineScale(application).toDouble()
-		var lineId = 1
-		for (range in contiguousLegRanges(samples)) {
-			if (range.last - range.first < 1) continue
+		val ranges = contiguousLegRanges(samples).filter { it.last - it.first >= 1 }
+		val updatePlan = flightNativeTrackUpdatePlan(
+			existingRouteStrokes = routeStrokes.size,
+			requiredRouteStrokes = ranges.size,
+			existingPointMarkers = 0,
+			requiredPointMarkers = 0,
+			pointsVisible = false
+		)
+		var strokeIndex = 0
+		for (range in ranges) {
 			val points = QVectorPointI()
 			val heights = QListFloat()
 			for (index in sampledIndices(range, MAXIMUM_ROUTE_POINTS)) {
@@ -293,24 +313,20 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				heights.add(nativeHeights[index])
 			}
 
-			// Always create the centreline before the optional volume bridge. It uses the
-			// same native path as the visible red tether, with unchanged GPS coordinates.
-			buildNativeStroke(collection, lineId++, pointsOrder + 2,
-				TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
-			// Keep the exact sampled centreline and heights. The native renderer builds a closed
-			// circular mesh around it, using the same zoom-dependent width as the former line.
-			buildNativeStroke(
-				collection = collection,
-				lineId = lineId++,
-				baseOrder = pointsOrder + 1,
-				width = TUBE_CORE_WIDTH_DP * lineScale,
-				color = TUBE_CORE_COLOR,
-				points = points,
-				heights = heights,
-				volumetric = true
-			)
+			val stroke = routeStrokes.getOrNull(strokeIndex) ?: RouteStroke(
+				core = buildNativeStroke(collection, strokeIndex * 2 + 1, pointsOrder + 2,
+					TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights),
+				tube = buildNativeStroke(collection, strokeIndex * 2 + 2, pointsOrder + 1,
+					TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights, volumetric = true)
+			).also { routeStrokes.add(it) }
+			updateNativeStroke(stroke.core, TUBE_CORE_WIDTH_DP * lineScale, points, heights)
+			updateNativeStroke(stroke.tube, TUBE_CORE_WIDTH_DP * lineScale, points, heights)
+			strokeIndex++
 		}
-		if (collection.getLinesCount() > 0) routeLinesCollection = collection
+		for (index in routeStrokes.size - updatePlan.routeStrokesToHide until routeStrokes.size) {
+			routeStrokes[index].core.setIsHidden(true)
+			routeStrokes[index].tube.setIsHidden(true)
+		}
 		routeGeometryDirty = false
 	}
 
@@ -323,7 +339,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		points: QVectorPointI,
 		heights: QListFloat,
 		volumetric: Boolean = false
-	) {
+	): VectorLine {
 		val line = VectorLineBuilder()
 			.setBaseOrder(baseOrder)
 			.setIsHidden(false)
@@ -351,6 +367,20 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				PlatformUtil.getLog(FlightReplayMapLayer::class.java).warn("Flight tube bridge unavailable; retaining native elevated lines", error)
 			}
 		}
+		return line
+	}
+
+	private fun updateNativeStroke(
+		line: VectorLine,
+		width: Double,
+		points: QVectorPointI,
+		heights: QListFloat
+	) {
+		line.setLineWidth(width)
+		line.setPoints(points)
+		line.setHeights(heights)
+		line.setElevationScaleFactor(1f)
+		line.setIsHidden(false)
 	}
 
 	private fun sampledIndices(range: IntRange, maximumCount: Int): List<Int> {
@@ -368,9 +398,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	}
 
 	private fun rebuildRecordedPoints(trip: FlightTrip?, showPoints: Boolean) {
-		clearPointCollection()
 		val samples = trip?.samples.orEmpty()
 		if (!showPoints || samples.isEmpty()) {
+			recordedPointMarkers.forEach { it.setIsHidden(true) }
 			pointGeometryDirty = false
 			return
 		}
@@ -379,26 +409,52 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			nativeHeights = resolveVisualHeights(samples)
 		}
 
-		val collection = MapMarkersCollection()
-		val pointImage = NativeUtilities.createSkImageFromBitmap(createPointBitmap())
+		// Unlike a replacement collection, MapMarker mutations keep the already-visible dots
+		// resident while the latest live fix is added.
+		val collection = pointMarkersCollection ?: MapMarkersCollection().also {
+			pointMarkersCollection = it
+		}
 		val step = ceil(samples.size / MAXIMUM_NATIVE_POINTS.toDouble()).toInt().coerceAtLeast(1)
-		var markerId = 1
-		for (index in samples.indices step step) {
-			MapMarkerBuilder()
-				.setMarkerId(markerId++)
+		val indices = samples.indices step step
+		val updatePlan = flightNativeTrackUpdatePlan(
+			existingRouteStrokes = 0,
+			requiredRouteStrokes = 0,
+			existingPointMarkers = recordedPointMarkers.size,
+			requiredPointMarkers = indices.count(),
+			pointsVisible = true
+		)
+		for ((markerIndex, sampleIndex) in indices.withIndex()) {
+			val marker = recordedPointMarkers.getOrNull(markerIndex) ?: MapMarkerBuilder()
+				.setMarkerId(markerIndex + 1)
 				.setBaseOrder(pointsOrder)
-				.setPosition(point31(samples[index]))
-				.setHeight(nativeHeights[index])
+				.setPosition(point31(samples[sampleIndex]))
+				.setHeight(nativeHeights[sampleIndex])
 				.setElevationScaleFactor(1f)
 				.setIsHidden(false)
 				.setIsAccuracyCircleSupported(false)
 				.setPinIconHorisontalAlignment(MapMarker.PinIconHorisontalAlignment.CenterHorizontal)
 				.setPinIconVerticalAlignment(MapMarker.PinIconVerticalAlignment.CenterVertical)
-				.setPinIcon(pointImage)
+				.setPinIcon(recordedPointImage())
 				.buildAndAddToCollection(collection)
+				.also { recordedPointMarkers.add(it) }
+			marker.setPosition(point31(samples[sampleIndex]))
+			marker.setHeight(nativeHeights[sampleIndex])
+			marker.setIsHidden(false)
 		}
-		pointMarkersCollection = collection
+		for (markerIndex in recordedPointMarkers.size - updatePlan.pointMarkersToHide until recordedPointMarkers.size) {
+			recordedPointMarkers[markerIndex].setIsHidden(true)
+		}
 		pointGeometryDirty = false
+	}
+
+	private fun recordedPointImage(): net.osmand.core.jni.SingleSkImage {
+		val density = context.resources.displayMetrics.density.coerceAtLeast(1f)
+		val image = recordedPointImage
+		if (image != null && density == recordedPointImageDensity) return image
+		return NativeUtilities.createSkImageFromBitmap(createPointBitmap()).also {
+			recordedPointImage = it
+			recordedPointImageDensity = density
+		}
 	}
 
 	private fun rebuildPhotoMarkers(trip: FlightTrip?, photos: List<FlightPhotoAttachment>) {
@@ -672,12 +728,16 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val renderer = mapRenderer
 		routeLinesCollection?.let { renderer?.removeSymbolsProvider(it) }
 		routeLinesCollection = null
+		routeStrokes.clear()
 	}
 
 	private fun clearPointCollection() {
 		val renderer = mapRenderer
 		pointMarkersCollection?.let { renderer?.removeSymbolsProvider(it) }
 		pointMarkersCollection = null
+		recordedPointMarkers.clear()
+		recordedPointImage = null
+		recordedPointImageDensity = Float.NaN
 	}
 
 	private fun clearPhotoCollection() {

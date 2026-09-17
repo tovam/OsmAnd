@@ -43,6 +43,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightTerrainModels.kt" "$sources/FlightProfilePlanner.kt" "$sources/FlightTrackMath.kt" \
   "$sources/FlightRecordingLines.kt" \
   "$sources/FlightLiveMonitoring.kt" "$sources/FlightOfflineCoverage.kt" \
+  "$sources/FlightNativeTrackUpdatePlan.kt" \
   "$sources/FlightWorkspaceNavigation.kt" "$sources/FlightLocalNavigation.kt" "$sources/FlightLiveTimeline.kt" "$sources/FlightPhotoCaptureJson.kt" \
   "$sources/FlightSampleInterpolator.kt" "$sources/FlightReplayEngine.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightPreparationNonSubjectFixtures.kt" \
@@ -59,6 +60,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalSummaryMetadataTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightLibraryPresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMonitoringTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightNativeTrackUpdatePlanTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPreparationLogicTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoCalibrationPersistenceTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoDepthTest.kt" \
