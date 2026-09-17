@@ -337,16 +337,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				}
 			}
 		}.sortedWith(compareBy({ tileNearestDistanceKm(it.key.tile, latitude, longitude) }, { it.reservedBytes }))
-		// Immediate nearby coarse coverage, then a reserved coarse lane interleaved
-		// with refinements/imagery. A slow distant tile cannot block the entire next phase.
-		assetScheduler.reconcile(buildList {
-			addAll(coarseWork.take(9))
-			val rest = coarseWork.drop(9)
-			for (index in 0 until maxOf(rest.size, extraWork.size)) {
-				rest.getOrNull(index)?.let(::add)
-				extraWork.getOrNull(index)?.let(::add)
-			}
-		})
+		// Every queued coarse tile has priority over expensive refinements/composites.
+		// Spare workers may still progress after coarse work has started, so one slow
+		// distant request does not freeze all nearby imagery.
+		assetScheduler.reconcile(coarseWork + extraWork)
+		val desiredLayers = orderedTiles.map { it to 0 }.toSet() +
+			requestedRefinementTiles.map { it to (it.zoom - plan.zoom).coerceAtLeast(1) }
+		fun retainedCoverage(scene: FlightTerrainScene?): List<FlightTerrainMesh> =
+			FlightTerrainResidency.retainPlanned(scene?.meshes.orEmpty(), desiredLayers)
 
 		suspend fun <T> interruptibleResult(block: () -> T): Result<T> = try {
 			Result.success(runInterruptible(Dispatchers.IO) { block() })
@@ -463,13 +461,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						it.coordinateOriginLatitude == origin.first && it.coordinateOriginLongitude == origin.second
 					}
 					val finished = partial.meshes.mapTo(hashSetOf()) { it.tileId }
-					val previousByTile = retained?.meshes.orEmpty().associateBy { it.tileId }
+					val retainedMeshes = retainedCoverage(retained)
+					val previousByTile = retainedMeshes.associateBy { it.tileId }
 					val safeMeshes = partial.meshes.map { mesh ->
 						if (mesh.terrainAvailable) mesh else previousByTile[mesh.tileId]
 							?.takeIf { it.terrainAvailable } ?: mesh
 					}
 					val progressive = partial.copy(meshes = safeMeshes +
-						retained?.meshes.orEmpty().filter { it.tileId !in finished })
+						retainedMeshes.filter { it.tileId !in finished })
 					onScene(progressive)
 				}
 			)
@@ -485,6 +484,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			var boundaryTiles: Map<TerrainTileId, TerrariumTile> = tiles.toMap()
 			refinementLayers.forEach { layer ->
 				val availableTiles = layer.plan.tiles.mapNotNull { tileId ->
+					if (FlightTerrainResidency.parent(tileId, boundaryZoom) !in boundaryTiles) return@mapNotNull null
 					refinementTiles[tileId]?.let { tileId to it }
 				}.toMap()
 				if (availableTiles.isNotEmpty()) {
@@ -504,16 +504,18 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						geometryCache = geometryCache,
 						workerCount = geometryWorkerCount
 					)
-					boundaryZoom = layer.plan.zoom
-					boundaryTiles = availableTiles
 				}
+				// Children wait for their actual parent; an unrelated completed parent
+				// must not make them stitch to their own (incompatible) fine heights.
+				boundaryZoom = layer.plan.zoom
+				boundaryTiles = availableTiles
 			}
 			if (retainPreviousRefinements && previousScene != null &&
 				previousScene.coordinateOriginLatitude == baseScene.coordinateOriginLatitude &&
 				previousScene.coordinateOriginLongitude == baseScene.coordinateOriginLongitude
 			) {
 				val present = meshes.mapTo(hashSetOf()) { it.tileId }
-				meshes += previousScene.meshes.filter { it.refinementLevel > 0 && it.tileId !in present }
+				meshes += retainedCoverage(previousScene).filter { it.refinementLevel > 0 && it.tileId !in present }
 			}
 			val baseQuads = if (useTargetBaseGeometry) geometryQuadsByTile else coarseGeometryQuadsByTile
 			val combinedQuads = baseQuads + refinementQuadsByTile
@@ -564,7 +566,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				}
 				val presentLayers = retainedMeshes.mapTo(hashSetOf()) { it.tileId to it.refinementLevel }
 				built.copy(
-					meshes = retainedMeshes + previousScene.meshes.filter {
+					meshes = retainedMeshes + retainedCoverage(previousScene).filter {
 						(it.tileId to it.refinementLevel) !in presentLayers
 					}
 				)
@@ -577,10 +579,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		onStatus(status(FlightTerrainPhase.DOWNLOADING, "Cache local et relief…"))
 		publishProgressiveScene(force = true, retainPreviousCoverage = true)
 
-		// Phase 1 is deliberately global: every coarse Terrarium tile is resolved before
-		// any fine MNT or detailed satellite work starts. Mixing these requests by distance
-		// previously allowed a nearby z14 refinement to starve a missing base tile and left
-		// large zero-metre planes visible for minutes.
+		// Publish the nearest coarse coverage first. Remaining coarse work keeps queue
+		// priority while independent bounded lanes collect imagery/refinement results.
 		val baseTerrainRequests = orderedTiles.filterNot(tiles::containsKey).map { tileId ->
 			TerrainElevationWork(
 				tileId = tileId,
@@ -662,10 +662,10 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		onStatus(
 			status(
 				FlightTerrainPhase.DOWNLOADING,
-				message = if (failed == 0) {
+				message = if (tiles.size == orderedTiles.size) {
 					"Relief grossier complet · affinage et textures"
 				} else {
-					"Relief grossier ${tiles.size}/${orderedTiles.size} · $failed tuile(s) indisponible(s)"
+					"Relief grossier ${tiles.size}/${orderedTiles.size} · affinage progressif"
 				}
 			)
 		)

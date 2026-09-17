@@ -102,12 +102,14 @@ object FlightTerrainMeshBuilder {
 				coordinateOriginLongitude,
 				gridQuads
 			)
-			val geometry = cachedOrBuildGeometry(geometryCache, geometryCacheKey) {
-				when {
-					sourceTile != null -> buildTileGeometry(sourceTile, sampler, projection, gridQuads)
-					includePlaceholders -> buildPlaceholderGeometry(tileId, projection)
-					else -> null
+			// A loading plane is not elevation data. Never cache it under the key
+			// later used by the real tile (including after a cancelled scene load).
+			val geometry = when {
+				sourceTile != null -> cachedOrBuildGeometry(geometryCache, geometryCacheKey) {
+					buildTileGeometry(sourceTile, sampler, projection, gridQuads)
 				}
+				includePlaceholders -> buildPlaceholderGeometry(tileId, projection)
+				else -> null
 			} ?: return@mapNotNull null
 			FlightTerrainMesh(
 				tileId = tileId,
@@ -264,12 +266,13 @@ object FlightTerrainMeshBuilder {
 		ensureGeometryWorkActive()
 		if (plan.zoom <= baseZoom || tiles.isEmpty()) return emptyList()
 		val projection = FlightTerrainCoordinates(coordinateOriginLatitude, coordinateOriginLongitude)
-		val sampler = TileElevationSampler(plan.zoom, tiles)
+		val renderableTiles = tiles.filterKeys { FlightTerrainResidency.parent(it, boundaryZoom) in boundaryTiles }
+		val sampler = TileElevationSampler(plan.zoom, renderableTiles)
 		val boundarySampler = TileElevationSampler(boundaryZoom, boundaryTiles)
-		val availableIds = tiles.keys
+		val availableIds = renderableTiles.keys
 		return plan.tiles.mapNotNull { tileId ->
 			ensureGeometryWorkActive()
-			val tile = tiles[tileId] ?: return@mapNotNull null
+			val tile = renderableTiles[tileId] ?: return@mapNotNull null
 			val gridQuads = geometryQuadsByTile[tileId]
 				?.coerceIn(DEFAULT_GRID_QUADS, MAXIMUM_GRID_QUADS)
 				?: DEFAULT_GRID_QUADS
@@ -430,6 +433,7 @@ object FlightTerrainMeshBuilder {
 		val vertices = FloatArray(gridSize * gridSize * VERTEX_COMPONENTS)
 		var minimumElevation = Float.POSITIVE_INFINITY
 		var maximumElevation = Float.NEGATIVE_INFINITY
+		val boundaryFallback = boundarySampler?.parentTile(tile.id)
 		for (row in 0 until gridSize) {
 			ensureGeometryWorkActive()
 			val tileY = tile.id.y + row.toDouble() / gridQuads
@@ -440,7 +444,7 @@ object FlightTerrainMeshBuilder {
 				val detailedElevation = sampler.elevationAt(tileX, tileY, tile) ?: 0f
 				val edgeBlend = boundaryBlend(column, row, gridQuads, boundaryMask)
 				val elevation = if (edgeBlend < 1f && boundarySampler != null) {
-					val coarseElevation = boundarySampler.elevationAtLocation(latitude, longitude)
+					val coarseElevation = boundarySampler.elevationAtLocation(latitude, longitude, boundaryFallback)
 					detailedElevation + ((coarseElevation ?: detailedElevation) - detailedElevation) * (1f - edgeBlend)
 				} else detailedElevation
 				minimumElevation = minOf(minimumElevation, elevation)
@@ -560,10 +564,12 @@ object FlightTerrainMeshBuilder {
 	) {
 		private val tileCount = 1 shl zoom
 
-		fun elevationAtLocation(latitude: Double, longitude: Double): Float? = elevationAt(
+		fun parentTile(tile: TerrainTileId): TerrariumTile? = FlightTerrainResidency.parent(tile, zoom)?.let(tiles::get)
+
+		fun elevationAtLocation(latitude: Double, longitude: Double, fallback: TerrariumTile? = null): Float? = elevationAt(
 			FlightTerrainTilePlanner.longitudeToTileX(longitude, zoom),
 			FlightTerrainTilePlanner.latitudeToTileY(latitude, zoom),
-			null
+			fallback
 		)
 
 		fun elevationAt(tileX: Double, tileY: Double, fallback: TerrariumTile?): Float? {
