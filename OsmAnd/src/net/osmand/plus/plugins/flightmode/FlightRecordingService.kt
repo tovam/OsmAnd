@@ -431,20 +431,12 @@ class FlightRecordingService : Service(), LocationListener {
                 lastStateSave = elapsed
             }
             val previous = samples.lastOrNull()
-            val delta =
-                previous?.let { (sample.timestampMillis - it.timestampMillis) / 1000f }
-                    ?: Float.POSITIVE_INFINITY
-            val turn =
-                if (previous?.bearingDegrees != null && sample.bearingDegrees != null && delta > 0)
-                    absAngle(previous.bearingDegrees, sample.bearingDegrees) / delta
-                else 0f
-            val deviation =
-                FlightRouteHypothesis.distanceToPlanKm(journey!!.plan, sample)
-                    ?.times(1000)
-                    ?.toFloat() ?: 0f
-            val interval =
-                recordingPolicy.intervalSeconds(sample.speedMetersPerSecond ?: 0f, turn, deviation)
-            val record = delta >= interval || tracking.phase == FlightTrackingPhase.LANDED
+            val plan = journey!!.plan
+            val decision = FlightRecordingDecisions.decide(recordingPolicy, previous, sample,
+                landed = tracking.phase == FlightTrackingPhase.LANDED,
+                previousRouteDeviationMeters = previous?.let { FlightRouteHypothesis.distanceToPlanKm(plan, it)?.times(1000)?.toFloat() },
+                routeDeviationMeters = FlightRouteHypothesis.distanceToPlanKm(plan, sample)?.times(1000)?.toFloat())
+            val record = decision.shouldRecord
             if (record) {
                 store!!.append(sample)
                 samples += sample
@@ -455,6 +447,9 @@ class FlightRecordingService : Service(), LocationListener {
                         if (record) recordedFlightTrip(journey!!.name, samples.toList())
                         else updates.value.trip,
                     latest = sample,
+                    receivedFixesThisSession = updates.value.receivedFixesThisSession + 1L,
+                    recordingDecision = decision,
+                    lastSavedReason = if (record) decision.reason else updates.value.lastSavedReason,
                     tracking = tracking,
                     lastFixElapsed = fixReceivedAt,
                     error = null,
@@ -816,9 +811,5 @@ class FlightRecordingService : Service(), LocationListener {
                 .putExtra("routeTypes", stops.map { it.type.name }.toTypedArray()))
         }
 
-        private fun absAngle(a: Float, b: Float): Float {
-            val d = kotlin.math.abs(a - b) % 360f
-            return kotlin.math.min(d, 360f - d)
-        }
     }
 }

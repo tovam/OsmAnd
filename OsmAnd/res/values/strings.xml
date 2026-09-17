@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_cadence_current">Point conservé toutes les ~%1$.1f s · %2$s</string>
+    <string name="flight_cadence_received">%1$d positions reçues depuis le démarrage GPS · acquisition demandée : 1 s</string>
+    <string name="flight_cadence_fixed">intervalle fixe</string>
+    <string name="flight_cadence_distance">distance / délai maximal</string>
+    <string name="flight_cadence_turn">virage</string>
+    <string name="flight_cadence_deviation">entrée hors trajet prévu</string>
+    <string name="flight_cadence_first">Dernier point conservé : première position</string>
+    <string name="flight_cadence_landing">Dernier point conservé : arrêt du vol</string>
+    <string name="flight_cadence_due">Dernier point conservé : intervalle atteint</string>
     <string name="flight_live_gps_receiving">GPS reçu</string>
     <string name="flight_route_waypoint">Passage</string>
     <string name="flight_route_stopover">Escale</string>

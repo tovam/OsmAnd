@@ -69,6 +69,29 @@ internal fun FlightLiveRecordingSummary(
     }
     Column(modifier.clickable(onClick = onOpen).padding(horizontal = 6.dp, vertical = 3.dp)) {
         FlightGpsCountAndSignal(live, flightDisplayElapsed(timer, SystemClock.elapsedRealtime()))
+        if (live.running) FlightRecordingCadenceInfo(live)
+    }
+}
+
+@Composable
+internal fun FlightRecordingCadenceInfo(live: FlightLiveState, details: Boolean = false) {
+    val decision = live.recordingDecision ?: return
+    val cadence = stringResource(when (decision.cadence) {
+        FlightRecordingCadence.FIXED_INTERVAL -> R.string.flight_cadence_fixed
+        FlightRecordingCadence.DISTANCE_OR_MAXIMUM_INTERVAL -> R.string.flight_cadence_distance
+        FlightRecordingCadence.TURN -> R.string.flight_cadence_turn
+        FlightRecordingCadence.ROUTE_DEVIATION_ENTRY -> R.string.flight_cadence_deviation
+    })
+    Text(stringResource(R.string.flight_cadence_current, decision.intervalSeconds, cadence), color = Color.LightGray, fontSize = 10.sp)
+    if (details) {
+        Text(stringResource(R.string.flight_cadence_received, live.receivedFixesThisSession), color = Color.LightGray, fontSize = 11.sp)
+        live.lastSavedReason?.let { reason ->
+            Text(stringResource(when (reason) {
+                FlightRecordingSaveReason.FIRST_FIX -> R.string.flight_cadence_first
+                FlightRecordingSaveReason.LANDING -> R.string.flight_cadence_landing
+                else -> R.string.flight_cadence_due
+            }), color = Color.LightGray, fontSize = 11.sp)
+        }
     }
 }
 

@@ -123,6 +123,7 @@ internal fun FlightLiveScreen(
                 "${fix?.satellitesUsed?:"—"} / ${fix?.satellitesFound?:"—"}",
             )
             LiveRow(stringResource(R.string.flight_live_points), "${live.trip?.samples?.size?:0}")
+            FlightRecordingCadenceInfo(live, details = true)
             FlightRecordedPoints(live)
             FlightOfflineProgressPanel(state)
             if (live.running) FlightRecordingPolicyControls(live.policy, onPolicy, live)
