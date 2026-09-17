@@ -118,6 +118,31 @@ class CloudTest(unittest.TestCase):
             self.assertEqual(json.loads(zip.read("journey.json"))["name"], "Changed")
         self.assertEqual(self.call("GET", "/v1/journeys/trip1/archive", HTTP_IF_MATCH='"' + first["revision"] + '"')["status"], 409)
 
+    def test_two_recording_phones_keep_the_loser_local_copy_on_a_revision_conflict(self):
+        lease = self.lease()
+        base = self.put(HTTP_X_EDIT_TOKEN=lease, HTTP_IF_NONE_MATCH="*")["json"]
+        phone_a_recording = archive("Recorded by phone A")
+        phone_b_recording = archive("Recorded by phone B")
+
+        published_by_a = self.put(
+            phone_a_recording,
+            HTTP_X_EDIT_TOKEN=lease,
+            HTTP_IF_MATCH='"' + base["revision"] + '"',
+        )
+        self.assertEqual(published_by_a["status"], 200)
+        rejected_on_b = self.put(
+            phone_b_recording,
+            HTTP_X_EDIT_TOKEN=lease,
+            HTTP_IF_MATCH='"' + base["revision"] + '"',
+        )
+
+        self.assertEqual(rejected_on_b["status"], 409)
+        with zipfile.ZipFile(io.BytesIO(phone_b_recording)) as zip:
+            self.assertEqual(json.loads(zip.read("journey.json"))["name"], "Recorded by phone B")
+        current = self.call("GET", "/v1/journeys/trip1/archive")["body"]
+        with zipfile.ZipFile(io.BytesIO(current)) as zip:
+            self.assertEqual(json.loads(zip.read("journey.json"))["name"], "Recorded by phone A")
+
     def test_concurrent_create_allows_only_one_winner(self):
         lease = self.lease()
         with ThreadPoolExecutor(2) as pool:
