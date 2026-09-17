@@ -4,6 +4,11 @@ The Smart build applies `model3d-marker-elevation.patch` first, followed by
 `flight-volumetric-geometry.patch`. Both were checked against OsmAnd-core
 `c3cd29673dcb7118af8e5371aff33a4c421a246e`.
 
+`basemap-overzoom-fallback.patch` is applied last. The complete stack was also
+checked against `ee8cbbc6d952f6a625e89c7e0e0467fb6adbd015`. The workflow follows
+upstream rather than pinning either revision, so it checks every patch before
+applying it and publishes failures as check annotations.
+
 The build copies `FlightTubeMesh.h` to `core/src/Map/` and
 `FlightVectorLineBridge.cpp` to `core/wrappers/java/` before CMake runs. Changes
 to either patch or either source file invalidate the native library cache.
@@ -51,3 +56,10 @@ clang++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 
 The standalone tests do not validate phone rendering or Android integration;
 those still require compiling the patched native library and testing an APK.
+
+When checking patches against downloaded source files inside this repository,
+run Git from this repository root with `--directory=<fixture-relative-path>`.
+Running `git apply` from a nested, untracked fixture directory can silently skip
+patch paths because Git finds the parent repository. Use `--verbose` and run the
+source checks against the resulting files; a successful exit code alone is not
+evidence that a patch was actually applied.

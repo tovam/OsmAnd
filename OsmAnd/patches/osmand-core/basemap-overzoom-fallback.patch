@@ -54,7 +54,7 @@ diff --git a/src/Map/MapPrimitiviser_P.cpp b/src/Map/MapPrimitiviser_P.cpp
 -        context, zoom, primitivisedObjects, detailedmapMapObjects, evaluationResult, cache, queryController, metric);
 +        context, zoom, false, primitivisedObjects, detailedmapMapObjects, evaluationResult, cache, queryController, metric);
      if (metric)
-         metric->elapsedTimeForObtainingPrimitivesFromDetailedmap += obtainPrimitivesStopwatch.elapsed();
+         metric->elapsedTimeForObtainingPrimitivesFromDetailedmap += obtainPrimitivesFromDetailedmapStopwatch.elapsed();
  
 @@ -590,7 +595,10 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
      {
@@ -66,7 +66,7 @@ diff --git a/src/Map/MapPrimitiviser_P.cpp b/src/Map/MapPrimitiviser_P.cpp
 +                zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap),
 +            primitivisedObjects, basemapMapObjects, evaluationResult, cache, queryController, metric);
          if (metric)
-             metric->elapsedTimeForObtainingPrimitivesFromBasemap += obtainPrimitivesStopwatch.elapsed();
+             metric->elapsedTimeForObtainingPrimitivesFromBasemap += obtainPrimitivesFromBasemapStopwatch.elapsed();
      }
 @@ -623,6 +631,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
  void OsmAnd::MapPrimitiviser_P::obtainPrimitives(

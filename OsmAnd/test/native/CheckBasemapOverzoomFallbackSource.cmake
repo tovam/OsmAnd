@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 # This checks the patched core call paths, not device or renderer output. The smart build supplies
-# the same pinned core sources to which the patch was just applied.
+# the same checked-out core sources to which the patch was just applied.
 if(NOT DEFINED PRIMITIVISER_FILE OR NOT EXISTS "${PRIMITIVISER_FILE}")
     message(FATAL_ERROR "Pass -DPRIMITIVISER_FILE=<patched src/Map/MapPrimitiviser_P.cpp>")
 endif()

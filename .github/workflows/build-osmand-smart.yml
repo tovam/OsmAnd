@@ -73,12 +73,21 @@ jobs:
 
       - name: Apply flight altitude and volumetric geometry to OsmAnd core
         run: |
-          git -C core apply --check ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
-          git -C core apply ../android/OsmAnd/patches/osmand-core/model3d-marker-elevation.patch
-          git -C core apply --check ../android/OsmAnd/patches/osmand-core/flight-volumetric-geometry.patch
-          git -C core apply ../android/OsmAnd/patches/osmand-core/flight-volumetric-geometry.patch
-          git -C core apply --check ../android/OsmAnd/patches/osmand-core/basemap-overzoom-fallback.patch
-          git -C core apply ../android/OsmAnd/patches/osmand-core/basemap-overzoom-fallback.patch
+          set -euo pipefail
+          for patch_name in model3d-marker-elevation flight-volumetric-geometry basemap-overzoom-fallback; do
+            patch_file="../android/OsmAnd/patches/osmand-core/${patch_name}.patch"
+            if ! patch_details="$(git -C core apply --check --verbose "${patch_file}" 2>&1)"; then
+              printf '%s\n' "${patch_details}"
+              # Publish the cause in check annotations, not only authenticated build logs.
+              patch_details="${patch_details//'%'/'%25'}"
+              patch_details="${patch_details//$'\r'/'%0D'}"
+              patch_details="${patch_details//$'\n'/'%0A'}"
+              echo "::error file=OsmAnd/patches/osmand-core/${patch_name}.patch,title=Native patch does not apply::${patch_details}"
+              exit 1
+            fi
+            printf '%s\n' "${patch_details}"
+            git -C core apply "${patch_file}"
+          done
           cp android/OsmAnd/patches/osmand-core/FlightTubeMesh.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/FlightVectorLineBridge.cpp core/wrappers/java/
 
