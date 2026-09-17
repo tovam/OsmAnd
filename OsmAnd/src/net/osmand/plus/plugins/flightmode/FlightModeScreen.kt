@@ -490,6 +490,10 @@ fun FlightModeScreen(
 						Spacer(Modifier.height(14.dp))
 						Text(stringResource(if (state.savingJourney) R.string.flight_local_saving else R.string.flight_library_opening),
 							color = FlightText, fontSize = 13.sp, textAlign = TextAlign.Center)
+						if (state.savingJourney && state.recordingForSelectedFlight().running) {
+							Text(stringResource(R.string.flight_local_saving_metadata), color = FlightMuted,
+								fontSize = 11.sp, textAlign = TextAlign.Center)
+						}
 					}
 				}
 			}

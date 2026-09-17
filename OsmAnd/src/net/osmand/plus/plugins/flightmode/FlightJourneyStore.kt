@@ -192,14 +192,33 @@ class FlightJourneyStore(private val context: Context) {
 		)
 	}
 
-	fun save(journey: FlightJourney): FlightJourney = save(journey, mergePreviousAssets = true)
+	fun save(journey: FlightJourney): FlightJourney =
+		save(journey, mergePreviousAssets = true, mergeRecording = true)
 
-	private fun save(journey: FlightJourney, mergePreviousAssets: Boolean): FlightJourney = synchronized(STORE_LOCK) {
+	/**
+	 * Writes editable journal metadata while this exact real flight is still being recorded.
+	 *
+	 * The recorder owns the append-only measurement log until it stops. Reading that log here would
+	 * serialize an arbitrary-length replay behind GPS fsyncs and make a UI-only save wait for every
+	 * recorded event. The JSON journal is intentionally saved as the metadata snapshot supplied by
+	 * the caller; the untouched log is merged by [load] and by the normal [save] used at
+	 * finalization. If the recorder stopped meanwhile, use the ordinary merged save instead.
+	 */
+	fun saveActiveRecordingMetadata(journey: FlightJourney): FlightJourney = synchronized(STORE_LOCK) {
+		save(journey, mergePreviousAssets = true,
+			mergeRecording = !canSaveActiveRecordingMetadata(FlightRecordingService.state.value, journey.id))
+	}
+
+	private fun save(
+		journey: FlightJourney,
+		mergePreviousAssets: Boolean,
+		mergeRecording: Boolean
+	): FlightJourney = synchronized(STORE_LOCK) {
 		val target=File(journeysDirectory,"${validatedId(journey.id)}.$JOURNEY_FILE_EXTENSION")
 		val previous=if(target.isFile) JSONObject(android.util.AtomicFile(target).openRead().bufferedReader().use { it.readText() }) else JSONObject()
 		val previousAssets=offlineAssetsFromJson(previous.optJSONObject("offlineAssets"))
 		val previousRequest=offlineAssetsFromJson(previous.optJSONObject("offlineRequest"))
-		val recorded=FlightRecordingStore(context,journey.id).merge(journey)
+		val recorded=if (mergeRecording) FlightRecordingStore(context,journey.id).merge(journey) else journey
 		val request=FlightOfflineAssets((recorded.offlineRequest.terrainTiles+previousRequest.terrainTiles).distinct(),
 			(recorded.offlineRequest.standardSatelliteTiles+previousRequest.standardSatelliteTiles).distinct())
 		// Requests are not completed assets. Verification belongs to the explicit offline worker.
@@ -263,7 +282,7 @@ class FlightJourneyStore(private val context: Context) {
 			(latest.offlineAssets.terrainTiles.filterNot { it in terrain } + verified.terrainTiles).distinct(),
 			(latest.offlineAssets.standardSatelliteTiles.filterNot { it in satellite } + verified.standardSatelliteTiles).distinct()
 		)
-		save(latest.copy(offlineAssets = assets), mergePreviousAssets = false)
+		save(latest.copy(offlineAssets = assets), mergePreviousAssets = false, mergeRecording = true)
 	}
 
 	fun load(id: String): FlightJourney = synchronized(STORE_LOCK) {

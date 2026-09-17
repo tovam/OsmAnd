@@ -44,3 +44,7 @@ internal fun FlightUiState.afterAbandonedJournalNavigation(): FlightUiState = co
 
 internal fun FlightUiState.afterFailedJournalNavigation(message: String): FlightUiState =
     afterAbandonedJournalNavigation().copy(tripLoadError = message)
+
+/** Only the matching real recorder owns a durable append-only measurement log. */
+internal fun canSaveActiveRecordingMetadata(live: FlightLiveState, journeyId: String): Boolean =
+    live.running && !live.simulation && live.journeyId == journeyId

@@ -416,7 +416,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				offlineAssets = source.offlineAssets, batteryHistory = source.batteryHistory,
 				simulation = source.simulatedJourney
 			)
-			val saved = withContext(Dispatchers.IO) { journeyStore.save(journey) }
+			val saved = withContext(Dispatchers.IO) { journeyStore.saveActiveRecordingMetadata(journey) }
 			if (uiState.journeyId == source.journeyId) {
 				val changed = !uiState.hasSameJournalContentAs(source,
 					includeTrip = !source.previewingPlan && source.sessionMode != FlightSessionMode.LIVE,
