@@ -1045,7 +1045,11 @@ private fun LiveTimelineAction(state: FlightUiState, onReturnLive: () -> Unit) {
 			else if (future) R.string.flight_timeline_hypothesis else R.string.flight_timeline_actual),
 			color = if (future) FlightWarning else FlightGreen, fontSize = 10.sp,
 			modifier = Modifier.weight(1f).padding(horizontal = 6.dp))
-		CompactAction(stringResource(R.string.flight_return_live), FlightGreen, onReturnLive)
+		CompactAction(
+			stringResource(if (state.browsingLiveTimeline) R.string.flight_return_live else R.string.flight_mode_live),
+			if (state.browsingLiveTimeline) FlightMuted else FlightGreen,
+			onReturnLive
+		)
 	}
 	}
 }
