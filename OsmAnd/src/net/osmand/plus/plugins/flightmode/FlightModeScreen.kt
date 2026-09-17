@@ -478,10 +478,16 @@ fun FlightModeScreen(
 					modifier = Modifier.fillMaxSize().background(Color(0xD900000000)).clickable { },
 					contentAlignment = Alignment.Center
 				) {
-					Column(horizontalAlignment = Alignment.CenterHorizontally) {
+					Column(
+						modifier = Modifier.padding(20.dp).widthIn(max = 320.dp)
+							.background(FlightPanelStrong, RoundedCornerShape(12.dp))
+							.border(1.dp, FlightLine, RoundedCornerShape(12.dp)).padding(20.dp),
+						horizontalAlignment = Alignment.CenterHorizontally
+					) {
 						CircularProgressIndicator(color = FlightOrange, strokeWidth = 3.dp)
 						Spacer(Modifier.height(14.dp))
-						Text(stringResource(if (state.savingJourney) R.string.flight_local_saving else R.string.flight_library_opening), color = FlightText)
+						Text(stringResource(if (state.savingJourney) R.string.flight_local_saving else R.string.flight_library_opening),
+							color = FlightText, fontSize = 13.sp, textAlign = TextAlign.Center)
 					}
 				}
 			}
