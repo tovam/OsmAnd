@@ -150,6 +150,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSetRecordingPolicy = viewModel::setRecordingPolicy,
 					onSetPhotoSources = viewModel::setPhotoSources,
 					onPhotoAction = ::handlePhotoAction,
+					onImportPhotos = { openPhotosLauncher.launch(arrayOf("image/*")) },
 					onValidatePhotos = viewModel::validatePendingPhotos,
 					onDiscardPhotos = viewModel::discardPendingPhotos,
 					onSelectPhoto = viewModel::togglePhotoSelection,

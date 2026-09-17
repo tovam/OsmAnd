@@ -246,7 +246,8 @@ fun FlightModeScreen(
 	onDisarmPreparation: () -> Unit = {},
 	onOfflineSimulation: (Boolean) -> Unit = {},
 	onSimulateLive: () -> Unit = {},
-	onOpenJourneyDetails: (String) -> Unit = onOpenJourney
+	onOpenJourneyDetails: (String) -> Unit = onOpenJourney,
+	onImportPhotos: () -> Unit = onPhotoAction
 ) {
 	val cloudContext = LocalContext.current.applicationContext
 	val cloudScope = rememberCoroutineScope()
@@ -454,7 +455,8 @@ fun FlightModeScreen(
 					onClose = onClose,
 					onPageChange = onPageChange,
 					onSetSources = onSetPhotoSources,
-					onPhotoAction = onPhotoAction,
+						onPhotoAction = onPhotoAction,
+						onImportPhotos = onImportPhotos,
 					onValidatePhotos = onValidatePhotos,
 					onDiscardPhotos = onDiscardPhotos,
 					onSelectPhoto = onSelectPhoto,
@@ -1771,6 +1773,7 @@ private fun PhotoScreen(
 	onPageChange: (FlightPage) -> Unit,
 	onSetSources: (Boolean?, Boolean?, Boolean?, Boolean?) -> Unit,
 	onPhotoAction: () -> Unit,
+	onImportPhotos: () -> Unit,
 	onValidatePhotos: () -> Unit,
 	onDiscardPhotos: () -> Unit,
 	onSelectPhoto: (String) -> Unit,
@@ -1796,9 +1799,10 @@ private fun PhotoScreen(
 		Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
 			Text(stringResource(R.string.flight_mode_attached_photos, state.photos.size), color = FlightMuted,
 				fontSize = 11.sp, modifier = Modifier.weight(1f))
-			CompactAction(stringResource(if (state.sessionMode == FlightSessionMode.LIVE)
-				R.string.flight_mode_take_photo else R.string.flight_mode_add_gallery_photos),
-				FlightBlue, onPhotoAction)
+			if (state.sessionMode == FlightSessionMode.LIVE) {
+				CompactAction(stringResource(R.string.flight_mode_take_photo), FlightBlue, onPhotoAction)
+			}
+			CompactAction(stringResource(R.string.flight_mode_add_gallery_photos), FlightBlue, onImportPhotos)
 		}
 		LazyColumn(Modifier.weight(1f)) {
 			state.journeyMessage?.let { message ->
