@@ -2522,8 +2522,6 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 				}) { Text("×${live.simulationRate}",fontSize=11.sp) }
 			}
 			FlightLiveRecordingSummary(live, Modifier.weight(1f)) { onSelected(FlightPage.LIVE) }
-			val cameraAction=LocalFlightCameraAction.current
-			TextButton(onClick=cameraAction,enabled=live.running) { Text(stringResource(R.string.flight_live_camera),fontSize=11.sp) }
 		}
 		if (selected != FlightPage.SATELLITE && selected != FlightPage.LIVE)
 			FlightOfflineProgressPanel(state, compact = true,
