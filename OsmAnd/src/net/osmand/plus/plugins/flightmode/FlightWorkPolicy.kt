@@ -17,6 +17,10 @@ internal object FlightUiActivity {
 }
 
 internal object FlightWorkPolicy {
+    /** Camera capture keeps the flight alive, but does not consume a terrain frame behind it. */
+    fun visualWorkActive(uiVisible: Boolean, cameraPreviewActive: Boolean): Boolean =
+        uiVisible && !cameraPreviewActive
+
     fun recordingActive(simulation: Boolean, visible: Boolean, userPaused: Boolean): Boolean =
         !simulation || (visible && !userPaused)
 

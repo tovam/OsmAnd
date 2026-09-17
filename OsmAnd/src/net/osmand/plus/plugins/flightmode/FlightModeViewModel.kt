@@ -48,6 +48,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var pendingCaptureSensors: FlightPhotoCapture? = null
 	private var pendingDuplicateTrip: FlightTrip? = null
 	private var flightUiVisible by mutableStateOf(false)
+	private var cameraPreviewActive by mutableStateOf(false)
+	private val visualWorkActive get() = FlightWorkPolicy.visualWorkActive(flightUiVisible, cameraPreviewActive)
 	private val uiVisibility = MutableStateFlow(false)
 	private val livePredictor = FlightLivePredictor()
 	private var preparationDownload: Job? = null
@@ -175,7 +177,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			initialScene = { uiState.terrainScene },
 			publishScene = { scene -> uiState = uiState.copy(terrainScene = scene) },
 			publishStatus = { status -> uiState = uiState.copy(terrainStatus = status) }
-		).also { it.setForeground(flightUiVisible) }
+		).also { it.setForeground(visualWorkActive) }
 	}
 
 	init {
@@ -266,14 +268,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 		viewModelScope.launch {
 			snapshotFlow {
-				flightUiVisible && uiState.sessionMode == FlightSessionMode.LIVE && !uiState.browsingLiveTimeline &&
+				visualWorkActive && uiState.sessionMode == FlightSessionMode.LIVE && !uiState.browsingLiveTimeline &&
 					uiState.page in listOf(FlightPage.MAP, FlightPage.WINDOW)
 			}.collectLatest { active ->
 				if (!active) return@collectLatest
 				var lastTerrain = 0L
 				while (true) {
 					delay(100)
-					if (!flightUiVisible || uiState.sessionMode != FlightSessionMode.LIVE || uiState.browsingLiveTimeline) continue
+					if (!visualWorkActive || uiState.sessionMode != FlightSessionMode.LIVE || uiState.browsingLiveTimeline) continue
 					val now = android.os.SystemClock.elapsedRealtime()
 					val sample = livePredictor.position(now) ?: continue
 					val progress = uiState.liveTimeline?.let { FlightLiveTimeline.progress(it, sample.timestampMillis) } ?: 0f
@@ -298,7 +300,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (flightUiVisible == visible) return
 		flightUiVisible = visible
 		uiVisibility.value = visible
-		terrainStreamingEngine.setForeground(visible)
+		terrainStreamingEngine.setForeground(visualWorkActive)
 		if (!visible) {
 			FlightUiActivity.set(this, null)
 			liveTimelineJob?.cancel()
@@ -306,6 +308,17 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			if (preparationDownload?.isActive == true) pausePreparationDownload()
 		} else {
 			refreshDeviceState()
+			uiState.snapshot?.sample?.let(::requestTerrain)
+		}
+	}
+
+	fun setCameraPreviewActive(active: Boolean) {
+		if (cameraPreviewActive == active) return
+		cameraPreviewActive = active
+		terrainStreamingEngine.setForeground(visualWorkActive)
+		if (active) liveTimelineJob?.cancel()
+		else if (visualWorkActive) {
+			if (uiState.sessionMode == FlightSessionMode.LIVE) rebuildLiveTimeline(uiState.liveState)
 			uiState.snapshot?.sample?.let(::requestTerrain)
 		}
 	}
@@ -336,7 +349,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun rebuildLiveTimeline(live: FlightLiveState) {
-		if (!flightUiVisible || uiState.page !in listOf(FlightPage.MAP, FlightPage.WINDOW)) return
+		if (!visualWorkActive || uiState.page !in listOf(FlightPage.MAP, FlightPage.WINDOW)) return
 		val fix = live.latest ?: return
 		if (liveTimelineJob?.isActive == true) return
 		val plan = uiState.plan
@@ -1179,6 +1192,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		sample: FlightSample,
 		reason: FlightSceneDemandReason = FlightSceneDemandReason.AIRCRAFT
 	) {
+		if (!visualWorkActive) return
 		// Editing dates/bands is not a 3D consumer. Keep resident data, but do not compete with typing.
 		if (uiState.page !in listOf(FlightPage.MAP,FlightPage.WINDOW,FlightPage.WINDOW_SETUP)) return
 		terrainStreamingEngine.submit(sceneDemand(sample), reason)

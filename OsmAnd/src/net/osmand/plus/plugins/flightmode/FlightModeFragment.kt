@@ -40,7 +40,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private var gpxLayerSuppressed = false
 	private var showFlightCamera by mutableStateOf(false)
 	private val cameraPermissionLauncher=registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-		showFlightCamera=granted
+		setFlightCameraVisible(granted)
 	}
 	private var previous3DMapsEnabled: Boolean? = null
 	private var flightMapViewInitialized = false
@@ -80,6 +80,12 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		}
 	}
 
+	private fun setFlightCameraVisible(visible: Boolean) {
+		if (showFlightCamera == visible) return
+		showFlightCamera = visible
+		if (::viewModel.isInitialized) viewModel.setCameraPreviewActive(visible)
+	}
+
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		viewModel = ViewModelProvider(this)[FlightModeViewModel::class.java]
@@ -91,7 +97,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 			layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 			setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 			setContent {
-				FlightModeScreen(
+				if (!showFlightCamera) FlightModeScreen(
 					state = viewModel.uiState,
 					mapView = app.osmandMap.mapView,
 					onClose = ::close,
@@ -193,7 +199,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onLocalJourneyRemoved = viewModel::localJourneyRemoved
 				)
 				if(showFlightCamera) FlightCameraScreen(viewLifecycleOwner,viewModel.uiState.liveState.latest,
-					onClose={showFlightCamera=false},onPrepareFile=viewModel::preparePhotoCapture,onCaptured=viewModel::finishPhotoCapture,
+					onClose={setFlightCameraVisible(false)},onPrepareFile=viewModel::preparePhotoCapture,onCaptured=viewModel::finishPhotoCapture,
 					onShutter=viewModel::recordPhotoShutter)
 			}
 		}
@@ -202,7 +208,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private fun handlePhotoAction() {
 		if (viewModel.uiState.sessionMode == FlightSessionMode.LIVE) {
 			if(ContextCompat.checkSelfPermission(requireContext(),Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)
-				showFlightCamera=true
+				setFlightCameraVisible(true)
 			else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
 		} else {
 			openPhotosLauncher.launch(arrayOf("image/*"))
@@ -249,6 +255,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 
 	override fun onDestroyView() {
 		viewModel.setUiVisible(false)
+		setFlightCameraVisible(false)
 		// onPause normally performs this cleanup. Repeating it here is deliberate:
 		// a fragment transaction or activity recreation must never leave a flight
 		// layer or an unfinished gesture attached to OsmAnd's shared map view.
