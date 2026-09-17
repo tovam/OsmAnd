@@ -276,6 +276,7 @@ fun FlightModeScreen(
 		)
 	) {
 		val safeDrawingInsets = WindowInsets.safeDrawing
+		var includeFutureProfile by rememberSaveable(state.journeyId) { mutableStateOf(true) }
 		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney,
 			cloud, cloudSelectedKey, when (state.page) { FlightPage.PLANS -> 1; FlightPage.JOURNEYS -> 2; else -> 0 }, onLocalJourneyRemoved,
 			initialSettings = cloudSelectedKey == null)
@@ -377,6 +378,8 @@ fun FlightModeScreen(
 					{ FlightBottomNavigation(state, onPageChange) }) }
 				FlightPage.MAP -> MapScreen(
 					state = state,
+					includeFutureProfile = includeFutureProfile,
+					onIncludeFutureProfile = { includeFutureProfile = it },
 					mapView = mapView,
 					onClose = onClose,
 					onPageChange = onPageChange,
@@ -394,6 +397,8 @@ fun FlightModeScreen(
 				)
 				FlightPage.WINDOW -> WindowScreen(
 					state = state,
+					includeFutureProfile = includeFutureProfile,
+					onIncludeFutureProfile = { includeFutureProfile = it },
 					onClose = onClose,
 					onPageChange = onPageChange,
 					onSetAltitudeOverride = onSetWindowAltitudeOverride,
@@ -746,6 +751,8 @@ private fun PrepareScreen(
 @Composable
 private fun MapScreen(
 	state: FlightUiState,
+	includeFutureProfile: Boolean,
+	onIncludeFutureProfile: (Boolean) -> Unit,
 	mapView: OsmandMapTileView?,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
@@ -762,6 +769,7 @@ private fun MapScreen(
 	onRemoveFlightSpan: (Int) -> Unit
 ) {
 	val sample = state.snapshot?.sample
+	val altitudeProfile = rememberAltitudeProfile(state, includeFutureProfile)
 	val density = LocalDensity.current
 	val targetScalePixels = with(density) { 96.dp.toPx() }
 	var mapScale by remember(mapView) { mutableStateOf<FlightMapScale?>(null) }
@@ -855,7 +863,10 @@ private fun MapScreen(
 			Row(Modifier.fillMaxWidth().background(FlightHudPanel)) {
 				CompactAction(stringResource(R.string.flight_map_points_short),
 					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
-				if (state.sessionMode == FlightSessionMode.LIVE) LiveTimelineAction(state, onReturnLive)
+				if (state.sessionMode == FlightSessionMode.LIVE) {
+					AltitudeProfileSelector(includeFutureProfile, onIncludeFutureProfile)
+					LiveTimelineAction(state, onReturnLive)
+				}
 			}
 			if (state.snapshot?.dataGap == true) {
 				Text(
@@ -867,8 +878,8 @@ private fun MapScreen(
 				)
 			}
 			FlightProfileView(
-				profile = state.profile,
-				progress = state.replayProgress,
+				profile = altitudeProfile.profile,
+				progress = altitudeProfile.progress(sample?.timestampMillis, state.replayProgress),
 				flightSpans = state.flightSpans,
 				pendingStartProgress = state.pendingFlightStartProgress,
 				modifier = Modifier.fillMaxWidth().height(122.dp).background(FlightHudPanel).padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1069,6 +1080,8 @@ private fun LiveTimelineAction(state: FlightUiState, onReturnLive: () -> Unit) {
 @Composable
 private fun WindowScreen(
 	state: FlightUiState,
+	includeFutureProfile: Boolean,
+	onIncludeFutureProfile: (Boolean) -> Unit,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
 	onSetAltitudeOverride: (Float?) -> Unit,
@@ -1105,12 +1118,15 @@ private fun WindowScreen(
 		mutableStateOf(WindowPanel.FLIGHT)
 	}
 	var showTerrainDiagnostics by rememberSaveable { mutableStateOf(false) }
+	val altitudeProfile = rememberAltitudeProfile(state, includeFutureProfile)
 	val overlayPhoto = state.windowPhotoOverlay.photoId?.let { photoId ->
 		(state.photos + state.pendingPhotos).firstOrNull { it.id == photoId }
 	}
-	val photoProgress = remember(state.trip, state.liveTimeline, state.photos, state.pendingPhotos) {
+	val photoProgress = remember(state.trip, altitudeProfile, state.photos, state.pendingPhotos) {
 		(state.photos + state.pendingPhotos).mapNotNull { photo ->
-			state.progressForRecordedPhoto(photo.matchedSamplePosition)
+			if (state.sessionMode == FlightSessionMode.LIVE)
+				altitudeProfile.photoProgress(state.trip, photo.matchedSamplePosition)
+			else state.progressForRecordedPhoto(photo.matchedSamplePosition)
 		}.filter(Float::isFinite).distinct().sorted()
 	}
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
@@ -1158,10 +1174,12 @@ private fun WindowScreen(
 		WindowPanelSelector(panel = panel, onSelect = { panel = it })
 		when (panel) {
 			WindowPanel.FLIGHT -> {
+				if (state.sessionMode == FlightSessionMode.LIVE)
+					AltitudeProfileSelector(includeFutureProfile, onIncludeFutureProfile)
 				if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty()) {
 					FlightProfileView(
-						profile = state.profile,
-						progress = state.replayProgress,
+						profile = altitudeProfile.profile,
+						progress = altitudeProfile.progress(state.snapshot?.sample?.timestampMillis, state.replayProgress),
 						flightSpans = state.flightSpans,
 						photoProgress = photoProgress,
 						modifier = Modifier.fillMaxWidth().height(66.dp).background(FlightPanelStrong)
@@ -2806,6 +2824,19 @@ private fun FlatTextAction(text: String, modifier: Modifier = Modifier, onClick:
 		fontWeight = FontWeight.Medium,
 		modifier = modifier.clickable(onClick = onClick).padding(vertical = 8.dp)
 	)
+}
+
+@Composable
+private fun rememberAltitudeProfile(state: FlightUiState, includeFuture: Boolean): FlightAltitudeProfile =
+	remember(state.trip, state.liveTimeline, state.profile, state.sessionMode, includeFuture) {
+		selectFlightAltitudeProfile(state.trip, state.liveTimeline, state.profile,
+			state.sessionMode == FlightSessionMode.LIVE, includeFuture)
+	}
+
+@Composable
+private fun AltitudeProfileSelector(includeFuture: Boolean, onChange: (Boolean) -> Unit) {
+	CompactAction(stringResource(if (includeFuture) R.string.flight_profile_full else R.string.flight_profile_measured),
+		FlightBlue, { onChange(!includeFuture) })
 }
 
 @Composable
