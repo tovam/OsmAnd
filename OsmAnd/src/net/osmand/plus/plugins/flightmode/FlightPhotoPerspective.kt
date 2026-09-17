@@ -1,6 +1,8 @@
 package net.osmand.plus.plugins.flightmode
 
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import kotlin.math.atan
@@ -8,6 +10,12 @@ import kotlin.math.sqrt
 
 /** Reads only optical metadata needed to start a photo/terrain calibration. */
 object FlightPhotoPerspective {
+
+	internal fun uprightBitmap(bitmap: Bitmap, orientation: Int): Bitmap {
+		if (orientation !in 2..8) return bitmap
+		val matrix = Matrix().apply { setValues(FlightPhotoOrientation.matrix(orientation, bitmap.width, bitmap.height)) }
+		return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+	}
 
 	fun detectVerticalFieldOfViewDegrees(file: File): Float? = runCatching {
 		if (!file.isFile) return@runCatching null
@@ -21,10 +29,7 @@ object FlightPhotoPerspective {
 		)
 		if (!focalLength35mm.isFinite() || focalLength35mm <= 0.0) return@runCatching null
 		val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-		val rotatedQuarterTurn = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
-			orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
-			orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
-			orientation == ExifInterface.ORIENTATION_TRANSVERSE
+		val rotatedQuarterTurn = FlightPhotoOrientation.swapsAxes(orientation)
 		val displayedWidth = if (rotatedQuarterTurn) bounds.outHeight else bounds.outWidth
 		val displayedHeight = if (rotatedQuarterTurn) bounds.outWidth else bounds.outHeight
 		verticalFieldOfViewFrom35mm(focalLength35mm, displayedWidth, displayedHeight)

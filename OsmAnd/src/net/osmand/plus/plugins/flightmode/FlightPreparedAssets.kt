@@ -60,11 +60,7 @@ internal class FlightPreparedAssets(changed: () -> Unit) : AutoCloseable {
 			}) ?: error("Image decoding failed")
 			try {
 				val orientation = if (key.photo) MediaMetadataUtils.getExifOrientation(File(key.path)) else 1
-				val angle = when (orientation) { 3 -> 180f; 6 -> 90f; 8 -> 270f; else -> 0f }
-				val oriented = if (angle == 0f) decoded else Bitmap.createBitmap(
-					decoded, 0, 0, decoded.width, decoded.height,
-					android.graphics.Matrix().apply { postRotate(angle) }, true
-				)
+				val oriented = FlightPhotoPerspective.uprightBitmap(decoded, orientation)
 				if (oriented !== decoded) decoded.recycle()
 				val processed = try { FlightPhotoDehaze.apply(oriented, key.dehaze) }
 					catch (failure: Throwable) { if (oriented !== decoded) oriented.recycle(); throw failure }

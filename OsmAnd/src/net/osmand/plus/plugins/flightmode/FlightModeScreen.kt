@@ -2,7 +2,6 @@ package net.osmand.plus.plugins.flightmode
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Matrix
 import android.graphics.Paint
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
@@ -2054,15 +2053,8 @@ internal fun decodePhotoPreview(file: File, maximumPixels: Int = MAXIMUM_PHOTO_P
 	while (max(bounds.outWidth, bounds.outHeight) / sampleSize > maximumPixels) sampleSize *= 2
 	val decoded = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sampleSize })
 		?: return null
-	val rotation = when (MediaMetadataUtils.getExifOrientation(file)) {
-		3 -> 180f
-		6 -> 90f
-		8 -> 270f
-		else -> 0f
-	}
-	if (rotation == 0f) return decoded
 	return runCatching {
-		Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, Matrix().apply { postRotate(rotation) }, true)
+		FlightPhotoPerspective.uprightBitmap(decoded, MediaMetadataUtils.getExifOrientation(file))
 	}.getOrNull()?.also { rotated ->
 		if (rotated !== decoded) decoded.recycle()
 	} ?: decoded
