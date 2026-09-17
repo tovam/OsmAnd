@@ -23,11 +23,15 @@ import net.osmand.plus.R
 @Composable
 internal fun FlightLiveFixNotice(live: FlightLiveState) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    val displayFixTracker = remember(live.journeyId, live.running) { FlightLiveDisplayFixTracker() }
     FlightResumedEffect(live.running) {
         while (live.running) { now = SystemClock.elapsedRealtime(); delay(1000) }
     }
     if (!live.running) return
-    val health = FlightLiveSafety.fixHealth(live.latest, live.lastFixElapsed, flightDisplayElapsed(now, SystemClock.elapsedRealtime()))
+    val health = displayFixTracker.health(
+        live,
+        flightDisplayElapsed(now, SystemClock.elapsedRealtime()),
+    )
     val accuracy = live.latest?.horizontalAccuracyMeters
     val message = when {
         live.error != null -> live.error
@@ -36,10 +40,12 @@ internal fun FlightLiveFixNotice(live: FlightLiveState) {
         health == FlightFixHealth.STALE -> stringResource(R.string.flight_live_stale_fix_notice)
         accuracy != null && accuracy > 100f -> stringResource(R.string.flight_live_inaccurate_fix_notice, accuracy)
         live.latest?.altitudeMeters == null -> stringResource(R.string.flight_live_altitude_missing_notice)
-        else -> null
+        else -> stringResource(R.string.flight_live_gps_receiving)
     }
-    if (message != null) Text(message, color = Color(0xFFFFBD39), fontSize = 11.sp,
-        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+    if (message != null) Text(message,
+        color = if (health == FlightFixHealth.FRESH && live.error == null && accuracy != null && accuracy <= 100f && live.latest?.altitudeMeters != null)
+            Color.LightGray else Color(0xFFFFBD39), fontSize = 11.sp,
+        modifier = Modifier.heightIn(min = 18.dp).padding(horizontal = 6.dp, vertical = 2.dp))
 }
 
 /** A compact cockpit observes the recorder; disposing this page never stops the service. */

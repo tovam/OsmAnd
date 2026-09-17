@@ -48,6 +48,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightCalibrationTerrain.kt" \
   "$sources/FlightAltitudeProfile.kt" \
   "$sources/FlightProfileSegments.kt" \
+  "$sources/FlightLiveDisplayState.kt" \
   "$sources/FlightWorkspaceNavigation.kt" "$sources/FlightLocalNavigation.kt" "$sources/FlightLiveTimeline.kt" "$sources/FlightPhotoCaptureJson.kt" \
   "$sources/FlightSampleInterpolator.kt" "$sources/FlightReplayEngine.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightPreparationNonSubjectFixtures.kt" \
@@ -72,6 +73,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCalibrationTerrainTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightAltitudeProfileTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightProfileSegmentsTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightLiveDisplayStateTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightWaypointPlanTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPreparationLogicTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightPhotoCalibrationPersistenceTest.kt" \
@@ -100,7 +102,8 @@ java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore
   net.osmand.test.junit.FlightCalibrationTerrainTest \
   net.osmand.test.junit.FlightAltitudeProfileTest \
   net.osmand.test.junit.FlightProfileSegmentsTest \
-  net.osmand.test.junit.FlightWaypointPlanTest
+  net.osmand.test.junit.FlightWaypointPlanTest \
+  net.osmand.test.junit.FlightLiveDisplayStateTest
 cd "$repo_root"
 java -Djava.io.tmpdir="$test_output" -cp "$test_output:$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest net.osmand.test.junit.FlightLocalNavigationTest net.osmand.test.junit.FlightPhotoCalibrationPersistenceTest net.osmand.test.junit.FlightPhotoDepthTest net.osmand.test.junit.FlightDownloadCancellationTest net.osmand.test.junit.FlightPhotoFitDiagnosticsTest net.osmand.test.junit.FlightCloudArchiveTest net.osmand.test.junit.FlightOfflineJourneyTest net.osmand.test.junit.FlightJournalSummaryMetadataTest net.osmand.test.junit.FlightLibraryPresentationTest
