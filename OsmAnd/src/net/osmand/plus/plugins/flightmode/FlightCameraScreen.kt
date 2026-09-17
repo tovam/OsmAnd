@@ -3,6 +3,7 @@ package net.osmand.plus.plugins.flightmode
 import android.annotation.SuppressLint
 import android.os.Build
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import androidx.camera.camera2.interop.Camera2Interop
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
@@ -261,6 +263,60 @@ internal fun FlightCameraScreen(
         }
         onDispose { previewView.setOnTouchListener(null) }
     }
+    fun takePicture() {
+        val image = capture
+        if (image != null && !busy)
+            try {
+                busy = true
+                error = null
+                image.targetRotation =
+                    previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+                val metadata = ImageCapture.Metadata()
+                fix?.takeIf {
+                        System.currentTimeMillis() - it.timestampMillis in 0..15_000
+                    }
+                    ?.let { f ->
+                        metadata.location =
+                            android.location.Location("gps").apply {
+                                latitude = f.latitude
+                                longitude = f.longitude
+                                time = f.timestampMillis
+                                f.altitudeMeters?.let { altitude = it }
+                                f.horizontalAccuracyMeters?.let { accuracy = it }
+                            }
+                    }
+                val output =
+                    ImageCapture.OutputFileOptions.Builder(onPrepareFile())
+                        .setMetadata(metadata)
+                        .build()
+                image.takePicture(
+                    output,
+                    executor,
+                    object : ImageCapture.OnImageSavedCallback {
+                        override fun onCaptureStarted() {
+                            latestShutter(sensors.snapshot(latestFix))
+                        }
+
+                        override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+                            busy = false
+                            saved++
+                            onCaptured(true)
+                        }
+
+                        override fun onError(exception: ImageCaptureException) {
+                            busy = false
+                            error = exception.message
+                            onCaptured(false)
+                        }
+                    },
+                )
+            } catch (e: Exception) {
+                busy = false
+                error = e.message
+                onCaptured(false)
+            }
+    }
+    val currentTakePicture by rememberUpdatedState<(()->Unit)>({ takePicture() })
     Dialog(
         onDismissRequest = { if (!busy) onClose() },
         properties =
@@ -270,6 +326,47 @@ internal fun FlightCameraScreen(
                 dismissOnClickOutside = false,
             ),
     ) {
+        val window =
+            (androidx.compose.ui.platform.LocalView.current.parent as? DialogWindowProvider)?.window
+        DisposableEffect(window) {
+            val original = window?.callback
+            if (window == null || original == null) {
+                onDispose {}
+            } else {
+                val pressed = mutableSetOf<Int>()
+                val callback =
+                    object : android.view.Window.Callback by original {
+                        override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                            val decision =
+                                FlightCameraKeyPolicy.action(
+                                    event.keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+                                        event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN,
+                                    event.action == KeyEvent.ACTION_DOWN,
+                                    event.repeatCount > 0,
+                                    event.keyCode in pressed,
+                                    busy,
+                                    capture != null,
+                                )
+                            when (event.action) {
+                                KeyEvent.ACTION_DOWN -> pressed.add(event.keyCode)
+                                KeyEvent.ACTION_UP -> pressed.remove(event.keyCode)
+                            }
+                            return when (decision) {
+                                FlightCameraKeyPolicy.Action.CAPTURE -> {
+                                    currentTakePicture()
+                                    true
+                                }
+                                FlightCameraKeyPolicy.Action.CONSUME -> true
+                                FlightCameraKeyPolicy.Action.IGNORE -> original.dispatchKeyEvent(event)
+                            }
+                        }
+                    }
+                window.callback = callback
+                onDispose {
+                    if (window.callback === callback) window.callback = original
+                }
+            }
+        }
         Column(
             Modifier.fillMaxSize()
                 .background(Color.Black)
@@ -384,61 +481,7 @@ internal fun FlightCameraScreen(
                     fontSize = 12.sp,
                 )
             Button(
-                onClick = {
-                    val image = capture
-                    if (image != null && !busy)
-                        try {
-                            busy = true
-                            error = null
-                            image.targetRotation =
-                                previewView.display?.rotation ?: android.view.Surface.ROTATION_0
-                            val metadata = ImageCapture.Metadata()
-                            fix?.takeIf {
-                                    System.currentTimeMillis() - it.timestampMillis in 0..15_000
-                                }
-                                ?.let { f ->
-                                    metadata.location =
-                                        android.location.Location("gps").apply {
-                                            latitude = f.latitude
-                                            longitude = f.longitude
-                                            time = f.timestampMillis
-                                            f.altitudeMeters?.let { altitude = it }
-                                            f.horizontalAccuracyMeters?.let { accuracy = it }
-                                        }
-                                }
-                            val output =
-                                ImageCapture.OutputFileOptions.Builder(onPrepareFile())
-                                    .setMetadata(metadata)
-                                    .build()
-                            image.takePicture(
-                                output,
-                                executor,
-                                object : ImageCapture.OnImageSavedCallback {
-                                    override fun onCaptureStarted() {
-                                        latestShutter(sensors.snapshot(latestFix))
-                                    }
-
-                                    override fun onImageSaved(
-                                        results: ImageCapture.OutputFileResults
-                                    ) {
-                                        busy = false
-                                        saved++
-                                        onCaptured(true)
-                                    }
-
-                                    override fun onError(exception: ImageCaptureException) {
-                                        busy = false
-                                        error = exception.message
-                                        onCaptured(false)
-                                    }
-                                },
-                            )
-                        } catch (e: Exception) {
-                            busy = false
-                            error = e.message
-                            onCaptured(false)
-                        }
-                },
+                onClick = { takePicture() },
                 enabled = capture != null && !busy,
                 modifier =
                     Modifier.align(Alignment.CenterHorizontally)
