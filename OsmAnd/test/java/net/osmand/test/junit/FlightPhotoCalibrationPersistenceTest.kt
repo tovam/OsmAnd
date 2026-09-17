@@ -9,6 +9,25 @@ import org.junit.Test
 /** Synthetic metadata only: never open or migrate existing user photographs. */
 class FlightPhotoCalibrationPersistenceTest {
     @Test
+    fun linkedInspectionKeepsPlaneAndOtherPhotoWhileSavingCamera() {
+        val plane = FlightPhotoSpatialPose(3.5, 1800000000000L, 45.0, 10.0, 10000f, 40f, 80f, -20f, 60f, 4f / 3f)
+        val original = FlightPhotoWindowAlignment(scale = 1.7f, offsetXFraction = 0.2f, spatialPose = plane)
+        val other = original.copy(windowLook = FlightWindowLook(yawDegrees = 90f))
+        val placement = original.windowPlacement.copy(zoom = 3f)
+        val look = FlightWindowLook(yawDegrees = -30f, pitchDegrees = -15f)
+        val updated = original.withInspectionView(placement, look, 11000f)
+        assertEquals(plane, updated.spatialPose)
+        assertEquals(placement, updated.windowPlacement)
+        assertEquals(look, updated.windowLook)
+        assertEquals(original.scale, updated.scale)
+        assertEquals(original.offsetXFraction, updated.offsetXFraction)
+        assertEquals(90f, other.windowLook.yawDegrees, 0f)
+        assertEquals(plane, other.spatialPose)
+        val legacy = original.copy(spatialPose = null).withInspectionView(placement, look, null, plane)
+        assertEquals(plane, legacy.spatialPose)
+    }
+
+    @Test
     fun ordinaryAndTelephotoCalibrationsSurviveSavingWithoutRecalculation() {
         for (fov in listOf(1.1, 2.0, 5.0, 14.5, 60.0)) {
             val fit =

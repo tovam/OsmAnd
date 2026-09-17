@@ -1942,6 +1942,16 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			windowLook = transformed.look,
 			windowPhotoOverlay = transformed.photoOverlay
 		)
+		val photo = findPhoto(current.photoId) ?: return
+		photo.windowAlignment?.let { previous ->
+			val legacyPlane = if (previous.spatialPose == null) FlightViewGeometry.photoSpatialPose(
+				uiState.trip, photo.matchedSamplePosition, previous.windowPlacement,
+				previous.windowLook, previous.altitudeOverrideMeters
+			) else null
+			val alignment = previous.withInspectionView(transformed.placement, transformed.look,
+				uiState.windowAltitudeOverrideMeters, legacyPlane)
+			if (alignment != previous) replacePhoto(photo.copy(windowAlignment = alignment), message = null)
+		}
 		scheduleTerrainDetailFocus()
 	}
 

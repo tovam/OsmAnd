@@ -581,6 +581,19 @@ data class FlightPhotoWindowAlignment(
 	 */
 	val spatialPose: FlightPhotoSpatialPose? = null
 ) {
+	/** Remember where the user is looking without moving the calibrated photo plane. */
+	fun withInspectionView(
+		placement: FlightWindowPlacement,
+		look: FlightWindowLook,
+		altitude: Float?,
+		legacyPlane: FlightPhotoSpatialPose? = null
+	): FlightPhotoWindowAlignment = copy(
+		windowPlacement = placement,
+		windowLook = look,
+		altitudeOverrideMeters = altitude,
+		spatialPose = spatialPose ?: legacyPlane
+	).clamped()
+
 	fun clamped(): FlightPhotoWindowAlignment {
 		val safeOverlay = FlightWindowPhotoOverlay(
 			opacity = opacity.takeIf(Float::isFinite) ?: 0.55f,

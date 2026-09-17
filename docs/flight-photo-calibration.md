@@ -4,15 +4,15 @@
 
 Photo Plus uses a compact chronological library. Open a photo to access five editor tabs:
 
-1. **Photo landmarks**: tap to add points, or tap an existing marker to select it and then its new location. The top toolbar adds, selects, deletes and clears points (clear-all requires confirmation). Pinch, pan and freely rotate with two fingers. Rotation is saved with the photo calibration, never baked into its pixels or solver coordinates.
-2. **Map landmarks**: the primary action opens a north-up satellite picker, initially z14, with unlimited visual zoom/pan. Select each matching index and tap the corresponding ground feature. Calculate opens the comparison result. These controls never take over the main map view.
+1. **Landmarks**: the photo and satellite map share one split-pane editor, photo above and map below. The compact toolbar creates a numbered pair, explicitly selects its number, moves it, deletes it or clears all pairs (clear-all requires confirmation). Canvas taps only place the selected pair; they never select a different marker. Both panes support pan, pinch and continuous rotation, with independent persistent viewports. Photo rotation is saved with the calibration, never baked into its pixels or solver coordinates. The satellite picker initially uses z14 source imagery; further visual magnification does not invent detail.
+2. **Photo adjustments**: image adjustments and atmospheric-haze correction are shown live in Photo Plus, separate from landmark placement and the Hublot camera.
 3. **Compare**: show the recorded camera in orange, fitted camera in violet, landmarks in cyan and recorded trajectory in orange. Fit the map to about three times the horizontal camera separation (minimum 50 m); magnification beyond source zoom is explicitly only magnification.
 4. **Hublot 3D**: switch between recorded eye, estimated eye and an overview aimed at their midpoint. Real sphere meshes identify the other camera. The photo is a fixed world-space rectangle, not a moving HUD. Pan, zoom and photo opacity are independent inspection controls.
 5. **Details**: retain date provenance, track association and sensor metadata without expanding every library row.
 
 Associate the photo with the track first. Four complete, well-spread point pairs are required; there is no fixed point-count cap. A four-point result explicitly warns about ambiguity; more correspondences are recommended. Calculation can be cancelled. Every edit is passed to the existing journal autosave mechanism. Pending photos still require the normal import confirmation.
 
-Photo and map clicks independently advance to the next unplaced landmark. Once all photo slots are filled, a new tap on empty space adds another point; tapping an existing marker selects it. Map placement never creates an unmatched photo slot. P/C indicators show which half of each pair has been placed. Photo Plus uses undamped pinch scaling; Hublot retains half-strength pinch. Calculate is disabled until the image, recorded position, recorded altitude and at least four full pairs are available; the missing prerequisite is displayed. Missing terrain or solver failures remain errors.
+Use **+** to create a pair, then place that same numbered pair in each pane, in either order. Neither pane automatically advances or creates a new pair. P/C indicators show which half has been placed. Photo Plus uses undamped pinch scaling; Hublot retains half-strength pinch. Calculate is disabled until the image, recorded position, recorded altitude and at least four full pairs are available; the missing prerequisite is displayed. Missing terrain or solver failures remain errors.
 
 Automatic association, association to the current track point and removal require confirmation. The current-point confirmation displays its fractional index and warns about resetting manual Hublot alignment. If playback moves the target while the dialog is open, the confirmation is cancelled. Landmark pairs are preserved by these association changes.
 
@@ -35,7 +35,7 @@ The previous view matrix formed `eye + direction` in Float, where direction was 
 Standalone tests under `OsmAnd/test/standalone` cover:
 
 - `DirectionalViewMatrixTest`: 1000 successive small yaw steps and 1000 pitch steps at a distant origin.
-- `PhotoCalibrationInputTest`: sequential photo/map placement, no overwrite after five clicks, explicit correction selection, readiness prerequisites and undamped photo zoom.
+- `PhotoCalibrationInputTest`: shared numbered-pair placement through 1000 pairs, no canvas selection, explicit toolbar actions, readiness prerequisites and undamped photo zoom.
 - `PhotoPoseSolverTest`: exact and noisy synthetic correspondences, fixed/free focal length, five-point unknown-focal recovery and rejection of collinear image points.
 - `PhotoCalibrationPersistenceTest`: WGS84 position/direction round trips, including a dateline case; complete and partial JSON persistence; corrupt-fit recovery; agreement between solver projections and the real GL photo rectangle for five positive/negative roll angles.
 
