@@ -321,7 +321,7 @@ internal fun FlightStorageStatusStrip(state: FlightUiState, compact: Boolean = f
     Column(
         Modifier.fillMaxWidth()
             .background(Color(0xFF101B22))
-            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .padding(horizontal = 6.dp, vertical = 1.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -347,11 +347,12 @@ internal fun FlightStorageStatusStrip(state: FlightUiState, compact: Boolean = f
             }
             if (!compact)
                 if (state.journeySaveError != null) {
-                    TextButton(onClick = ui.save) {
+                    TextButton(onClick = ui.save, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
                         Text(stringResource(R.string.flight_local_retry_save), fontSize = 11.sp)
                     }
                 } else
-                    TextButton(onClick = { ui.open(state.journeyId?.let { "local:$it" }) }) {
+                    TextButton(onClick = { ui.open(state.journeyId?.let { "local:$it" }) },
+                        modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
                         Text(stringResource(R.string.flight_sync_manage), fontSize = 11.sp)
                     }
         }

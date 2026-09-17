@@ -337,15 +337,13 @@ fun FlightModeScreen(
 		) {
 			Column(Modifier.fillMaxSize()) {
 			if (state.page !in listOf(FlightPage.HOME,FlightPage.PLANS,FlightPage.JOURNEYS,FlightPage.PREPARE)) {
-				Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).background(FlightPanelStrong),verticalAlignment=Alignment.CenterVertically) {
-					TextButton(onClick={onPageChange(FlightWorkspaceNavigation.libraryPage(state.sessionMode))},
-						contentPadding=androidx.compose.foundation.layout.PaddingValues(horizontal=8.dp,vertical=0.dp)) {
-						Text(stringResource(R.string.flight_back_library),fontSize=11.sp)
-					}
-					Text(state.journeyName,Modifier.weight(1f),color=FlightText,fontSize=11.sp,maxLines=1)
-					if(state.page != FlightPage.DETAIL) TextButton(onClick={onPageChange(FlightPage.DETAIL)}) {
-						Text(stringResource(R.string.flight_detail_title),fontSize=12.sp)
-					}
+				Row(Modifier.fillMaxWidth().heightIn(min = 34.dp).background(FlightPanelStrong).padding(horizontal = 4.dp),
+					verticalAlignment=Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+					CompactAction(stringResource(R.string.flight_back_library), FlightMuted,
+						{ onPageChange(FlightWorkspaceNavigation.libraryPage(state.sessionMode)) })
+					Text(state.journeyName,Modifier.weight(1f),color=FlightText,fontSize=11.sp,maxLines=1, overflow=TextOverflow.Ellipsis)
+					if(state.page != FlightPage.DETAIL) CompactAction(stringResource(R.string.flight_detail_title), FlightMuted,
+						{ onPageChange(FlightPage.DETAIL) })
 				}
 				val recorder = state.liveState
 				if (!recorder.running && recorder.journeyId != null && recorder.journeyId == state.journeyId) {
@@ -810,7 +808,7 @@ private fun MapScreen(
 		Row(
 			modifier = Modifier
 				.align(Alignment.TopEnd)
-				.padding(top = 122.dp, end = 2.dp)
+				.padding(top = 106.dp, end = 2.dp)
 				.height(44.dp),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -848,7 +846,7 @@ private fun MapScreen(
 		mapScale?.let { scale ->
 			FlightMapScaleBar(
 				scale = scale,
-				modifier = Modifier.align(Alignment.TopStart).padding(top = 128.dp, start = 11.dp)
+				modifier = Modifier.align(Alignment.TopStart).padding(top = 112.dp, start = 11.dp)
 			)
 		}
 
@@ -2208,13 +2206,13 @@ private fun SavedJourneyRow(journey: FlightJourneySummary, onOpen: (String) -> U
 @Composable
 private fun FlightTopBar(title: String, mode: FlightSessionMode, onClose: () -> Unit, overlay: Boolean = false) {
 	Row(
-		modifier = Modifier.fillMaxWidth().height(54.dp)
+		modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp)
 			.background(if (overlay) FlightHudPanel else FlightPanelStrong)
 			.border(1.dp, FlightLine),
 		verticalAlignment = Alignment.CenterVertically
 	) {
 		Box(
-			modifier = Modifier.size(54.dp).clickable(onClick = onClose),
+			modifier = Modifier.size(38.dp).clickable(onClick = onClose),
 			contentAlignment = Alignment.Center
 		) {
 			androidx.compose.material3.Icon(
@@ -2227,7 +2225,7 @@ private fun FlightTopBar(title: String, mode: FlightSessionMode, onClose: () -> 
 		Text(
 			text = title,
 			color = FlightText,
-			fontSize = 17.sp,
+			fontSize = 14.sp,
 			fontWeight = FontWeight.SemiBold,
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
