@@ -90,10 +90,28 @@
 			android:id="@+id/menuItems"
 			android:layout_width="280dp"
 			android:layout_height="match_parent"
+			android:layout_above="@id/drawer_build_version"
+			android:layout_alignParentTop="true"
 			android:layout_gravity="start"
 			android:background="?attr/bg_color"
 			android:clipToPadding="false"
 			android:drawSelectorOnTop="false" />
+
+		<net.osmand.plus.widgets.TextViewEx
+			android:id="@+id/drawer_build_version"
+			android:layout_width="280dp"
+			android:layout_height="wrap_content"
+			android:layout_alignParentBottom="true"
+			android:background="?attr/bg_color"
+			android:gravity="left|center_vertical"
+			android:includeFontPadding="false"
+			android:paddingLeft="@dimen/content_padding"
+			android:paddingTop="@dimen/content_padding_small_half"
+			android:paddingRight="@dimen/content_padding"
+			android:paddingBottom="@dimen/content_padding_small_half"
+			android:textColor="?android:textColorSecondary"
+			android:textDirection="ltr"
+			android:textSize="@dimen/drawer_build_version_text_size" />
 
 	</RelativeLayout>
 

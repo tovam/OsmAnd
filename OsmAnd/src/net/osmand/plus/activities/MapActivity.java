@@ -349,9 +349,12 @@ public class MapActivity extends OsmandActionBarActivity implements DownloadEven
 	public InsetTargetsCollection getInsetTargets() {
 		InsetTargetsCollection collection = new InsetTargetsCollection();
 		collection.add(InsetTarget.createCustomBuilder(R.id.menuItems)
-				.portraitSides(InsetSide.TOP, InsetSide.BOTTOM).landscapeSides(InsetSide.TOP)
+				.portraitSides(InsetSide.TOP).landscapeSides(InsetSide.TOP)
 				.applyPadding(true).build());
-		collection.add(InsetTarget.createLeftSideContainer(true, true, R.id.menuItems));
+		collection.add(InsetTarget.createCustomBuilder(R.id.drawer_build_version)
+				.portraitSides(InsetSide.BOTTOM).landscapeSides(InsetSide.BOTTOM)
+				.applyPadding(true).build());
+		collection.add(InsetTarget.createLeftSideContainer(true, true, R.id.menuItems, R.id.drawer_build_version));
 
 		View dashboardView = findViewById(R.id.dashboard);
 		collection.add(InsetTarget.createLeftSideContainer(false, true, dashboardView));

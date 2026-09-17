@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.widget.ImageView;
 import android.widget.ListView;
+import android.widget.TextView;
 
 import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
@@ -788,6 +789,11 @@ public class MapActivityActions extends MapActions {
 		boolean nightMode = app.getDaynightHelper().isNightMode(ThemeUsageContext.OVER_MAP);
 		ListView menuItemsListView = activity.findViewById(R.id.menuItems);
 		menuItemsListView.setBackgroundColor(ColorUtilities.getListBgColor(activity, nightMode));
+		TextView buildVersion = activity.findViewById(R.id.drawer_build_version);
+		buildVersion.setText(Version.getAppVersion(app));
+		buildVersion.setContentDescription(Version.getFullVersion(app));
+		buildVersion.setTextColor(ColorUtilities.getSecondaryTextColor(activity, nightMode));
+		buildVersion.setBackgroundColor(ColorUtilities.getListBgColor(activity, nightMode));
 		if (drawerLogoHeader != null) {
 			menuItemsListView.removeHeaderView(drawerLogoHeader);
 			Bitmap navDrawerLogo = app.getAppCustomization().getNavDrawerLogo();
