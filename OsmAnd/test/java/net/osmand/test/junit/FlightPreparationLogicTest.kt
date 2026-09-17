@@ -45,6 +45,15 @@ class FlightPreparationLogicTest {
 
     private val base = 1_800_000_000_000L
 
+    @Test fun cancelledOrPostponedAlarmsDoNotStartFromAnOldBroadcast() {
+        assertFalse(flightScheduleIsDue(null, base))
+        assertFalse(flightScheduleIsDue(0L, base))
+        assertFalse(flightScheduleIsDue(base + 60_000L, base))
+        assertTrue(flightScheduleIsDue(base, base))
+        assertTrue(flightScheduleIsDue(base + 1_000L, base))
+        assertTrue(flightScheduleIsDue(base - 60_000L, base))
+    }
+
     private fun sample(
         seconds: Int = 0,
         alt: Double? = 100.0,

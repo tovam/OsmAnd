@@ -199,6 +199,8 @@ class FlightScheduleReceiver : BroadcastReceiver() {
         if (intent.action == FlightScheduleManager.START) {
             val id = intent.getStringExtra("journey") ?: return
             try {
+                // AlarmManager.cancel cannot recall a broadcast already dispatched to this process.
+                if (!flightScheduleIsDue(FlightScheduleManager.scheduledStart(context, id), System.currentTimeMillis())) return
                 FlightRecordingService.start(context, id)
             } catch (e: Exception) {
                 context

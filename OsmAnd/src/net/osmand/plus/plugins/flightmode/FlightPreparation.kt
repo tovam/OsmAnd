@@ -130,6 +130,11 @@ enum class FlightTrackingPhase {
     STOPPED,
 }
 
+/** An already-delivered broadcast must not revive a cancelled or newly postponed alarm. */
+internal fun flightScheduleIsDue(scheduledStartMillis: Long?, nowMillis: Long): Boolean =
+    scheduledStartMillis != null && scheduledStartMillis > 0 &&
+        scheduledStartMillis <= nowMillis + 1_000L
+
 /** Only consecutive, fresh, reliable fixes can establish landing; GPS loss is never low speed. */
 data class FlightTrackingState(
     val phase: FlightTrackingPhase = FlightTrackingPhase.WAITING,
