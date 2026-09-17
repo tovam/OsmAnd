@@ -67,9 +67,27 @@ static void preservedCentres(const std::vector<Sample>& points, const std::vecto
     }
 }
 
+static void grazingEndCapKeepsRoundPhysicalDiameter(
+    const Sample& sample, const std::vector<Vertex>& vertices)
+{
+    // Looking along a level flight path projects the end cap into its vertical/horizontal plane.
+    // Its equal axes distinguish a real cylinder from the old flat elevated ribbon.
+    double minZ = 1e9, maxZ = -1e9, minH = 1e9, maxH = -1e9;
+    for (const auto& v : vertices)
+    {
+        if (!near(v.x, sample.x))
+            continue;
+        minZ = std::min(minZ, v.z); maxZ = std::max(maxZ, v.z);
+        minH = std::min(minH, v.height); maxH = std::max(maxH, v.height);
+    }
+    assert(minZ < maxZ && minH < maxH);
+    assert(near((maxZ - minZ) * sample.metersPerUnit, maxH - minH));
+    assert(near(maxH - minH, 2.0 * sample.radius * sample.metersPerUnit));
+}
+
 int main()
 {
-    // Identical physical diameter from above and from the side, at 12 km altitude.
+    // Identical physical diameter from above, from the side and at a grazing angle, at 12 km altitude.
     const std::vector<Sample> level = {{0, 0, 12000, 0.02, 100, 0}, {100000, 0, 12000, 0.02, 100, 1}};
     const auto levelMesh = mesh(level);
     double minZ = 1e9, maxZ = -1e9, minH = 1e9, maxH = -1e9;
@@ -80,6 +98,7 @@ int main()
     }
     assert(near((maxZ - minZ) * 0.02, maxH - minH));
     assert(near(maxH - minH, 4));
+    grazingEndCapKeepsRoundPhysicalDiameter(level.front(), levelMesh);
     preservedCentres(level, levelMesh);
     closed(levelMesh);
 

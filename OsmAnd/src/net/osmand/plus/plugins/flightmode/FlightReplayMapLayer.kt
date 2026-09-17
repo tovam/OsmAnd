@@ -60,7 +60,11 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private var nativeTrip: FlightTrip? = null
 	private var nativeHeights = FloatArray(0)
 	private var routeLinesCollection: VectorLinesCollection? = null
-	private data class RouteStroke(val core: VectorLine, val tube: VectorLine)
+	private data class RouteStroke(
+		val core: VectorLine,
+		val tube: VectorLine,
+		val tubeEnabled: Boolean
+	)
 	private val routeStrokes = mutableListOf<RouteStroke>()
 	private var hypothesisCollection: VectorLinesCollection? = null
 	private var hypothesisPlan: FlightPlan? = null
@@ -313,14 +317,16 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				heights.add(nativeHeights[index])
 			}
 
-			val stroke = routeStrokes.getOrNull(strokeIndex) ?: RouteStroke(
-				core = buildNativeStroke(collection, strokeIndex * 2 + 1, pointsOrder + 2,
-					TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights),
-				tube = buildNativeStroke(collection, strokeIndex * 2 + 2, pointsOrder + 1,
-					TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights, volumetric = true)
+			val stroke = routeStrokes.getOrNull(strokeIndex) ?: createRouteStroke(
+				collection, strokeIndex, lineScale, points, heights
 			).also { routeStrokes.add(it) }
 			updateNativeStroke(stroke.core, TUBE_CORE_WIDTH_DP * lineScale, points, heights)
 			updateNativeStroke(stroke.tube, TUBE_CORE_WIDTH_DP * lineScale, points, heights)
+			// The native tube is a closed cylinder. The elevated flat line remains only for cores
+			// without the bridge; drawing it over an enabled tube makes the path look flat at a
+			// grazing camera angle.
+			stroke.core.setIsHidden(stroke.tubeEnabled)
+			stroke.tube.setIsHidden(!stroke.tubeEnabled)
 			strokeIndex++
 		}
 		for (index in routeStrokes.size - updatePlan.routeStrokesToHide until routeStrokes.size) {
@@ -337,8 +343,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		width: Double,
 		color: Int,
 		points: QVectorPointI,
-		heights: QListFloat,
-		volumetric: Boolean = false
+		heights: QListFloat
 	): VectorLine {
 		val line = VectorLineBuilder()
 			.setBaseOrder(baseOrder)
@@ -358,16 +363,36 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			.setJointStyle(VectorLine.JointStyle.ROUND.swigValue())
 			.setApproximationEnabled(false)
 			.buildAndAddToCollection(collection)
-		if (volumetric && tubeBridgeAvailable) {
-			try {
-				FlightVectorLineBridge.enableTube(line)
-			} catch (error: LinkageError) {
-				// An older native library must not erase every flight line or abort map drawing.
-				tubeBridgeAvailable = false
-				PlatformUtil.getLog(FlightReplayMapLayer::class.java).warn("Flight tube bridge unavailable; retaining native elevated lines", error)
-			}
-		}
 		return line
+	}
+
+	private fun createRouteStroke(
+		collection: VectorLinesCollection,
+		strokeIndex: Int,
+		lineScale: Double,
+		points: QVectorPointI,
+		heights: QListFloat
+	): RouteStroke {
+		val core = buildNativeStroke(collection, strokeIndex * 2 + 1, pointsOrder + 2,
+			TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
+		val tube = buildNativeStroke(collection, strokeIndex * 2 + 2, pointsOrder + 1,
+			TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
+		return RouteStroke(core, tube, enableFlightTube(tube))
+	}
+
+	private fun enableFlightTube(line: VectorLine): Boolean {
+		if (!tubeBridgeAvailable) return false
+		return try {
+			FlightVectorLineBridge.enableTube(line)
+			true
+		} catch (error: LinkageError) {
+			// An older native library must not erase every flight line or abort map drawing.
+			tubeBridgeAvailable = false
+			PlatformUtil.getLog(FlightReplayMapLayer::class.java).warn(
+				"Flight tube bridge unavailable; retaining native elevated lines", error
+			)
+			false
+		}
 	}
 
 	private fun updateNativeStroke(
