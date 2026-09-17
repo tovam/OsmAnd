@@ -1086,7 +1086,7 @@ private fun WindowScreen(
 	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit
 ) {
 	var panel by remember(state.sessionMode) {
-		mutableStateOf(if (state.sessionMode != FlightSessionMode.LIVE) WindowPanel.FLIGHT else WindowPanel.VIEW)
+		mutableStateOf(WindowPanel.FLIGHT)
 	}
 	val overlayPhoto = state.windowPhotoOverlay.photoId?.let { photoId ->
 		(state.photos + state.pendingPhotos).firstOrNull { it.id == photoId }
