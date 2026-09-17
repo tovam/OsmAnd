@@ -61,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1092,6 +1093,7 @@ private fun WindowScreen(
 	var panel by remember(state.sessionMode) {
 		mutableStateOf(WindowPanel.FLIGHT)
 	}
+	var showTerrainDiagnostics by rememberSaveable { mutableStateOf(false) }
 	val overlayPhoto = state.windowPhotoOverlay.photoId?.let { photoId ->
 		(state.photos + state.pendingPhotos).firstOrNull { it.id == photoId }
 	}
@@ -1113,6 +1115,7 @@ private fun WindowScreen(
 				terrainStatus = state.terrainStatus,
 				rendererRecovery = state.terrainRendererRecovery,
 				terrainRenderStats = state.terrainRenderStats,
+				showTerrainDiagnostics = showTerrainDiagnostics,
 				altitudeOverrideMeters = state.windowAltitudeOverrideMeters,
 				shadingEnabled = state.plan.shadowsEnabled,
 				shadowIntensity = state.plan.shadowIntensity,
@@ -1160,6 +1163,11 @@ private fun WindowScreen(
 			}
 			WindowPanel.VIEW -> {
 				LazyColumn(Modifier.fillMaxWidth().height(258.dp)) {
+					item {
+						CompactToggleRow(stringResource(R.string.flight_terrain_diagnostics), showTerrainDiagnostics) {
+							showTerrainDiagnostics = it
+						}
+					}
 					item {
 						SatelliteQualitySelector(
 							quality = state.plan.satelliteQuality,
@@ -2903,6 +2911,7 @@ private fun FlightWindowScene(
 	onRetryTerrain: () -> Unit,
 	onRendererError: (String) -> Unit,
 	onRenderStats: (FlightTerrainRenderStats) -> Unit,
+	showTerrainDiagnostics: Boolean = false,
 	modifier: Modifier = Modifier
 ) {
 	val latestPlacement by rememberUpdatedState(placement)
@@ -3075,7 +3084,7 @@ private fun FlightWindowScene(
 				modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)
 			)
 		}
-		TerrainStatusOverlay(
+		if (showTerrainDiagnostics) TerrainStatusOverlay(
 			status = rendererRecovery.error?.let { terrainStatus.copy(phase = FlightTerrainPhase.ERROR, message = it) } ?: terrainStatus,
 			scene = scene,
 			sample = sample,

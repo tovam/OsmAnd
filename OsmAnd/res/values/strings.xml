@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_terrain_diagnostics">Diagnostic des tuiles</string>
     <string name="flight_map_top_view">Vue verticale · 90°</string>
     <string name="flight_live_signal_waiting">En attente du signal GPS</string>
     <string name="flight_offline_refreshing">Recontrôle du stockage en cours…</string>
