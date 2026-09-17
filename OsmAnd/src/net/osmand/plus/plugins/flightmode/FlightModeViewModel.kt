@@ -35,6 +35,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private val terrainRepository = FlightTerrainRepository(app)
 	private val citySearch = FlightCitySearch(app)
 	private val journeyStore = FlightJourneyStore(application)
+	private val journalOperations = FlightJournalOperations()
 	private var replayEngine: FlightReplayEngine? = null
 	private var storageJob: Job? = null
 	private var journeyListJob: Job? = null
@@ -83,12 +84,16 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val previousDownload=preparationDownload
 		previousDownload?.cancel()
 		val generation=++preparationDownloadGeneration
+		val operation = journalOperations.capture()
+		val sourceId = uiState.journeyId
 		uiState=uiState.copy(offlinePreloadStatus=FlightTerrainStatus(phase=FlightTerrainPhase.DOWNLOADING))
 		preparationDownload=viewModelScope.launch {
 			try {
 				previousDownload?.join()
-				val original=saveLocalJournal()
+				if (!journalOperations.isCurrent(operation)) return@launch
+				val original=saveLocalJournal(sourceId)
 				withContext(Dispatchers.IO) { journeyStore.update(original.id) { it.copy(offlineRequest=quote.assets) } }
+				if (!journalOperations.isCurrent(operation)) return@launch
 				uiState=uiState.copy(offlinePreloadStatus=FlightTerrainStatus(phase=FlightTerrainPhase.DOWNLOADING))
 				val result=terrainRepository.preloadPrepared(quote) { status ->
 					if(uiState.journeyId==original.id && generation==preparationDownloadGeneration) uiState=uiState.copy(offlinePreloadStatus=status)
@@ -98,7 +103,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				}
 				if(uiState.journeyId==original.id && generation==preparationDownloadGeneration) uiState=uiState.copy(offlineAssets=saved.offlineAssets,offlinePreloadStatus=result.status)
 			} catch(e:CancellationException) { throw e }
-			catch(e:Exception) { if(generation==preparationDownloadGeneration) uiState=uiState.copy(offlinePreloadStatus=uiState.offlinePreloadStatus.copy(phase=FlightTerrainPhase.ERROR,message=e.message)) }
+			catch(e:Exception) { if(journalOperations.isCurrent(operation) && generation==preparationDownloadGeneration) uiState=uiState.copy(offlinePreloadStatus=uiState.offlinePreloadStatus.copy(phase=FlightTerrainPhase.ERROR,message=e.message)) }
 		}
 	}
 	fun pausePreparationDownload() {
@@ -114,6 +119,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 		simulationJob?.cancel()
 		uiState = uiState.copy(simulationLoading = true, simulationError = null)
+		val operation = journalOperations.capture()
 		simulationJob=viewModelScope.launch {
 			try {
 				if (simulationOriginal == null) {
@@ -125,7 +131,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				}
 				val plan = uiState.plan
 				val trip=withContext(Dispatchers.Default) { FlightOfflinePreparation.simulation(plan) }
-				if (FlightOfflinePreparation.simulationInput(uiState.plan) != FlightOfflinePreparation.simulationInput(plan) ||
+				if (!journalOperations.isCurrent(operation) || FlightOfflinePreparation.simulationInput(uiState.plan) != FlightOfflinePreparation.simulationInput(plan) ||
 					uiState.sessionMode != FlightSessionMode.PREPARE) return@launch
 				replayEngine = FlightReplayEngine(trip)
 				val progress=uiState.replayProgress
@@ -134,7 +140,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					replayProgress=progress, replayPlaying=false, previewingPlan=true, simulationLoading=false)
 				uiState.snapshot?.sample?.let(::requestTerrain)
 			} catch(e:CancellationException) { throw e }
-			catch(e:Exception) { uiState=uiState.copy(simulationLoading=false,simulationError=e.message ?: "simulation_failed") }
+			catch(e:Exception) { if (journalOperations.isCurrent(operation)) uiState=uiState.copy(simulationLoading=false,simulationError=e.message ?: "simulation_failed") }
 		}
 	}
 
@@ -309,6 +315,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private fun schedulePreparationSimulation() {
 		if (uiState.sessionMode != FlightSessionMode.PREPARE) return
 		simulationJob?.cancel()
+		val operation = journalOperations.capture()
 		val plan = uiState.plan
 		if (!FlightOfflinePreparation.canSimulate(plan)) {
 			replayEngine = null
@@ -325,14 +332,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			try {
 			delay(250)
 			val trip=withContext(Dispatchers.Default) { FlightOfflinePreparation.simulation(plan) }
-			if (FlightOfflinePreparation.simulationInput(uiState.plan) != FlightOfflinePreparation.simulationInput(plan) ||
+			if (!journalOperations.isCurrent(operation) || FlightOfflinePreparation.simulationInput(uiState.plan) != FlightOfflinePreparation.simulationInput(plan) ||
 				uiState.sessionMode != FlightSessionMode.PREPARE) return@launch
 			replayEngine=FlightReplayEngine(trip)
 			uiState=uiState.copy(trip=trip,profile=FlightProfilePlanner.fromTrip(trip),previewingPlan=true,simulationLoading=false,simulationError=null,
 				snapshot=replayEngine?.snapshotAt(uiState.replayProgress))
 			uiState.snapshot?.sample?.let(::requestTerrain)
 			} catch (e: CancellationException) { throw e }
-			catch (e: Exception) { uiState = uiState.copy(simulationLoading=false,simulationError=e.message ?: "simulation_failed") }
+			catch (e: Exception) { if (journalOperations.isCurrent(operation)) uiState = uiState.copy(simulationLoading=false,simulationError=e.message ?: "simulation_failed") }
 		}
 	}
 
@@ -378,8 +385,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun savePreparation(arm: Boolean) {
-		if(uiState.savingPreparation)return
+		if(uiState.savingPreparation || uiState.loadingTrip)return
 		val sourceId=uiState.journeyId
+		val operation = journalOperations.capture()
 		uiState=uiState.copy(savingPreparation=true,scheduleError=null)
 		viewModelScope.launch {
 			try {
@@ -389,7 +397,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					armedAt=withContext(Dispatchers.IO) { FlightScheduleManager.arm(app,saved.copy(plan=saved.plan.copy(preparation=scheduled))) }
 				}
 				val saved=result.saved
-				if (uiState.journeyId!=saved.id) return@launch
+				if (!journalOperations.isCurrent(operation) || uiState.journeyId!=saved.id) return@launch
 				uiState=uiState.copy(journeyMessage=app.getString(net.osmand.plus.R.string.flight_plan_saved))
 				if (result.armed) {
 					val scheduled = (saved.plan.preparation ?: FlightPreparation()).copy(automatic=true)
@@ -398,9 +406,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				}
 				result.scheduleError?.let { uiState=uiState.copy(scheduleError=it.message ?: "schedule_failed") }
 			} catch(e:CancellationException) { throw e }
-			catch(e:Exception) { uiState=uiState.copy(journeyMessage=e.message,journeySaveError=e.message ?: "save_failed") }
+			catch(e:Exception) { if (journalOperations.isCurrent(operation)) uiState=uiState.copy(journeyMessage=e.message,journeySaveError=e.message ?: "save_failed") }
 			finally {
-				if(uiState.journeyId==sourceId || sourceId==null) {
+				if(journalOperations.isCurrent(operation)) {
 					uiState=uiState.copy(savingPreparation=false)
 					if (uiState.journeyDirty && uiState.journeySaveError == null) schedulePhotoPersistence()
 				}
@@ -410,14 +418,15 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun cancelAutomaticDeparture() {
 		val id = uiState.journeyId ?: return
+		val operation = journalOperations.capture()
 		viewModelScope.launch {
 			try {
 				withContext(Dispatchers.IO) { FlightScheduleManager.cancel(app, id) }
-				if (uiState.journeyId != id) return@launch
+				if (!journalOperations.isCurrent(operation) || uiState.journeyId != id) return@launch
 				uiState=uiState.copy(scheduledPreparation=null,scheduledStartMillis=null,scheduleError=null)
 				updatePlan(uiState.plan.copy(preparation=(uiState.plan.preparation ?: FlightPreparation()).copy(automatic=false)))
 			} catch(e:CancellationException) { throw e }
-			catch(e:Exception) { uiState=uiState.copy(scheduleError=e.message ?: "schedule_failed") }
+			catch(e:Exception) { if (journalOperations.isCurrent(operation)) uiState=uiState.copy(scheduleError=e.message ?: "schedule_failed") }
 		}
 	}
 
@@ -449,6 +458,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun localJourneyRemoved(id: String) {
 		if (uiState.journeyId == id) {
+			journalOperations.invalidate()
 			FlightNetworkAccess.release(offlineOwner)
 			photoPersistenceJob?.cancel(); simulationJob?.cancel(); liveTimelineJob?.cancel()
 			simulationOriginal=null; replayEngine=null; terrainStreamingEngine.reset()
@@ -534,15 +544,22 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun refreshStorageUsage() {
 		storageJob?.cancel()
+		val operation = journalOperations.capture()
 		val journeyId = uiState.journeyId
 		val photos = uiState.photos
 		val offlineAssets = uiState.offlineAssets
 		uiState = uiState.copy(storageUsageLoading = true)
 		storageJob = viewModelScope.launch {
-			val usage = withContext(Dispatchers.IO) {
-				journeyStore.storageUsage(journeyId, photos, offlineAssets)
+			try {
+				val usage = withContext(Dispatchers.IO) {
+					journeyStore.storageUsage(journeyId, photos, offlineAssets)
+				}
+				if (journalOperations.isCurrent(operation)) uiState = uiState.copy(storageUsage = usage, storageUsageLoading = false)
+			} catch (error: CancellationException) {
+				throw error
+			} catch (error: Exception) {
+				if (journalOperations.isCurrent(operation)) uiState = uiState.copy(storageUsageLoading = false, journeyMessage = error.message)
 			}
-			uiState = uiState.copy(storageUsage = usage, storageUsageLoading = false)
 		}
 	}
 
@@ -652,7 +669,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun startLive() {
-		if (liveStartJob?.isActive == true) return
+		if (liveStartJob?.isActive == true || uiState.loadingTrip) return
+		var operation = journalOperations.capture()
 		FlightNetworkAccess.release(offlineOwner)
 		uiState = uiState.copy(offlineSimulation=false)
 		simulationJob?.cancel()
@@ -665,20 +683,25 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		liveStartJob = viewModelScope.launch {
 			try {
 				policySaveJob?.join()
+				if (!journalOperations.isCurrent(operation)) return@launch
 				val sourceId = uiState.journeyId
 				val phase = withContext(Dispatchers.IO) {
 					sourceId?.let { FlightRecordingStore(app, it).readState().phase } ?: FlightTrackingPhase.WAITING
 				}
-				if (uiState.journeyId != sourceId) return@launch
+				if (!journalOperations.isCurrent(operation) || uiState.journeyId != sourceId) return@launch
 				if (FlightWorkPolicy.needsNewRecordingJournal(uiState.simulatedJourney,
 					!uiState.trip?.samples.isNullOrEmpty(), phase)) {
 					// Reusing a completed journey means repeating its plan, never overwriting measurements/photos.
 					saveLocalJournal()
+					if (!journalOperations.isCurrent(operation)) return@launch
+					journalOperations.invalidate()
+					operation = journalOperations.capture()
 					uiState=uiState.copy(journeyId=null,journeyCreatedAtMillis=null,trip=null,photos=emptyList(),
 						batteryHistory=emptyList(),flightSpans=emptyList(),previewingPlan=false,simulatedJourney=false,
 						journeyName=if(uiState.simulatedJourney) FlightJourneyNaming.route(uiState.plan) else uiState.journeyName)
 				}
 				val prepared=saveLocalJournal()
+				if (!journalOperations.isCurrent(operation) || uiState.journeyId != prepared.id) return@launch
 				livePredictor.reset()
 				replayEngine=null
 				uiState=uiState.copy(page=FlightPage.MAP,sessionMode=FlightSessionMode.LIVE,
@@ -687,6 +710,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				FlightRecordingService.start(app,prepared.id)
 			} catch(e:CancellationException) { throw e }
 			catch(e:Exception) {
+				if (!journalOperations.isCurrent(operation)) return@launch
 				val message = e.message ?: e.javaClass.simpleName
 				uiState=uiState.copy(journeyMessage=message,
 					liveState=uiState.liveState.copy(journeyId=uiState.journeyId, running=false, error=message))
@@ -697,17 +721,20 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var liveStartJob: Job? = null
 
 	fun startLiveSimulation() {
-		if (uiState.simulationLoading) return
+		if (uiState.simulationLoading || uiState.loadingTrip) return
 		if (FlightRecordingService.state.value.running) {
 			uiState=uiState.copy(journeyMessage=app.getString(net.osmand.plus.R.string.flight_live_already_running))
 			return
 		}
 		val source = uiState
 		if (!FlightOfflinePreparation.canSimulate(source.plan) && (source.trip?.samples?.size ?: 0) < 2) return
+		val operation = journalOperations.capture()
 		uiState=uiState.copy(simulationLoading=true,simulationError=null)
 		viewModelScope.launch {
+			var createdId: String? = null
 			try {
 				savePendingLocalChanges()
+				if (!journalOperations.isCurrent(operation)) return@launch
 				val now=System.currentTimeMillis()
 				val copy=FlightJourney("simulation_${UUID.randomUUID()}",
 					app.getString(net.osmand.plus.R.string.flight_immersion_name,source.journeyName),now,now,
@@ -715,6 +742,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					if(source.previewingPlan) recordedFlightTrip("",emptyList()) else source.trip ?: recordedFlightTrip("",emptyList()),
 					emptyList(),emptyList(),source.offlineAssets,simulation=true)
 				val saved=withContext(Dispatchers.IO) { journeyStore.save(copy) }
+				if (!journalOperations.isCurrent(operation)) return@launch
+				createdId = saved.id
 				setOfflineSimulation(true)
 				applyJourney(saved)
 				simulationJob?.cancel(); simulationOriginal=null; replayEngine=null; livePredictor.reset()
@@ -723,8 +752,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					liveState=FlightLiveState(journeyId=saved.id,simulation=true))
 				FlightRecordingService.simulate(app,saved.id)
 			} catch(e:CancellationException) { throw e }
-			catch(e:Exception) { uiState=uiState.copy(simulationLoading=false,simulationError=e.message,
-				sessionMode=FlightSessionMode.PREPARE,page=FlightPage.PREPARE) }
+			catch(e:Exception) {
+				if (createdId != null && uiState.journeyId == createdId) {
+					uiState=uiState.copy(simulationLoading=false,simulationError=e.message,
+						sessionMode=FlightSessionMode.REPLAY,page=FlightPage.MAP)
+				} else if (journalOperations.isCurrent(operation)) {
+					uiState=uiState.copy(simulationLoading=false,simulationError=e.message)
+				}
+			}
 		}
 	}
 
@@ -768,6 +803,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			return
 		}
 		pendingDuplicateTrip = trip
+		abandonJournalNavigationWork()
 		uiState = uiState.copy(
 			loadingTrip = false,
 			duplicateJourneyWarning = matchingJourney,
@@ -814,6 +850,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun applyJourney(journey: FlightJourney, details: Boolean = false) {
+		journalOperations.invalidate()
 		simulationJob?.cancel(); liveTimelineJob?.cancel(); liveCursorMillis=null
 		simulationOriginal=null
 		if(journey.id!=uiState.journeyId)livePredictor.reset()
@@ -890,6 +927,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		message: String?,
 		initialPage: FlightPage = FlightPage.MAP
 	) {
+		journalOperations.invalidate()
 		simulationJob?.cancel()
 		liveTimelineJob?.cancel()
 		simulationOriginal = null
@@ -940,11 +978,19 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (hasOfflineCorridorSource()) scheduleAutomaticOfflinePreload()
 	}
 
+	private fun abandonJournalNavigationWork() {
+		// Leaving invalidates old completions even if loading the next flight fails.
+		// Do not leave the retained flight with spinners whose owners can no longer clear them.
+		simulationJob?.cancel()
+		storageJob?.cancel()
+		if (uiState.offlinePreloadStatus.phase in listOf(FlightTerrainPhase.PLANNING,
+			FlightTerrainPhase.DOWNLOADING, FlightTerrainPhase.BUILDING)) pausePreparationDownload()
+		uiState = uiState.afterAbandonedJournalNavigation()
+	}
+
 	private fun showTripLoadFailure(error: Throwable) {
-		uiState = uiState.copy(
-			loadingTrip = false,
-			tripLoadError = error.message ?: "Impossible de charger ce trajet"
-		)
+		abandonJournalNavigationWork()
+		uiState = uiState.afterFailedJournalNavigation(error.message ?: "Impossible de charger ce trajet")
 	}
 
 	fun clearTripLoadError() {
@@ -1365,6 +1411,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun persistJourney(showConfirmation: Boolean) {
+		val operation = journalOperations.capture()
 		val planned = uiState.sessionMode == FlightSessionMode.PREPARE
 		val trip = uiState.trip
 		if (!planned && uiState.journeyId == null && trip?.samples.isNullOrEmpty()) {
@@ -1382,6 +1429,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			} catch (error: CancellationException) {
 				throw error
 			} catch (error: Exception) {
+				if (!journalOperations.isCurrent(operation)) return@launch
 				uiState = uiState.copy(
 					journeySaveError = error.message ?: "save_failed",
 					journeyMessage = error.message ?: "Enregistrement automatique impossible"
@@ -1439,6 +1487,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			uiState = uiState.copy(confirmJourneyNavigation = true)
 			return
 		}
+		// Invalidate before the first suspension: imports must not complete into a departing flight.
+		journalOperations.invalidate()
 		pendingDuplicateTrip = null
 		uiState = uiState.copy(loadingTrip = true, tripLoadError = null,
 			duplicateJourneyWarning = null, replayPlaying = false, journeyMessage = null)
@@ -1503,6 +1553,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun exportJourney(uri: Uri) {
+		val operation = journalOperations.capture()
 		if(uiState.previewingPlan) return
 		val trip = uiState.trip
 		if (trip == null || trip.samples.isEmpty()) {
@@ -1524,6 +1575,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 		viewModelScope.launch {
 			val result = runCatching { withContext(Dispatchers.IO) { journeyStore.exportArchive(journey, uri) } }
+			result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+			if (!journalOperations.isCurrent(operation)) return@launch
 			uiState = uiState.copy(
 				journeyMessage = result.fold(
 					onSuccess = { "Archive exportée : GPX + capteurs + photos + données hors ligne" },
@@ -1535,13 +1588,19 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun stageReplayPhotos(uris: List<Uri>) {
 		if (uris.isEmpty()) return
+		val token = journalOperations.capture()
+		val sourceTrip = uiState.trip
 		viewModelScope.launch {
-			val photos = withContext(Dispatchers.IO) { journeyStore.importPhotos(uris, uiState.trip) }
-			uiState = uiState.copy(
-				pendingPhotos = (uiState.pendingPhotos + photos).sortedWith(PHOTO_TIME_COMPARATOR),
-				selectedPhotoId = photos.firstOrNull()?.id ?: uiState.selectedPhotoId,
-				journeyMessage = if (photos.isEmpty()) "Aucune photo lisible" else "${photos.size} photo(s) à valider"
-			)
+			journalOperations.loadOwned(token,
+				load = { journeyStore.importPhotos(uris, sourceTrip) },
+				publish = { photos ->
+					uiState = uiState.copy(
+						pendingPhotos = (uiState.pendingPhotos + photos).sortedWith(PHOTO_TIME_COMPARATOR),
+						selectedPhotoId = photos.firstOrNull()?.id ?: uiState.selectedPhotoId,
+						journeyMessage = if (photos.isEmpty()) "Aucune photo lisible" else "${photos.size} photo(s) à valider"
+					)
+				},
+				discard = { journeyStore.discardPhotos(it) })
 		}
 	}
 
@@ -1631,12 +1690,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun associatePhotoAutomatically(id: String) {
 		val originalPhoto = findPhoto(id) ?: return
 		val originalTrip = uiState.trip
+		val operation = journalOperations.capture()
 		viewModelScope.launch {
 			val redetectedPhoto = if (originalPhoto.timestampMillis == null) {
 				withContext(Dispatchers.IO) {
 					journeyStore.redetectMissingPhotoTimestamp(originalPhoto, originalTrip)
 				}
 			} else originalPhoto
+			if (!journalOperations.isCurrent(operation)) return@launch
 			val currentPhoto = findPhoto(id) ?: return@launch
 			val photo = if (currentPhoto.timestampMillis == null && redetectedPhoto.timestampMillis != null) {
 				currentPhoto.copy(
@@ -1792,6 +1853,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun detectAndApplyPhotoPerspective(id: String, mayInitializeCamera: Boolean) {
+		val operation = journalOperations.capture()
 		viewModelScope.launch {
 			val photo = findPhoto(id) ?: return@launch
 			val initialPlacement = uiState.windowPlacement
@@ -1800,6 +1862,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			val detectedFov = withContext(Dispatchers.IO) {
 				journeyStore.detectPhotoVerticalFieldOfViewDegrees(photo)
 			} ?: return@launch
+			if (!journalOperations.isCurrent(operation)) return@launch
 			val latestPhoto = findPhoto(id) ?: return@launch
 			val currentAlignment = latestPhoto.windowAlignment
 			// Initial viewport measurement is not a user edit.
@@ -1983,6 +2046,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	override fun onCleared() {
+		journalOperations.invalidate()
 		stopObservingSchedules?.invoke()
 		deviceStateJob?.cancel()
 		FlightUiActivity.set(this, null)
