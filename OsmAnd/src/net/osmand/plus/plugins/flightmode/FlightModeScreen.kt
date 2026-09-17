@@ -802,7 +802,11 @@ private fun MapScreen(
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(2.dp)
 		) {
-			FlightMapRendererBadge(openGlRendererAttached, mapElevation)
+			FlightMapRendererBadge(openGlRendererAttached, mapElevation) {
+				mapView?.setElevationAngle(90f)
+				mapView?.refreshMap()
+				mapElevation = 90f
+			}
 			FlightMapRoundButton(
 				icon = if (state.mapCenterLocked) R.drawable.ic_action_lock else R.drawable.ic_action_lock_open,
 				tint = if (state.mapCenterLocked) FlightGreen else FlightMuted,
@@ -914,7 +918,7 @@ private fun FlightMapScaleBar(scale: FlightMapScale, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun FlightMapRendererBadge(openGlRendererAttached: Boolean, elevationAngle: Float) {
+private fun FlightMapRendererBadge(openGlRendererAttached: Boolean, elevationAngle: Float, onResetTilt: () -> Unit) {
 	val tint = if (openGlRendererAttached) FlightGreen else FlightWarning
 	val label = if (openGlRendererAttached) {
 		"OPENGL · ${elevationAngle.roundToInt()}°"
@@ -930,6 +934,7 @@ private fun FlightMapRendererBadge(openGlRendererAttached: Boolean, elevationAng
 		letterSpacing = 0.3.sp,
 		maxLines = 1,
 		modifier = Modifier
+			.clickable(enabled = openGlRendererAttached, onClickLabel = stringResource(R.string.flight_map_top_view), onClick = onResetTilt)
 			.background(FlightHudPanel, RoundedCornerShape(4.dp))
 			.border(1.dp, tint, RoundedCornerShape(4.dp))
 			.padding(horizontal = 5.dp, vertical = 3.dp)
