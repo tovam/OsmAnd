@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_route_waypoint">Passage</string>
+    <string name="flight_route_stopover">Escale</string>
+    <string name="flight_route_add_stopover">+ Escale</string>
+    <string name="flight_route_edit">Suite du vol</string>
+    <string name="flight_route_edit_hint">Choisis un point puis place-le sur la carte. Le GPS déjà enregistré reste inchangé.</string>
     <string name="flight_profile_full">Profil : mesuré + estimé</string>
     <string name="flight_profile_measured">Profil : mesuré seul</string>
     <string name="flight_cal_local_relief_missing">Relief hors ligne absent pour le repère (%1$.5f, %2$.5f). Précharge cette zone avant le vol. Aucun téléchargement n’est lancé par le calcul.</string>

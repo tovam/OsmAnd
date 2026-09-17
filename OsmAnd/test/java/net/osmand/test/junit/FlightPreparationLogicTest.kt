@@ -262,7 +262,11 @@ class FlightPreparationLogicTest {
         val plan =
             route(45.0 to 0.0, 45.0 to 10.0).let {
                 it.copy(
-                    stops = listOf(it.stops.first(), FlightStop("Via", 45.0, 5.0), it.stops.last()),
+                    stops = listOf(
+                        it.stops.first(),
+                        FlightStop("Via", 45.0, 5.0, FlightStopType.WAYPOINT),
+                        it.stops.last(),
+                    ),
                     preparation =
                         it.preparation!!.copy(
                             departureMillis = base,

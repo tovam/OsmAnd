@@ -770,6 +770,7 @@ class FlightJourneyStore(private val context: Context) {
 					put("name", stop.name)
 					putOptional("latitude", stop.latitude)
 					putOptional("longitude", stop.longitude)
+					put("type", stop.type.name)
 				})
 			}
 		})
@@ -780,7 +781,14 @@ class FlightJourneyStore(private val context: Context) {
 		val stopsJson = json.optJSONArray("stops") ?: JSONArray()
 		val stops = (0 until stopsJson.length()).mapNotNull { index ->
 			stopsJson.optJSONObject(index)?.let {
-				FlightStop(it.optString("name"), it.optNullableDouble("latitude"), it.optNullableDouble("longitude"))
+				FlightStop(
+					name = it.optString("name"),
+					latitude = it.optNullableDouble("latitude"),
+					longitude = it.optNullableDouble("longitude"),
+					type = runCatching {
+						FlightStopType.valueOf(it.optString("type", FlightStopType.STOPOVER.name))
+					}.getOrDefault(FlightStopType.STOPOVER),
+				)
 			}
 		}.takeIf { it.size >= 2 } ?: FlightPlan.preview().stops
 		val terrainFineZoom = json.optInt(

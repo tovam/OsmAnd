@@ -78,9 +78,10 @@ internal fun FlightPlanningScreen(
                 withContext(Dispatchers.Default) { quote?.preview(!source, palette) ?: emptyList() }
         }
     fun change(next: FlightPreparation) = onUpdate(state.plan.copy(preparation = next))
-    fun addVia() {
+    fun addVia(type: FlightStopType = FlightStopType.WAYPOINT) {
         val stops = state.plan.stops.toMutableList()
-        stops.add(stops.lastIndex, FlightStop(context.getString(R.string.flight_plan_via)))
+        stops.add(stops.lastIndex, FlightStop(context.getString(
+            if (type == FlightStopType.WAYPOINT) R.string.flight_route_waypoint else R.string.flight_route_stopover), type = type))
         selected = stops.lastIndex - 1
         onUpdate(state.plan.copy(stops = stops, preparation = prep))
         mapEditor = true
@@ -256,6 +257,15 @@ internal fun FlightPlanningScreen(
                                         },
                                     )
                             }
+                            if (i in 1 until state.plan.stops.lastIndex) {
+                                PlanAction(stringResource(if (stop.type == FlightStopType.WAYPOINT)
+                                    R.string.flight_route_waypoint else R.string.flight_route_stopover), {
+                                    onUpdate(state.plan.copy(stops = state.plan.stops.mapIndexed { index, item ->
+                                        if (index == i) item.copy(type = if (item.type == FlightStopType.WAYPOINT)
+                                            FlightStopType.STOPOVER else FlightStopType.WAYPOINT) else item
+                                    }))
+                                })
+                            }
                         }
                         if (state.citySearchStopIndex != null) {
                             val stopIndex = state.citySearchStopIndex
@@ -272,6 +282,7 @@ internal fun FlightPlanningScreen(
                             }
                         }
                         PlanAction(stringResource(R.string.flight_plan_add_via), { addVia() })
+                        PlanAction(stringResource(R.string.flight_route_add_stopover), { addVia(FlightStopType.STOPOVER) })
                         FlightDateField(
                             stringResource(R.string.flight_plan_departure),
                             prep.departureMillis,
@@ -664,6 +675,7 @@ internal fun FlightPlanningScreen(
                         PlanAction("${i+1} ${s.name}", { selected = i }, selected == i)
                     }
                     PlanAction(stringResource(R.string.flight_plan_add_via), { addVia() })
+                    PlanAction(stringResource(R.string.flight_route_add_stopover), { addVia(FlightStopType.STOPOVER) })
                     if (selected > 0 && selected < state.plan.stops.lastIndex)
                         PlanAction(
                             stringResource(R.string.flight_plan_remove_via),
@@ -709,7 +721,7 @@ internal fun FlightPlanningScreen(
 }
 
 @Composable
-private fun FlightPlanMap(
+internal fun FlightPlanMap(
     plan: FlightPlan,
     selected: Int,
     coverage: List<Pair<TerrainTileId, Int>>,

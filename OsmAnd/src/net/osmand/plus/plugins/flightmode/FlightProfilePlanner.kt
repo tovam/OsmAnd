@@ -8,8 +8,8 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Builds one complete climb/cruise/descent profile per leg. A stopover therefore
- * always reaches ground level before the next leg starts climbing.
+ * Builds a ground-to-ground profile between stopovers. A waypoint stays in the same
+ * climb/cruise/descent block, so crossing it neither lands nor starts another climb.
  */
 object FlightProfilePlanner {
 
@@ -37,23 +37,23 @@ object FlightProfilePlanner {
 			val to = plan.stops[index + 1]
 			val start = distanceBefore / totalDistance
 			val end = (distanceBefore + distanceKm) / totalDistance
-			val span = end - start
-			val cruiseAltitude = cruiseAltitudeMeters(distanceKm)
-			val climbDistance = min(distanceKm * 0.34f, 170f)
-			val descentDistance = min(distanceKm * 0.38f, 190f)
-			val climbEnd = start + span * (climbDistance / distanceKm).coerceIn(0.18f, 0.46f)
-			val descentStart = end - span * (descentDistance / distanceKm).coerceIn(0.20f, 0.48f)
-			val safeDescentStart = descentStart.coerceAtLeast(climbEnd)
-
-			val points = listOf(
-				FlightProfilePoint(start, 0f, index),
-				FlightProfilePoint(start + (climbEnd - start) * 0.18f, cruiseAltitude * 0.30f, index),
-				FlightProfilePoint(climbEnd, cruiseAltitude, index),
-				FlightProfilePoint(safeDescentStart, cruiseAltitude, index),
-				FlightProfilePoint(safeDescentStart + (end - safeDescentStart) * 0.68f, cruiseAltitude * 0.28f, index),
-				FlightProfilePoint(end, 0f, index)
+			val blockStart = blockStartLeg(plan, index)
+			val blockEnd = blockEndLeg(plan, index)
+			val blockDistance = distances.subList(blockStart, blockEnd + 1).sum().coerceAtLeast(1f)
+			val distanceIntoBlock = distances.subList(blockStart, index).sum()
+			val cruiseAltitude = cruiseAltitudeMeters(blockDistance)
+			val points = profilePointsForLeg(
+				index = index,
+				start = start,
+				end = end,
+				blockStart = distanceIntoBlock / blockDistance,
+				blockEnd = (distanceIntoBlock + distanceKm) / blockDistance,
+				cruiseAltitude = cruiseAltitude,
 			)
-			val duration = ((distanceKm / TYPICAL_CRUISE_SPEED_KMH) * 60f + 24f).roundToInt()
+			// The climb/descent allowance belongs to a ground-to-ground block, not to each
+			// overflight waypoint inside it. This retains legacy timing for stopovers.
+			val duration = (distanceKm / TYPICAL_CRUISE_SPEED_KMH * 60f).roundToInt() +
+				if (index == blockStart) 24 else 0
 			legs += FlightProfileLeg(
 				index = index,
 				from = from,
@@ -70,8 +70,50 @@ object FlightProfilePlanner {
 			totalDuration += duration
 		}
 
-		totalDuration += STOPOVER_MINUTES * (legs.size - 1).coerceAtLeast(0)
+		totalDuration += (1 until plan.stops.lastIndex).count(plan::isIntermediateStopover) * STOPOVER_MINUTES
 		return FlightProfile(legs, allPoints, totalDistance, totalDuration)
+	}
+
+	private fun blockStartLeg(plan: FlightPlan, legIndex: Int): Int {
+		for (stopIndex in legIndex downTo 1) {
+			if (plan.isIntermediateStopover(stopIndex)) return stopIndex
+		}
+		return 0
+	}
+
+	private fun blockEndLeg(plan: FlightPlan, legIndex: Int): Int {
+		for (stopIndex in legIndex + 1 until plan.stops.lastIndex) {
+			if (plan.isIntermediateStopover(stopIndex)) return stopIndex - 1
+		}
+		return plan.stops.lastIndex - 1
+	}
+
+	private fun profilePointsForLeg(
+		index: Int,
+		start: Float,
+		end: Float,
+		blockStart: Float,
+		blockEnd: Float,
+		cruiseAltitude: Float,
+	): List<FlightProfilePoint> {
+		val anchors = listOf(blockStart, 0.18f, 0.80f, blockEnd)
+			.filter { it in blockStart..blockEnd }
+			.distinct()
+		return anchors.map { blockProgress ->
+			val legProgress = if (blockEnd == blockStart) 0f else
+				(blockProgress - blockStart) / (blockEnd - blockStart)
+			FlightProfilePoint(
+				progress = start + (end - start) * legProgress,
+				altitudeMeters = altitudeAt(blockProgress, cruiseAltitude),
+				legIndex = index,
+			)
+		}
+	}
+
+	private fun altitudeAt(progress: Float, cruiseAltitude: Float): Float = when {
+		progress < 0.18f -> cruiseAltitude * (progress / 0.18f)
+		progress > 0.80f -> cruiseAltitude * ((1f - progress) / 0.20f)
+		else -> cruiseAltitude
 	}
 
 	fun fromTrip(trip: FlightTrip): FlightProfile {

@@ -73,7 +73,7 @@ class FlightRecordingService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action in listOf(STOP, MICROPHONE, SIMULATION_CONTROL, CONFIRM_AIRBORNE, POLICY) &&
+        if (intent?.action in listOf(STOP, MICROPHONE, SIMULATION_CONTROL, CONFIRM_AIRBORNE, POLICY, ROUTE) &&
             (realHandoffPending || !targetsCurrentJourney(intent))) {
             if (!startRequested && !updates.value.running) stopSelf()
             return restartMode()
@@ -146,6 +146,27 @@ class FlightRecordingService : Service(), LocationListener {
         if (intent?.action == STOP) {
             worker.post { if (targetsCurrentJourney(intent)) stopRecording(FlightTrackingPhase.STOPPED) }
             return if (realHandoffPending) START_STICKY else START_NOT_STICKY
+        }
+        if (intent?.action == ROUTE) {
+            worker.post {
+                if (!targetsCurrentJourney(intent) || !updates.value.running || stopping) return@post
+                val current = journey ?: return@post
+                val names = intent.getStringArrayExtra("routeNames") ?: return@post
+                val latitudes = intent.getDoubleArrayExtra("routeLatitudes") ?: return@post
+                val longitudes = intent.getDoubleArrayExtra("routeLongitudes") ?: return@post
+                val types = intent.getStringArrayExtra("routeTypes") ?: return@post
+                if (names.size !in 2..100 || latitudes.size != names.size ||
+                    longitudes.size != names.size || types.size != names.size) return@post
+                val stops = names.indices.map { i -> FlightStop(names[i].take(256), latitudes[i], longitudes[i],
+                    runCatching { FlightStopType.valueOf(types[i]) }.getOrDefault(FlightStopType.STOPOVER)) }
+                val plan = current.plan.copy(stops = stops)
+                if (FlightOfflinePreparation.canSimulate(plan)) {
+                    journey = current.copy(plan = plan)
+                    if (updates.value.simulation) updates.value = updates.value.copy(simulationPlan = plan)
+                }
+                // Persistence is the UI metadata save. Never rewrite measured samples or detector state.
+            }
+            return restartMode()
         }
         if (intent?.action == POLICY) {
             worker.post {
@@ -669,6 +690,7 @@ class FlightRecordingService : Service(), LocationListener {
         const val PREFS = "flight-recording-service"
         const val STOP = "flight.stop"
         const val POLICY = "flight.policy"
+        const val ROUTE = "flight.route"
         const val MICROPHONE = "flight.microphone"
         const val CONFIRM_AIRBORNE = "flight.confirm.airborne"
         const val SIMULATION_CONTROL = "flight.simulation.control"
@@ -782,6 +804,16 @@ class FlightRecordingService : Service(), LocationListener {
                     .putExtra(POLICY_MODE, safe.mode.name)
                     .putExtra(POLICY_FIXED_INTERVAL, safe.fixedIntervalSeconds)
             )
+        }
+
+        fun route(context: Context, journeyId: String?, stops: List<FlightStop>) {
+            require(stops.size in 2..100 && FlightOfflinePreparation.canSimulate(FlightPlan(stops)))
+            context.startService(Intent(context, FlightRecordingService::class.java).setAction(ROUTE)
+                .putExtra("journey", journeyId)
+                .putExtra("routeNames", stops.map { it.name.take(256) }.toTypedArray())
+                .putExtra("routeLatitudes", stops.map { requireNotNull(it.latitude) }.toDoubleArray())
+                .putExtra("routeLongitudes", stops.map { requireNotNull(it.longitude) }.toDoubleArray())
+                .putExtra("routeTypes", stops.map { it.type.name }.toTypedArray()))
         }
 
         private fun absAngle(a: Float, b: Float): Float {

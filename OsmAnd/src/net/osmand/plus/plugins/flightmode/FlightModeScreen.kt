@@ -277,6 +277,9 @@ fun FlightModeScreen(
 	) {
 		val safeDrawingInsets = WindowInsets.safeDrawing
 		var includeFutureProfile by rememberSaveable(state.journeyId) { mutableStateOf(true) }
+		var editLiveRoute by remember(state.journeyId) { mutableStateOf(false) }
+		if (editLiveRoute && state.sessionMode == FlightSessionMode.LIVE)
+			FlightLiveRouteEditor(state, onUpdatePlan, { editLiveRoute = false })
 		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney,
 			cloud, cloudSelectedKey, when (state.page) { FlightPage.PLANS -> 1; FlightPage.JOURNEYS -> 2; else -> 0 }, onLocalJourneyRemoved,
 			initialSettings = cloudSelectedKey == null)
@@ -366,6 +369,7 @@ fun FlightModeScreen(
 					onSaveJourney, onExportJourney, onUpdateJourneyName, onStartLive, onStopLive,
 					onDisarmPreparation, onSimulateLive, onOfflineSimulation, onSetRecordingPolicy, { onNewPreparation(true) })
 				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
+					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, { editLiveRoute = true })
 					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction,onSetRecordingPolicy) }
 					FlightBottomNavigation(state, onPageChange)
 				}
@@ -380,6 +384,7 @@ fun FlightModeScreen(
 					state = state,
 					includeFutureProfile = includeFutureProfile,
 					onIncludeFutureProfile = { includeFutureProfile = it },
+					onEditLiveRoute = { editLiveRoute = true },
 					mapView = mapView,
 					onClose = onClose,
 					onPageChange = onPageChange,
@@ -753,6 +758,7 @@ private fun MapScreen(
 	state: FlightUiState,
 	includeFutureProfile: Boolean,
 	onIncludeFutureProfile: (Boolean) -> Unit,
+	onEditLiveRoute: () -> Unit,
 	mapView: OsmandMapTileView?,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
@@ -864,6 +870,7 @@ private fun MapScreen(
 				CompactAction(stringResource(R.string.flight_map_points_short),
 					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
 				if (state.sessionMode == FlightSessionMode.LIVE) {
+					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, onEditLiveRoute)
 					AltitudeProfileSelector(includeFutureProfile, onIncludeFutureProfile)
 					LiveTimelineAction(state, onReturnLive)
 				}

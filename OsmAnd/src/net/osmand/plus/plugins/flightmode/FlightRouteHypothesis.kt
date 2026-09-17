@@ -4,6 +4,8 @@ import kotlin.math.*
 
 /** Planned geography is a hypothesis, separate from every measured sample and its altitude. */
 object FlightRouteHypothesis {
+	internal data class RemainingStop(val index: Int, val stop: FlightStop)
+
     private fun distance(a: Pair<Double, Double>, b: Pair<Double, Double>) =
         FlightTerrainTilePlanner.distanceKm(a.first, a.second, b.first, b.second)
 
@@ -32,22 +34,49 @@ object FlightRouteHypothesis {
         )
     }
 
-    private fun coordinates(plan: FlightPlan) =
-        plan.stops.mapNotNull { s -> s.latitude?.let { a -> s.longitude?.let { a to it } } }
+    /** A partially resolved route is not a different route with that stop removed. */
+    private fun coordinates(plan: FlightPlan): List<Pair<Double, Double>>? {
+        if (plan.stops.size < 2) return null
+        return plan.stops.map { stop ->
+            val latitude = stop.latitude ?: return null
+            val longitude = stop.longitude ?: return null
+            latitude to longitude
+        }
+    }
 
     fun distanceToPlanKm(plan: FlightPlan, sample: FlightSample): Double? =
-        coordinates(plan).zipWithNext().minOfOrNull { (a, b) ->
+        coordinates(plan)?.zipWithNext()?.minOfOrNull { (a, b) ->
             legDistance(a, b, sample.latitude to sample.longitude)
         }
 
-    fun remaining(plan: FlightPlan, sample: FlightSample): List<FlightSample> {
-        val stops = coordinates(plan)
-        if (stops.size < 2) return emptyList()
+    /** Stops after the deterministically nearest current segment, including its destination. */
+    internal fun remainingStops(plan: FlightPlan, sample: FlightSample): List<RemainingStop> {
+		if (plan.stops.size == 1) {
+			val destination = plan.stops.single()
+			return if (destination.latitude != null && destination.longitude != null)
+				listOf(RemainingStop(0, destination)) else emptyList()
+		}
+        val stops = coordinates(plan) ?: return emptyList()
         val at = sample.latitude to sample.longitude
-        val leg =
-            stops.zipWithNext().indices.minByOrNull { i -> legDistance(stops[i], stops[i + 1], at) }
-                ?: 0
-        val targets = listOf(at) + stops.drop(leg + 1)
+        var closestLeg = 0
+        var closestDistance = legDistance(stops[0], stops[1], at)
+        for (index in 1 until stops.lastIndex) {
+            val candidate = legDistance(stops[index], stops[index + 1], at)
+            if (candidate < closestDistance) {
+                closestLeg = index
+                closestDistance = candidate
+            }
+        }
+        return (closestLeg + 1..plan.stops.lastIndex).map { index ->
+            RemainingStop(index, plan.stops[index])
+        }
+    }
+
+    fun remaining(plan: FlightPlan, sample: FlightSample): List<FlightSample> {
+        val stops = remainingStops(plan, sample)
+        if (stops.isEmpty()) return emptyList()
+        val at = sample.latitude to sample.longitude
+        val targets = listOf(at) + stops.map { requireNotNull(it.stop.latitude) to requireNotNull(it.stop.longitude) }
         return targets.zipWithNext().flatMap { (a, b) ->
             val count = ceil(distance(a, b) / 20).toInt().coerceIn(1, 200)
             (0..count).map { i ->

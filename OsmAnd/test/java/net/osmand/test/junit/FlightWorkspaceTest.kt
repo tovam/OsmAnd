@@ -30,7 +30,7 @@ class FlightWorkspaceTest {
             FlightPlan(
                 listOf(
                     FlightStop("A", 45.0, 0.0),
-                    FlightStop("via", 46.0, 5.0),
+                    FlightStop("via", 46.0, 5.0, FlightStopType.WAYPOINT),
                     FlightStop("B", 45.0, 10.0),
                 ),
                 preparation =

@@ -355,7 +355,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val plan = uiState.plan
 		liveTimelineJob = viewModelScope.launch {
 			val timeline = withContext(Dispatchers.Default) { FlightLiveTimeline.build(plan, live.trip, fix) }
-			if (uiState.journeyId != live.journeyId || uiState.sessionMode != FlightSessionMode.LIVE) return@launch
+			if (uiState.journeyId != live.journeyId || uiState.sessionMode != FlightSessionMode.LIVE || uiState.plan != plan) return@launch
 			replayEngine = FlightReplayEngine(timeline)
 			val time = liveCursorMillis.takeIf { uiState.browsingLiveTimeline } ?: fix.timestampMillis
 			val progress = FlightLiveTimeline.progress(timeline, time)
@@ -633,7 +633,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val stops = uiState.plan.stops.toMutableList()
 		if (index !in stops.indices) return
 		if (stops[index].name == name) return
-		stops[index] = FlightStop(name = name)
+		stops[index] = stops[index].copy(name = name, latitude = null, longitude = null)
 		updatePlan(uiState.plan.copy(stops = stops))
 		searchCitiesForStop(index, name)
 	}
@@ -642,7 +642,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val stops = uiState.plan.stops.toMutableList()
 		if (index !in stops.indices) return
 		citySearchJob?.cancel()
-		stops[index] = FlightStop(
+		stops[index] = stops[index].copy(
 			name = suggestion.name,
 			latitude = suggestion.latitude,
 			longitude = suggestion.longitude
@@ -687,6 +687,19 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun updatePlan(plan: FlightPlan) {
 		if(plan==uiState.plan)return
+		val liveRouteChanged = uiState.sessionMode == FlightSessionMode.LIVE && plan.stops != uiState.plan.stops
+		if (liveRouteChanged) {
+			if (!FlightOfflinePreparation.canSimulate(plan)) return
+			// Route edits must never re-arm departure or change the live stop detector.
+			val safePlan = uiState.plan.copy(stops = plan.stops)
+			try { FlightRecordingService.route(getApplication(), uiState.journeyId, safePlan.stops) }
+			catch (error: Exception) { uiState = uiState.copy(journeyMessage = error.message); return }
+			liveTimelineJob?.cancel()
+			uiState = uiState.copy(plan = safePlan, journeyDirty = true)
+			rebuildLiveTimeline(uiState.liveState)
+			schedulePhotoPersistence()
+			return
+		}
 		val simulationChanged = FlightOfflinePreparation.simulationInput(plan) != FlightOfflinePreparation.simulationInput(uiState.plan)
 		val coverageChanged=plan.stops!=uiState.plan.stops || plan.preparation?.bands!=uiState.plan.preparation?.bands
 		if(coverageChanged) { preparationDownloadGeneration++; preparationDownload?.cancel() }

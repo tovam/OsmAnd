@@ -148,10 +148,18 @@ fun FlightWindowPlacement.viewAzimuthDegrees(
 	return if (normalized < 0f) normalized + 360f else normalized
 }
 
+/** An intermediate stop is either an overflight waypoint or a planned ground stop. */
+enum class FlightStopType {
+	STOPOVER,
+	WAYPOINT,
+}
+
 data class FlightStop(
 	val name: String,
 	val latitude: Double? = null,
-	val longitude: Double? = null
+	val longitude: Double? = null,
+	/** Legacy stops deliberately remain stopovers until the user explicitly changes them. */
+	val type: FlightStopType = FlightStopType.STOPOVER,
 )
 
 data class FlightCitySuggestion(
@@ -174,6 +182,10 @@ data class FlightPlan(
 	val resumeAfterRestart: Boolean = true,
 	val preparation: FlightPreparation? = null
 ) {
+	/** Departure and arrival always remain ground endpoints; only intermediate stopovers land. */
+	fun isIntermediateStopover(index: Int): Boolean =
+		index in 1 until stops.lastIndex && stops[index].type == FlightStopType.STOPOVER
+
 	companion object {
 		const val MIN_TERRAIN_DETAIL_ZOOM = 9
 		const val MAX_TERRAIN_DETAIL_ZOOM = 14
