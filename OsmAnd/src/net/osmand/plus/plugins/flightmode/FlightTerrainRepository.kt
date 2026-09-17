@@ -12,6 +12,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
@@ -1000,6 +1001,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					coarseAvailableTiles = available,
 					coarseFailedTiles = failed,
 					satelliteTiles = satelliteAvailable,
+					requestedSatelliteTiles = tilePlan.tiles.size,
 					satelliteFailedTiles = satelliteFailed,
 					bytesDownloaded = bytesDownloaded,
 					zoom = tilePlan.zoom
@@ -1017,6 +1019,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			coarseAvailableTiles = available,
 			coarseFailedTiles = failed,
 			satelliteTiles = satelliteAvailable,
+			requestedSatelliteTiles = tilePlan.tiles.size,
 			satelliteFailedTiles = satelliteFailed,
 			bytesDownloaded = bytesDownloaded,
 			zoom = tilePlan.zoom,
@@ -1051,7 +1054,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		var lastPublished = 0L
 		var lastFailure: String? = null
 		val terrainCount=quote.requests.count { !it.satellite }
-		fun status(phase:FlightTerrainPhase)=FlightTerrainStatus(phase=phase,requestedTiles=terrainCount,
+		fun status(phase:FlightTerrainPhase)=FlightTerrainStatus(phase=phase,requestedTiles=terrainCount,requestedSatelliteTiles=quote.satelliteCount,
+			offlineFilesVerified=terrain+satellite==quote.requests.size,
 			availableTiles=terrain,failedTiles=failedTerrain,satelliteTiles=satellite,satelliteFailedTiles=failedSatellite,
 			downloadedTiles=downloaded,bytesDownloaded=bytes,
 			bytesPerSecond=bytes*1000/(android.os.SystemClock.elapsedRealtime()-started).coerceAtLeast(1),
@@ -1072,12 +1076,19 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						else ensureTerrainFile(request.tile)
 					if (!fullyDecodedTile(cached.file)) {
 						withAssetLock(cached.file) {
-							if (!fullyDecodedTile(cached.file) && cached.file.exists() && !cached.file.delete())
-								throw IOException("Cannot replace corrupt tile ${request.tile}")
+							if (!fullyDecodedTile(cached.file)) {
+								FlightOfflineTileChanges.publish(request.tile, request.satellite, 0)
+								if (cached.file.exists() && !cached.file.delete())
+									throw IOException("Cannot replace corrupt tile ${request.tile}")
+							}
 						}
 						cached=if(request.satellite) ensureSatelliteSourceFile(request.tile,true) else ensureTerrainFile(request.tile)
-						if(!fullyDecodedTile(cached.file)) throw IOException("Unreadable downloaded tile ${request.tile}")
+						if(!fullyDecodedTile(cached.file)) {
+							FlightOfflineTileChanges.publish(request.tile, request.satellite, 0)
+							throw IOException("Unreadable downloaded tile ${request.tile}")
+						}
 					}
+					FlightOfflineTileChanges.publish(request.tile, request.satellite, cached.file.length())
 					Result.success(cached)
 				} catch(e:CancellationException) { throw e } catch(e:Exception) { Result.failure<CachedAsset>(e) }
 				finally { preparationCancellation.remove() }
@@ -1122,13 +1133,18 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		var tile = decodeTile(tileId, cached.file)
 		if (tile == null && !cached.downloaded) {
 			ensureWorkActive()
+			FlightOfflineTileChanges.publish(tileId, false, 0)
 			cached.file.delete()
 			cached = downloadTerrainTile(tileId, cached.file)
 			ensureWorkActive()
 			tile = decodeTile(tileId, cached.file)
 		}
+		if (tile == null) {
+			FlightOfflineTileChanges.publish(tileId, false, 0)
+			throw IOException("Tuile Terrarium illisible: ${tileId.zoom}/${tileId.x}/${tileId.y}")
+		}
 		return LoadedTerrainTile(
-			tile = tile ?: throw IOException("Tuile Terrarium illisible: ${tileId.zoom}/${tileId.x}/${tileId.y}"),
+			tile = tile,
 			downloadedBytes = cached.downloadedBytes,
 			memoryCacheHits = 0,
 			diskCacheHits = cached.diskCacheHits,
@@ -1319,6 +1335,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				)
 			}
 			if (!allowDownload) throw IOException("Téléchargement satellite temporairement désactivé")
+			FlightOfflineTileChanges.publish(tileId, true, 0)
 			if (file.exists() && !file.delete()) throw IOException("Texture satellite en cache verrouillée")
 			val downloaded = downloadAsset(
 				url = FlightSatelliteSource.tileUrl(tileId),
@@ -1326,7 +1343,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				accept = "image/jpeg",
 				sourceName = "EOX Sentinel-2",
 				connectTimeoutMillis = SATELLITE_CONNECT_TIMEOUT_MILLIS,
-				readTimeoutMillis = SATELLITE_READ_TIMEOUT_MILLIS
+				readTimeoutMillis = SATELLITE_READ_TIMEOUT_MILLIS,
+				offlineKey = FlightOfflineTileKey(tileId, true)
 			)
 			if (!isDecodableImage(file)) {
 				file.delete()
@@ -1358,7 +1376,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			url = "$TERRARIUM_BASE_URL/${tileId.zoom}/${tileId.x}/${tileId.y}.png",
 			destination = destination,
 			accept = "image/png",
-			sourceName = "Terrain Tiles"
+			sourceName = "Terrain Tiles",
+			offlineKey = FlightOfflineTileKey(tileId, false)
 		)
 
 	private fun downloadAsset(
@@ -1367,7 +1386,8 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		accept: String,
 		sourceName: String,
 		connectTimeoutMillis: Int = CONNECT_TIMEOUT_MILLIS,
-		readTimeoutMillis: Int = READ_TIMEOUT_MILLIS
+		readTimeoutMillis: Int = READ_TIMEOUT_MILLIS,
+		offlineKey: FlightOfflineTileKey? = null
 	): CachedAsset {
 		ensureWorkActive()
 		FlightNetworkAccess.requireOnline()
@@ -1411,6 +1431,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			if (!partial.renameTo(destination)) {
 				throw IOException("Impossible de finaliser la tuile $sourceName")
 			}
+			offlineKey?.let {
+				FlightOfflineTileChanges.publish(it.tile, it.satellite, if (isDecodableImage(destination)) total else 0)
+			}
 			return CachedAsset(
 				file = destination,
 				downloaded = true,
@@ -1442,14 +1465,31 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		return try { bitmap.width==256 && bitmap.height==256 } finally { bitmap.recycle() }
 	}
 
-	suspend fun existingPreparationBytes(quote: FlightOfflineQuote): Pair<Int,Long> = withContext(Dispatchers.IO) {
-		var count=0;var bytes=0L
-		for(request in quote.requests) {
-			kotlin.coroutines.coroutineContext.ensureActive()
-			val file=if(request.satellite) satelliteFile(request.tile) else tileFile(request.tile)
-			if(file.isFile && file.length()>0) { count++;bytes+=file.length() }
-		}
-		count to bytes
+	/** Lifecycle-owned, read-only inventory. It never starts a download or scans unrelated files. */
+	suspend fun observeOfflineCoverage(quote: FlightOfflineQuote,
+		onProgress: suspend (FlightOfflineCoverage) -> Unit): Unit = withContext(Dispatchers.IO) {
+		val inventory = FlightOfflineInventory(quote.requests)
+		val stopObserving = FlightOfflineTileChanges.observe(inventory::changed)
+		try {
+			coroutineScope {
+				launch {
+					for (request in quote.requests) {
+						currentCoroutineContext().ensureActive()
+						val key = FlightOfflineTileKey(request.tile, request.satellite)
+						val revision = inventory.revision(key) ?: continue
+						val file = if (request.satellite) satelliteFile(request.tile) else tileFile(request.tile)
+						val bytes = if (file.isFile && file.length() > 0 && isDecodableImage(file)) file.length() else 0L
+						inventory.inspected(key, revision, bytes)
+					}
+				}
+				var previous: FlightOfflineCoverage? = null
+				while (true) {
+					val progress = inventory.snapshot()
+					if (progress != previous) { onProgress(progress); previous = progress }
+					delay(500)
+				}
+			}
+		} finally { stopObserving() }
 	}
 
 	private fun decodeTile(tileId: TerrainTileId, file: File): TerrariumTile? {

@@ -61,13 +61,13 @@ internal fun FlightLiveScreen(
             now = SystemClock.elapsedRealtime()
         }
     }
-    val live = state.liveState
+    val live = state.recordingForSelectedFlight()
     val fix = if (live.running) live.latest else state.snapshot?.sample
     val age =
-        if (live.lastFixElapsed > 0) ((now - live.lastFixElapsed) / 1000).coerceAtLeast(0) else null
+        live.fixAgeSeconds(flightDisplayElapsed(now, SystemClock.elapsedRealtime()))
     val phase =
         when (live.tracking.phase) {
-            FlightTrackingPhase.WAITING -> R.string.flight_live_waiting
+            FlightTrackingPhase.WAITING -> R.string.flight_live_takeoff_undetected
             FlightTrackingPhase.AIRBORNE -> R.string.flight_live_airborne
             FlightTrackingPhase.LANDED -> R.string.flight_live_landed
             FlightTrackingPhase.STOPPED -> R.string.flight_live_stopped
@@ -116,7 +116,9 @@ internal fun FlightLiveScreen(
                 stringResource(R.string.flight_live_satellites),
                 "${fix?.satellitesUsed?:"—"} / ${fix?.satellitesFound?:"—"}",
             )
-            LiveRow(stringResource(R.string.flight_live_points), "${state.trip?.samples?.size?:0}")
+            LiveRow(stringResource(R.string.flight_live_points), "${live.trip?.samples?.size?:0}")
+            FlightRecordedPoints(live)
+            FlightOfflineProgressPanel(state)
             if (live.running) FlightRecordingPolicyControls(live.policy, onPolicy, live)
             Text(
                 stringResource(R.string.flight_live_prediction_hint),

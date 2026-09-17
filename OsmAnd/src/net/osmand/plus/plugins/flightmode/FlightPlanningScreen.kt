@@ -48,9 +48,9 @@ internal fun FlightPlanningScreen(
 ) {
     val context = LocalContext.current
     val prep = state.plan.preparation ?: FlightPreparation()
-    var quote by remember { mutableStateOf<FlightOfflineQuote?>(null) }
-    var quoting by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val quote = state.offlineQuote
+    val quoting = quote == null && state.offlineCoverageError == null && FlightOfflinePreparation.canSimulate(state.plan)
+    val error = state.offlineCoverageError
     var mapEditor by remember { mutableStateOf(false) }
     var section by remember { mutableStateOf(initialSection.coerceIn(0, 2)) }
     var showSaveError by remember { mutableStateOf(false) }
@@ -58,19 +58,10 @@ internal fun FlightPlanningScreen(
     var confirmStart by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(0) }
     var source by remember { mutableStateOf(false) }
-    var existing by remember { mutableStateOf<Pair<Int, Long>?>(null) }
     var freeBytes by remember { mutableLongStateOf(0) }
-    val repository =
-        remember(context) {
-            FlightTerrainRepository(context.applicationContext as net.osmand.plus.OsmandApplication)
-        }
-    DisposableEffect(repository) { onDispose { repository.close() } }
-    FlightVisibilityEffect(repository) { repository.setSceneWorkEnabled(it) }
     FlightResumedEffect(quote, state.offlinePreloadStatus.phase, section) {
         if (section != 1) return@FlightResumedEffect
         freeBytes = withContext(Dispatchers.IO) { context.filesDir.usableSpace }
-        existing = null
-        quote?.let { existing = repository.existingPreparationBytes(it) }
     }
     val palette =
         listOf(
@@ -81,27 +72,6 @@ internal fun FlightPlanningScreen(
             0x80F45F8E.toInt(),
             0x80FFFFFF.toInt(),
         )
-    // Names and schedules do not change the geographic download manifest.
-    val planKey = state.plan.stops.map { it.latitude to it.longitude } to prep.bands
-    FlightResumedEffect(planKey, section) {
-        if (section != 1) return@FlightResumedEffect
-        quote = null
-        error = null
-        quoting = true
-        delay(400)
-        try {
-            quote =
-                withContext(Dispatchers.Default) {
-                    FlightOfflinePreparation.quote(state.plan.copy(preparation = prep))
-                }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = e.message
-        } finally {
-            quoting = false
-        }
-    }
     val coverage by
         produceState<List<Pair<TerrainTileId, Int>>>(emptyList(), quote, source) {
             value =
@@ -491,7 +461,7 @@ internal fun FlightPlanningScreen(
                                     R.string.flight_plan_estimate,
                                     q.satelliteCount,
                                     q.terrainCount,
-                                    q.estimatedBytes / 1_073_741_824.0,
+                                    q.estimatedBytes / 1e9,
                                 ),
                                 color = Color.White,
                                 fontSize = 12.sp,
@@ -504,27 +474,12 @@ internal fun FlightPlanningScreen(
                             Text(
                                 stringResource(
                                     R.string.flight_plan_free_space,
-                                    freeBytes / 1_073_741_824.0,
+                                    freeBytes / 1e9,
                                 ),
                                 color = Color.LightGray,
                                 fontSize = 11.sp,
                             )
-                            existing?.let { (count, bytes) ->
-                                Text(
-                                    stringResource(
-                                        R.string.flight_plan_cached_estimate,
-                                        count,
-                                        bytes / 1_073_741_824.0,
-                                        q.estimatedBytes *
-                                            (1.0 -
-                                                count.toDouble() /
-                                                    q.requests.size.coerceAtLeast(1)) /
-                                            1_073_741_824.0,
-                                    ),
-                                    color = Color.LightGray,
-                                    fontSize = 11.sp,
-                                )
-                            }
+                            FlightOfflineProgressPanel(state)
                             PlanAction(
                                 stringResource(R.string.flight_plan_download),
                                 {
@@ -538,20 +493,9 @@ internal fun FlightPlanningScreen(
                         }
                         val offline = state.offlinePreloadStatus
                         if (offline.phase != FlightTerrainPhase.IDLE) {
-                            Text(
-                                "${stringResource(when(offline.phase) { FlightTerrainPhase.READY -> R.string.flight_plan_ready
-                        FlightTerrainPhase.ERROR -> R.string.flight_plan_partial
-                        FlightTerrainPhase.PAUSED -> R.string.flight_plan_pause_label
-                        else -> R.string.flight_plan_downloading })} · ${offline.message?:""} · %.1f MB · %.1f MB/s"
-                                    .format(
-                                        offline.bytesDownloaded / 1e6,
-                                        offline.bytesPerSecond / 1e6,
-                                    ),
-                                color =
-                                    if (offline.phase == FlightTerrainPhase.READY) Color(0xFF2CDBBE)
-                                    else Color.White,
-                                fontSize = 11.sp,
-                            )
+                            if (offline.phase == FlightTerrainPhase.ERROR) offline.message?.let {
+                                Text(it, color = Color(0xFFFFCC66), fontSize = 11.sp)
+                            }
                             if (offline.phase == FlightTerrainPhase.DOWNLOADING)
                                 PlanAction(
                                     stringResource(R.string.flight_plan_pause),

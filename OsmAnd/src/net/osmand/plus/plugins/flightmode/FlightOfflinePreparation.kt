@@ -48,6 +48,18 @@ class FlightOfflineQuote(
 object FlightOfflinePreparation {
     const val MAX_REQUESTS = 250_000
 
+    /** The same requested coverage as the downloader, including legacy Standard corridors. */
+    suspend fun corridorQuote(plan: FlightPlan, trip: FlightTrip?): FlightOfflineQuote {
+        if (plan.preparation != null) return quote(plan)
+        val tiles = trip?.samples?.takeIf { it.size >= 2 }?.let {
+            FlightTerrainTilePlanner.trackCorridorPlan(it, plan.terrainCorridorKm)
+        } ?: FlightTerrainTilePlanner.corridorPlan(plan.stops, plan.terrainCorridorKm)
+        requireNotNull(tiles) { "No route available for offline coverage" }
+        return FlightOfflineQuote(tiles.tiles.flatMap {
+            listOf(FlightOfflineRequest(it, false, 0), FlightOfflineRequest(it, true, 0))
+        }, plan.stops.mapNotNull { stop -> stop.latitude?.let { lat -> stop.longitude?.let { lat to it } } }, emptyList())
+    }
+
     fun canSimulate(plan: FlightPlan): Boolean =
         plan.stops.size >= 2 &&
             plan.stops.all {

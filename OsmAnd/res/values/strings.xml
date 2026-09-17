@@ -1,5 +1,28 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_live_signal_waiting">En attente du signal GPS</string>
+    <string name="flight_offline_refreshing">Recontrôle du stockage en cours…</string>
+    <string name="flight_live_recording_active">Enregistrement actif</string>
+    <string name="flight_live_takeoff_undetected">Décollage non détecté</string>
+    <string name="flight_live_recorded_count">%1$d points GPS enregistrés</string>
+    <string name="flight_live_simulated_count">%1$d points simulés enregistrés</string>
+    <string name="flight_live_no_new_fix">GPS non actualisé depuis %1$d s</string>
+    <string name="flight_live_recent_fix">Position GPS reçue il y a %1$d s</string>
+    <string name="flight_live_accuracy_suffix"> · ±%1$.0f m</string>
+    <string name="flight_live_recent_points">12 derniers points enregistrés · heure locale</string>
+    <string name="flight_live_no_recorded_points">Aucun point enregistré pour le moment</string>
+    <string name="flight_live_point_time">N° %1$d · %2$s</string>
+    <string name="flight_offline_counting">Tuiles du trajet · calcul de la couverture…</string>
+    <string name="flight_offline_count_failed">Tuiles du trajet · inventaire indisponible</string>
+    <string name="flight_offline_inventory_count">Inventaire des tuiles · %1$d / %2$d contrôlées</string>
+    <string name="flight_offline_stored_count">Tuiles du trajet · %1$d / %2$d stockées</string>
+    <string name="flight_offline_remaining">%1$d manquantes · %2$.3f GB stockés · reste ≈ %3$.3f GB</string>
+    <string name="flight_offline_by_source">Satellite %1$d / %2$d · Relief %3$d / %4$d</string>
+    <string name="flight_offline_transfer">Session : %1$.3f GB reçus · %2$.2f MB/s · %3$d / %4$d vérifiées</string>
+    <string name="flight_offline_failed_count">%1$d échecs · à réessayer</string>
+    <string name="flight_offline_verified">Hors ligne : toutes les tuiles vérifiées</string>
+    <string name="flight_offline_present_unverified">Fichiers présents · contrôle complet non effectué dans cette session</string>
+    <string name="flight_offline_estimate_note">Volume restant estimé. Les téléchargements incomplets ne sont pas comptés comme stockés. GB = 1 milliard d’octets.</string>
     <string name="flight_archive_invalid">Archive de vol invalide : fichiers manquants, inattendus ou en double.</string>
     <string name="flight_archive_photo_missing">Export impossible : une photo du journal manque sur ce téléphone.</string>
     <string name="flight_cloud_upload_local_changed">Le vol a changé sur ce téléphone. Relance l’envoi pour partager la version actuelle.</string>
@@ -360,7 +383,7 @@
 	<string name="flight_cal_explore">Explorer</string>
 	<string name="flight_plan_repeat_completed">Ce journal est terminé. Utilise « Dupliquer le trajet » pour programmer un nouveau vol sans effacer le précédent.</string>
 	<string name="flight_plan_low_space">Incomplet : moins de 256 Mio libres. Les fichiers terminés sont conservés ; libère de la place puis reprends.</string>
-	<string name="flight_plan_free_space">Espace libre sur le téléphone : %1$.2f Gio. Une réserve de 256 Mio est conservée.</string>
+	<string name="flight_plan_free_space">Espace libre sur le téléphone : %1$.2f GB. Une réserve de 256 Mio est conservée.</string>
 	<string name="flight_camera_hint">Pince pour zoomer sans filtre · touche pour la mise au point · la trace GPS continue.</string>
 	<string name="flight_camera_lens">Objectif %1$d</string>
 	<string name="flight_camera_saved">%1$d photo(s) enregistrée(s)</string>
@@ -402,7 +425,7 @@
 	<string name="flight_live_stop_confirm">Arrêter l’enregistrement GPS de ce voyage ? Tous les points déjà mesurés resteront enregistrés.</string>
 	<string name="flight_live_stop_countdown">Temps lent restant avant arrêt</string>
 	<string name="flight_live_stopped">Suivi arrêté manuellement</string>
-	<string name="flight_live_waiting">Au départ · attente du décollage</string>
+	<string name="flight_live_waiting">Décollage non détecté</string>
 	<string name="flight_plan_title">Préparer</string>
 	<string name="flight_plan_add_via">+ Point de passage</string>
 	<string name="flight_plan_arm">Programmer le départ auto</string>
@@ -418,7 +441,7 @@
 	<string name="flight_plan_departure">Départ</string>
 	<string name="flight_plan_download">Télécharger les fichiers manquants / reprendre</string>
 	<string name="flight_plan_edit_map">Modifier le trajet</string>
-	<string name="flight_plan_estimate">%1$d images satellite + %2$d tuiles relief · environ %3$.2f Gio</string>
+	<string name="flight_plan_estimate">%1$d images satellite + %2$d tuiles relief · environ %3$.2f GB</string>
 	<string name="flight_plan_estimate_hint">Estimation avant téléchargement : 45 ko par image, 110 ko par tuile relief, tailles variables. Tous les niveaux grossiers intermédiaires sont inclus. Aucun niveau demandé n’est abaissé en cachette.</string>
 	<string name="flight_plan_gain">Gain (m)</string>
 	<string name="flight_plan_horizon">Horizon géométrique, pas visibilité garantie : 1 km → 113 km · 2 → 160 · 3 → 195 · 5 → 252 · 8 → 319 · 10 → 357 · 12 → 391 · 14 → 422 km. Nuages, brume et relief modifient ce qui est réellement visible.</string>

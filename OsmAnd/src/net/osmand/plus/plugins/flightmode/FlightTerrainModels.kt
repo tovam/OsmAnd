@@ -20,6 +20,8 @@ data class FlightTerrainStatus(
 	val coarseAvailableTiles: Int = 0,
 	val coarseFailedTiles: Int = 0,
 	val satelliteTiles: Int = 0,
+	val requestedSatelliteTiles: Int = 0,
+	val offlineFilesVerified: Boolean = false,
 	val satelliteFailedTiles: Int = 0,
 	val nativeMapTiles: Int = 0,
 	val nativeMapFailedTiles: Int = 0,

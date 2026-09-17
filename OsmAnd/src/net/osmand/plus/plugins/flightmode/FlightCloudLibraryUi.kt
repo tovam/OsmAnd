@@ -209,6 +209,19 @@ internal fun FlightLibraryGpsLabel(id: String?, state: FlightUiState) {
     }
     // The one-second timer can precede a just-received fix. Read the clock at display time.
     val displayElapsed = flightDisplayElapsed(elapsed, android.os.SystemClock.elapsedRealtime())
+    if (activeHere && !active.simulation) {
+        Column {
+            Text(stringResource(R.string.flight_live_recording_active), color = Color(0xFF88DEBF), fontSize = 11.sp)
+            Text(stringResource(when (active.tracking.phase) {
+                FlightTrackingPhase.WAITING -> R.string.flight_live_takeoff_undetected
+                FlightTrackingPhase.AIRBORNE -> R.string.flight_live_airborne
+                FlightTrackingPhase.LANDED -> R.string.flight_live_landed
+                FlightTrackingPhase.STOPPED -> R.string.flight_live_stopped
+            }), color = Color.LightGray, fontSize = 10.sp)
+            FlightGpsCountAndSignal(active, displayElapsed)
+        }
+        return
+    }
     val status =
         flightLibraryGpsState(
             id,
@@ -221,14 +234,7 @@ internal fun FlightLibraryGpsLabel(id: String?, state: FlightUiState) {
         )
     val label =
         when (status) {
-            FlightLibraryGpsState.RECORDING ->
-                stringResource(
-                    when (active.tracking.phase) {
-                        FlightTrackingPhase.WAITING -> R.string.flight_library_gps_airport
-                        FlightTrackingPhase.AIRBORNE -> R.string.flight_library_gps_airborne
-                        else -> R.string.flight_library_gps_recording
-                    }
-                )
+            FlightLibraryGpsState.RECORDING -> stringResource(R.string.flight_library_gps_recording)
             FlightLibraryGpsState.WAITING -> stringResource(R.string.flight_library_gps_waiting)
             FlightLibraryGpsState.STALE -> stringResource(R.string.flight_library_gps_lost)
             FlightLibraryGpsState.SIMULATING ->

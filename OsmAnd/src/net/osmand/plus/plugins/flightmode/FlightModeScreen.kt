@@ -438,7 +438,9 @@ fun FlightModeScreen(
 				FlightPage.SATELLITE -> SatelliteScreen(
 					state = state,
 					onClose = onClose,
-					onPageChange = onPageChange
+					onPageChange = onPageChange,
+					onPreload = onPreloadPreparation,
+					onPausePreload = onCancelPreparationDownload
 				)
 				FlightPage.SENSORS -> SensorsScreen(
 					state = state,
@@ -1297,7 +1299,9 @@ private fun WindowSetupScreen(
 private fun SatelliteScreen(
 	state: FlightUiState,
 	onClose: () -> Unit,
-	onPageChange: (FlightPage) -> Unit
+	onPageChange: (FlightPage) -> Unit,
+	onPreload: (FlightOfflineQuote) -> Unit,
+	onPausePreload: () -> Unit
 ) {
 	var cacheInfo by remember { mutableStateOf(FlightSatelliteCacheInfo()) }
 	val refreshKey = "${state.offlinePreloadStatus.phase}:${state.offlinePreloadStatus.availableTiles}:" +
@@ -1305,6 +1309,12 @@ private fun SatelliteScreen(
 		state.offlineAssets.standardSatelliteTileCount
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_cached_tiles), state.sessionMode, onClose)
+		FlightOfflineProgressPanel(state)
+		if (state.offlinePreloadStatus.phase == FlightTerrainPhase.DOWNLOADING) {
+			PlanAction(stringResource(R.string.flight_plan_pause), onPausePreload)
+		} else if (state.plan.preparation != null && state.offlineQuote != null && !state.offlineSimulation) {
+			PlanAction(stringResource(R.string.flight_plan_download), { onPreload(state.offlineQuote) })
+		}
 		Box(Modifier.weight(1f).fillMaxWidth()) {
 			AndroidView(
 				modifier = Modifier.fillMaxSize(),
@@ -2471,7 +2481,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 	}
 	Column {
 	val context=LocalContext.current
-	val live=state.liveState
+	val live=state.recordingForSelectedFlight()
 	if(live.simulation && !live.running && live.tracking.phase in listOf(FlightTrackingPhase.LANDED,FlightTrackingPhase.STOPPED))
 		Text(stringResource(if(live.tracking.phase==FlightTrackingPhase.LANDED)R.string.flight_immersion_landed else R.string.flight_immersion_stopped),
 			color=FlightGreen,fontSize=11.sp,modifier=Modifier.fillMaxWidth().background(FlightPanelStrong).padding(4.dp))
@@ -2487,10 +2497,13 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 					FlightRecordingService.simulationControl(context,rates[(rates.indexOf(live.simulationRate)+1)%rates.size],live.simulationPaused,live.journeyId)
 				}) { Text("×${live.simulationRate}",fontSize=11.sp) }
 			}
-			Spacer(Modifier.weight(1f))
+			FlightLiveRecordingSummary(live, Modifier.weight(1f)) { onSelected(FlightPage.LIVE) }
 			val cameraAction=LocalFlightCameraAction.current
 			TextButton(onClick=cameraAction,enabled=live.running) { Text(stringResource(R.string.flight_live_camera),fontSize=11.sp) }
 		}
+		if (selected != FlightPage.SATELLITE && selected != FlightPage.LIVE)
+			FlightOfflineProgressPanel(state, compact = true,
+				modifier = Modifier.background(FlightPanelStrong).clickable { onSelected(FlightPage.SATELLITE) })
 	}
 	if (state.offlineSimulation && !live.simulation) {
 		val offlineAction=LocalFlightOfflineAction.current

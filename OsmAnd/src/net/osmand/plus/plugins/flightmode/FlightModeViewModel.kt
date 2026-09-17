@@ -62,6 +62,18 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var policyChangeRevision = 0L
 	private val policySaveMutex = Mutex()
 	private var policySaveJob: Job? = null
+	private data class OfflineCoverageScope(val journeyId: String?, val createdAt: Long?,
+		val stops: List<Pair<Double?, Double?>>, val bands: List<FlightOfflineBand>?, val corridorKm: Int)
+	private var offlineQuoteScope: OfflineCoverageScope? = null
+	private var offlineCachedQuote: FlightOfflineQuote? = null
+	private fun currentOfflineCoverageScope(): OfflineCoverageScope? {
+		if (!flightUiVisible || !hasOfflineCorridorSource() ||
+			uiState.page in listOf(FlightPage.HOME, FlightPage.PLANS, FlightPage.JOURNEYS)) return null
+		return OfflineCoverageScope(uiState.journeyId, uiState.journeyCreatedAtMillis,
+			uiState.plan.stops.map { it.latitude to it.longitude },
+			(uiState.plan.preparation ?: FlightPreparation().takeIf { uiState.sessionMode == FlightSessionMode.PREPARE })?.bands,
+			uiState.plan.terrainCorridorKm)
+	}
 
 	fun setOfflineSimulation(enabled: Boolean) {
 		if (enabled && uiState.sessionMode == FlightSessionMode.LIVE) return
@@ -171,6 +183,46 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		stopObservingSchedules = FlightScheduleManager.observe(app) { refreshDeviceState() }
 		refreshDeviceState()
 		viewModelScope.launch {
+			// Geographic inputs only: moving the aircraft, the eye or the replay slider never rebuilds a manifest.
+			snapshotFlow { currentOfflineCoverageScope() }.collectLatest { scope ->
+				if (scope == null) {
+					uiState = uiState.copy(offlineCoverageRefreshing = false)
+					if (flightUiVisible && !hasOfflineCorridorSource())
+						uiState = uiState.copy(offlineQuote = null, offlineCoverage = null, offlineCoverageError = null)
+					return@collectLatest
+				}
+				val same = scope == offlineQuoteScope
+				uiState = uiState.copy(offlineQuote = if (same) offlineCachedQuote else null,
+					offlineCoverage = if (same) uiState.offlineCoverage else null, offlineCoverageError = null, offlineCoverageRefreshing = true)
+				try {
+					val plan = uiState.plan.let {
+						if (it.preparation == null && scope.bands != null) it.copy(preparation = FlightPreparation()) else it
+					}
+					val trip = uiState.trip
+					val quote = offlineCachedQuote?.takeIf { same } ?: run {
+						delay(400)
+						withContext(Dispatchers.Default) { FlightOfflinePreparation.corridorQuote(plan, trip) }
+					}
+					if (scope != currentOfflineCoverageScope()) return@collectLatest
+					offlineQuoteScope = scope
+					offlineCachedQuote = quote
+					uiState = uiState.copy(offlineQuote = quote)
+					terrainRepository.observeOfflineCoverage(quote) { coverage ->
+						withContext(Dispatchers.Main.immediate) {
+							if (scope != currentOfflineCoverageScope()) return@withContext
+							// Keep the previous complete inventory while rechecking on resume, not a false drop to zero.
+							if (coverage.inventoried || uiState.offlineCoverage?.inventoried != true)
+								uiState = uiState.copy(offlineCoverage = coverage, offlineCoverageRefreshing = !coverage.inventoried)
+						}
+					}
+				} catch (e: CancellationException) { throw e }
+				catch (e: Exception) {
+					if (scope == currentOfflineCoverageScope()) uiState = uiState.copy(offlineCoverageRefreshing = false,
+						offlineCoverageError = e.message ?: "offline_inventory_failed")
+				}
+			}
+		}
+		viewModelScope.launch {
 			combine(FlightRecordingService.state, uiVisibility) { live, visible -> live to visible }.collect { (live, visible) ->
 				val previousRecorder = uiState.activeRecording
 				uiState = uiState.copy(activeRecording = live)
@@ -193,6 +245,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					} else uiState.photos
 					val photosChanged=newPhotos!=uiState.photos
 					uiState = uiState.copy(liveState = live, batteryHistory = live.battery,
+						showTrackPoints = if (live.running && uiState.sessionMode != FlightSessionMode.LIVE) true else uiState.showTrackPoints,
 						simulatedJourney = live.simulation,
 						recordingPolicy=live.policy,
 						photos=newPhotos,journeyDirty=uiState.journeyDirty || photosChanged,
@@ -705,6 +758,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				livePredictor.reset()
 				replayEngine=null
 				uiState=uiState.copy(page=FlightPage.MAP,sessionMode=FlightSessionMode.LIVE,
+					showTrackPoints=true,
 					replayPlaying=false,windowPhotoOverlay=FlightWindowPhotoOverlay(),snapshot=null,
 					liveState=FlightLiveState(journeyId=prepared.id))
 				FlightRecordingService.start(app,prepared.id)
@@ -910,6 +964,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				if (live.simulation) { if (live.simulationPaused) 0.0 else live.simulationRate.toDouble() } else 1.0,
 				fixReceivedAt = live.lastFixElapsed.takeIf { it > 0L }) }
 			uiState=uiState.copy(page=page,sessionMode=FlightSessionMode.LIVE,liveState=live,
+				showTrackPoints=true,
 				trip=live.trip?:uiState.trip,batteryHistory=live.battery,snapshot=live.latest?.let { FlightSnapshot(it,0f) })
 			rebuildLiveTimeline(live)
 		}
@@ -1064,15 +1119,20 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			uiState.plan.stops.count { it.latitude != null && it.longitude != null } >= 2
 
 	private suspend fun runOfflinePreload() {
+		val operation = journalOperations.capture()
+		val sourceId = uiState.journeyId
+		fun ownsDisplay() = journalOperations.isCurrent(operation) && uiState.journeyId == sourceId
 		try {
 			val plan = uiState.plan
 			val trip = uiState.trip
 			val finalStatus = terrainRepository.preloadCorridor(plan, trip) { status ->
-				uiState = uiState.copy(offlinePreloadStatus = status)
+				if (ownsDisplay()) uiState = uiState.copy(offlinePreloadStatus = status)
 			}
+			if (!ownsDisplay()) return
 			val assets = if (trip != null) withContext(Dispatchers.IO) {
 				journeyStore.discoverOfflineAssets(plan, trip, uiState.offlineAssets)
 			} else uiState.offlineAssets
+			if (!ownsDisplay()) return
 			val assetsChanged = assets != uiState.offlineAssets
 			uiState = uiState.copy(
 				offlinePreloadStatus = finalStatus,
@@ -1084,6 +1144,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		} catch (error: CancellationException) {
 			throw error
 		} catch (error: Exception) {
+			if (!ownsDisplay()) return
 			uiState = uiState.copy(
 				offlinePreloadStatus = uiState.offlinePreloadStatus.copy(
 					phase = FlightTerrainPhase.ERROR,
