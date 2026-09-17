@@ -29,6 +29,11 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightPhotoFitDiagnostics.kt" \
   "$sources/FlightPhotoDepth.kt" "$sources/FlightPhotoTreatmentJson.kt" \
   "$sources/FlightDownloadCancellation.kt" \
+  "$sources/FlightArchiveInventory.kt" \
+  "$sources/FlightJournalOperations.kt" \
+  "$sources/FlightPhotoOrientation.kt" \
+  "$sources/FlightTerrainMeshBuilder.kt" "$sources/FlightTerrainCpuScheduler.kt" \
+  "$sources/FlightTerrainLodPolicy.kt" "$sources/FlightTerrainResidency.kt" \
   "$sources/FlightNetworkAccess.kt" "$sources/FlightRasterDownloadAccess.kt" "$sources/FlightJournalSummaries.kt" "$sources/FlightPreparationSave.kt" \
   "$sources/FlightCloudArchive.kt" "$sources/FlightCloudClient.kt" "$sources/FlightJourneyNaming.kt" "$sources/FlightCloudVersions.kt" "$sources/FlightLibraryPresentation.kt" \
   "$sources/FlightOfflinePreparation.kt" "$sources/FlightLivePredictor.kt" "$sources/FlightLiveSimulation.kt" \
@@ -44,6 +49,10 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightCloudClockFixture.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalAndroidFixtures.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightCloudArchiveTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightArchiveInventoryTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalOperationsTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightPhotoOrientationTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightTerrainResidencyTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightRecordingLinesTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightStreamingVisibilityTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalSummaryMetadataTest.kt" \
@@ -65,5 +74,5 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
 cd "$repo_root"
 java -Djava.io.tmpdir="$test_output" -cp "$test_output:$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest net.osmand.test.junit.FlightLocalNavigationTest net.osmand.test.junit.FlightPhotoCalibrationPersistenceTest net.osmand.test.junit.FlightPhotoDepthTest net.osmand.test.junit.FlightDownloadCancellationTest net.osmand.test.junit.FlightPhotoFitDiagnosticsTest net.osmand.test.junit.FlightCloudArchiveTest net.osmand.test.junit.FlightOfflineJourneyTest net.osmand.test.junit.FlightJournalSummaryMetadataTest net.osmand.test.junit.FlightLibraryPresentationTest
-java -Djava.io.tmpdir="$test_output" -cp "$test_output:$classpath" org.junit.runner.JUnitCore net.osmand.test.junit.FlightLiveSimulationTest net.osmand.test.junit.FlightCameraOpticsTest net.osmand.test.junit.FlightWorkPolicyTest net.osmand.test.junit.FlightAssetSchedulerTest net.osmand.test.junit.FlightStreamingVisibilityTest net.osmand.test.junit.FlightDisplaySafetyTest net.osmand.test.junit.FlightRecordingPolicyTest
+java -Djava.io.tmpdir="$test_output" -cp "$test_output:$classpath" org.junit.runner.JUnitCore net.osmand.test.junit.FlightLiveSimulationTest net.osmand.test.junit.FlightCameraOpticsTest net.osmand.test.junit.FlightWorkPolicyTest net.osmand.test.junit.FlightAssetSchedulerTest net.osmand.test.junit.FlightStreamingVisibilityTest net.osmand.test.junit.FlightDisplaySafetyTest net.osmand.test.junit.FlightRecordingPolicyTest net.osmand.test.junit.FlightArchiveInventoryTest net.osmand.test.junit.FlightJournalOperationsTest net.osmand.test.junit.FlightPhotoOrientationTest net.osmand.test.junit.FlightTerrainResidencyTest
 echo "Flight logic check classes: $test_output"
