@@ -446,7 +446,8 @@ fun FlightModeScreen(
 					state = state,
 					onClose = onClose,
 					onPageChange = onPageChange,
-					onSetPolicy = onSetRecordingPolicy
+					onSetPolicy = onSetRecordingPolicy,
+					onToggleMicrophone = onToggleLiveMicrophone
 				)
 				FlightPage.PHOTO -> PhotoScreen(
 					state = state,
@@ -1722,7 +1723,8 @@ private fun SensorsScreen(
 	state: FlightUiState,
 	onClose: () -> Unit,
 	onPageChange: (FlightPage) -> Unit,
-	onSetPolicy: (FlightRecordingPolicy) -> Unit
+	onSetPolicy: (FlightRecordingPolicy) -> Unit,
+	onToggleMicrophone: () -> Unit
 ) {
 	val sample = state.snapshot?.sample
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
@@ -1733,6 +1735,12 @@ private fun SensorsScreen(
 				SensorReadout(sample)
 			}
 			item { SectionTitle("ENVIRONNEMENT") }
+			if (state.recordingForSelectedFlight().running) item {
+				val microphone = state.recordingForSelectedFlight().microphone
+				CompactAction(stringResource(if (microphone) R.string.flight_live_mic_off else R.string.flight_live_mic_on),
+					if (microphone) FlightOrange else FlightMuted, onToggleMicrophone,
+					Modifier.padding(horizontal = 8.dp))
+			}
 			item { Column(Modifier.padding(horizontal=8.dp)) { FlightBatteryChart(state.batteryHistory) } }
 			item {
 				EnvironmentSensorRow(
@@ -2528,6 +2536,10 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 				}) { Text("×${live.simulationRate}",fontSize=11.sp) }
 			}
 			FlightLiveRecordingSummary(live, Modifier.weight(1f)) { onSelected(FlightPage.LIVE) }
+			if (live.running && live.microphone) {
+				CompactAction(stringResource(R.string.flight_live_mic_off), FlightOrange,
+					{ FlightRecordingService.microphone(context, false, live.journeyId) })
+			}
 		}
 		if (selected != FlightPage.SATELLITE && selected != FlightPage.LIVE)
 			FlightOfflineProgressPanel(state, compact = true,
