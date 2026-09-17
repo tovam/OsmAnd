@@ -85,7 +85,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private fun setFlightCameraVisible(visible: Boolean) {
 		if (showFlightCamera == visible) return
 		showFlightCamera = visible
-		if (::viewModel.isInitialized) viewModel.setCameraPreviewActive(visible)
+		if (::viewModel.isInitialized) viewModel.onCameraPreviewVisibilityChanged(visible)
 	}
 
 	override fun onCreate(savedInstanceState: Bundle?) {

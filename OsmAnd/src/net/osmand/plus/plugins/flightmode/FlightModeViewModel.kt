@@ -312,7 +312,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
-	fun setCameraPreviewActive(active: Boolean) {
+	fun onCameraPreviewVisibilityChanged(active: Boolean) {
 		if (cameraPreviewActive == active) return
 		cameraPreviewActive = active
 		terrainStreamingEngine.setForeground(visualWorkActive)
