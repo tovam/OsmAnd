@@ -224,10 +224,12 @@ class FlightJourneyStore(private val context: Context) {
 	internal fun removeVerifiedCloudCopy(id: String, updatedAt: Long, remotePhotos: Set<String>) = synchronized(STORE_LOCK) {
 		val safeId = validatedId(id)
 		val live = FlightRecordingService.state.value
-		if (live.running && live.journeyId == id) throw IOException("removal_unverified")
 		val journey = load(id)
-		if (journey.updatedAtMillis != updatedAt || !remotePhotos.containsAll(journey.photos.map { it.id }) ||
-			journey.plan.preparation?.automatic == true) throw IOException("removal_unverified")
+		if (!canRemovePublishedFlight(journey, updatedAt, remotePhotos,
+				recording = live.running && live.journeyId == id,
+				scheduledOnDevice = FlightScheduleManager.scheduled(context, id) != null)) {
+			throw IOException("removal_unverified")
+		}
 		val journal = File(journeysDirectory, "$safeId.$JOURNEY_FILE_EXTENSION")
 		// Never touch gallery originals, shared media or the shared terrain/satellite stores.
 		val referenced = journeyFiles().filter { it != journal }.flatMap { other ->
@@ -268,7 +270,7 @@ class FlightJourneyStore(private val context: Context) {
 		val file = File(journeysDirectory, "${validatedId(id)}.$JOURNEY_FILE_EXTENSION")
 		if (!file.isFile) throw IOException("Journal de vol introuvable")
 		val loaded = journeyFromJson(JSONObject(android.util.AtomicFile(file).openRead().bufferedReader().use { it.readText() })) { storageName ->
-			File(mediaDirectory, safeFileName(storageName)).absolutePath
+			File(mediaDirectory, flightPhotoStorageName(storageName)).absolutePath
 		}
 		FlightRecordingStore(context, loaded.id).merge(loaded)
 	}
@@ -281,71 +283,90 @@ class FlightJourneyStore(private val context: Context) {
 
 	fun importArchive(uri: Uri): FlightJourney {
 		val importedMedia = linkedMapOf<String, String>()
-		val importedTerrainTiles = linkedSetOf<TerrainTileId>()
-		val importedSatelliteTiles = linkedSetOf<TerrainTileId>()
-		var journeyJson: String? = null
-		var totalBytes = 0L
-		context.contentResolver.openInputStream(uri)?.buffered()?.use { raw ->
-			ZipInputStream(raw).use { zip ->
-				while (true) {
-					val entry = zip.nextEntry ?: break
-					if (entry.isDirectory) continue
-					val terrainTile = archiveTileId(entry.name, OFFLINE_TERRAIN_ENTRY_PREFIX, "png")
-					val satelliteTile = archiveTileId(entry.name, OFFLINE_SATELLITE_ENTRY_PREFIX, "jpg")
-					when {
-						entry.name == JOURNEY_JSON_ENTRY -> {
-							val bytes = readLimited(zip, minOf(MAXIMUM_JSON_BYTES, MAXIMUM_ARCHIVE_BYTES - totalBytes))
-							totalBytes += bytes.size
-							journeyJson = bytes.toString(Charsets.UTF_8)
-						}
-						entry.name.startsWith("photos/") -> {
-							val archiveName = safeFileName(entry.name.substringAfterLast('/'))
-							val destination = File(mediaDirectory, "${UUID.randomUUID()}_$archiveName")
-							destination.outputStream().buffered().use { output ->
-								totalBytes += copyLimited(zip, output, MAXIMUM_ARCHIVE_BYTES - totalBytes)
+		val createdPhotos = mutableListOf<File>()
+		val inventory = FlightArchiveInventory()
+		var saved = false
+		try {
+			val importedTerrainTiles = linkedSetOf<TerrainTileId>()
+			val importedSatelliteTiles = linkedSetOf<TerrainTileId>()
+			var journeyJson: String? = null
+			var totalBytes = 0L
+			context.contentResolver.openInputStream(uri)?.buffered()?.use { raw ->
+				ZipInputStream(raw).use { zip ->
+					while (true) {
+						val entry = zip.nextEntry ?: break
+						val terrainTile = archiveTileId(entry.name, OFFLINE_TERRAIN_ENTRY_PREFIX, "png")
+						val satelliteTile = archiveTileId(entry.name, OFFLINE_SATELLITE_ENTRY_PREFIX, "jpg")
+						inventory.accept(entry.name, entry.isDirectory, terrainTile != null || satelliteTile != null)
+						when {
+							entry.isDirectory || entry.name == TRACK_GPX_ENTRY -> {
+								// Even ignored GPX/directory bytes count toward the decompression limit.
+								totalBytes += drainLimited(zip, MAXIMUM_ARCHIVE_BYTES - totalBytes)
 							}
-							importedMedia[archiveName] = destination.absolutePath
+							entry.name == JOURNEY_JSON_ENTRY -> {
+								val bytes = readLimited(zip, minOf(MAXIMUM_JSON_BYTES, MAXIMUM_ARCHIVE_BYTES - totalBytes))
+								totalBytes += bytes.size
+								journeyJson = bytes.toString(Charsets.UTF_8)
+							}
+							entry.name.startsWith("photos/") -> {
+								val archiveName = entry.name.substringAfter('/')
+								val destination = File(mediaDirectory, "${UUID.randomUUID()}_${safeFileName(archiveName)}")
+								createdPhotos += destination
+								destination.outputStream().buffered().use { output ->
+									totalBytes += copyLimited(zip, output, MAXIMUM_ARCHIVE_BYTES - totalBytes)
+								}
+								importedMedia[archiveName] = destination.absolutePath
+							}
+							terrainTile != null -> {
+								totalBytes += importOfflineTile(
+									zip,
+									terrainFile(terrainTile),
+									MAXIMUM_ARCHIVE_BYTES - totalBytes
+								)
+								importedTerrainTiles += terrainTile
+							}
+							satelliteTile != null -> {
+								totalBytes += importOfflineTile(
+									zip,
+									standardSatelliteFile(satelliteTile),
+									MAXIMUM_ARCHIVE_BYTES - totalBytes
+								)
+								importedSatelliteTiles += satelliteTile
+							}
 						}
-						terrainTile != null -> {
-							totalBytes += importOfflineTile(
-								zip,
-								terrainFile(terrainTile),
-								MAXIMUM_ARCHIVE_BYTES - totalBytes
-							)
-							importedTerrainTiles += terrainTile
-						}
-						satelliteTile != null -> {
-							totalBytes += importOfflineTile(
-								zip,
-								standardSatelliteFile(satelliteTile),
-								MAXIMUM_ARCHIVE_BYTES - totalBytes
-							)
-							importedSatelliteTiles += satelliteTile
-						}
+						zip.closeEntry()
 					}
-					zip.closeEntry()
 				}
+			} ?: throw IOException("Impossible d’ouvrir cette archive")
+			val root = JSONObject(journeyJson ?: throw IOException("Archive sans journey.json"))
+			val photoManifest = root.optJSONArray("photos") ?: JSONArray()
+			inventory.requirePhotoManifest((0 until photoManifest.length()).map {
+				photoManifest.getJSONObject(it).getString("storageName")
+			})
+			val parsed = journeyFromJson(root) { storageName ->
+				importedMedia[storageName] ?: throw IOException("invalid_archive")
 			}
-		} ?: throw IOException("Impossible d’ouvrir cette archive")
-		val parsed = journeyFromJson(
-			JSONObject(journeyJson ?: throw IOException("Archive sans journey.json"))
-		) { storageName ->
-			importedMedia[safeFileName(storageName)] ?: File(mediaDirectory, safeFileName(storageName)).absolutePath
-		}
-		val importedAssets = FlightOfflineAssets(
-			terrainTiles = normalizedTiles(parsed.offlineAssets.terrainTiles + importedTerrainTiles)
-				.filter { terrainFile(it).isUsableFile() },
-			standardSatelliteTiles = normalizedTiles(parsed.offlineAssets.standardSatelliteTiles + importedSatelliteTiles)
-				.filter { standardSatelliteFile(it).isUsableFile() }
-		)
-		val now = System.currentTimeMillis()
-		return save(
-			parsed.copy(
-				id = UUID.randomUUID().toString(),
-				updatedAtMillis = now,
-				offlineAssets = importedAssets
+			val importedAssets = FlightOfflineAssets(
+				terrainTiles = normalizedTiles(parsed.offlineAssets.terrainTiles + importedTerrainTiles)
+					.filter { terrainFile(it).isUsableFile() },
+				standardSatelliteTiles = normalizedTiles(parsed.offlineAssets.standardSatelliteTiles + importedSatelliteTiles)
+					.filter { standardSatelliteFile(it).isUsableFile() }
 			)
-		)
+			val now = System.currentTimeMillis()
+			return save(
+				parsed.copy(
+					id = UUID.randomUUID().toString(),
+					updatedAtMillis = now,
+					offlineAssets = importedAssets
+				)
+			).also { saved = true }
+		} catch (error: IOException) {
+			if (error.message == "invalid_archive") throw IOException(context.getString(net.osmand.plus.R.string.flight_archive_invalid), error)
+			throw error
+		} finally {
+			// These UUID-named copies were created by this import, never gallery originals.
+			if (!saved) createdPhotos.forEach { it.delete() }
+		}
 	}
 
 	fun exportArchive(journey: FlightJourney, uri: Uri) {
@@ -354,6 +375,9 @@ class FlightJourneyStore(private val context: Context) {
 		)
 		val archiveNames = portableJourney.photos.associate { photo ->
 			photo.id to "${safeFileName(photo.id)}_${safeFileName(photo.fileName)}"
+		}
+		if (portableJourney.photos.any { !File(it.localPath).isFile }) {
+			throw IOException(context.getString(net.osmand.plus.R.string.flight_archive_photo_missing))
 		}
 		context.contentResolver.openOutputStream(uri, "wt")?.buffered()?.use { raw ->
 			ZipOutputStream(raw).use { zip ->
@@ -365,7 +389,6 @@ class FlightJourneyStore(private val context: Context) {
 				zip.closeEntry()
 				portableJourney.photos.forEach { photo ->
 					val file = File(photo.localPath)
-					if (!file.isFile) return@forEach
 					zip.putNextEntry(ZipEntry("photos/${archiveNames.getValue(photo.id)}"))
 					file.inputStream().buffered().use { it.copyTo(zip) }
 					zip.closeEntry()
@@ -381,6 +404,7 @@ class FlightJourneyStore(private val context: Context) {
 	}
 
 	fun importPhotos(uris: List<Uri>, trip: FlightTrip?): List<FlightPhotoAttachment> = uris.mapNotNull { uri ->
+		var ownedCopy: File? = null
 		runCatching {
 			val originalName = displayName(uri) ?: "photo.jpg"
 			val extension = originalName.substringAfterLast('.', "jpg")
@@ -389,6 +413,7 @@ class FlightJourneyStore(private val context: Context) {
 				.take(8)
 				.ifBlank { "jpg" }
 			val destination = File(mediaDirectory, "${UUID.randomUUID()}.$extension")
+			ownedCopy = destination
 			context.contentResolver.openInputStream(uri)?.buffered()?.use { input ->
 				destination.outputStream().buffered().use { output -> input.copyTo(output) }
 			} ?: throw IOException("Photo inaccessible")
@@ -403,7 +428,7 @@ class FlightJourneyStore(private val context: Context) {
 				timestampSource = detectedTimestamp?.source,
 				cameraVerticalFieldOfViewDegrees = FlightPhotoPerspective.detectVerticalFieldOfViewDegrees(destination)
 			)
-		}.getOrNull()
+		}.onFailure { ownedCopy?.delete() }.getOrNull()
 	}
 
 	/**
@@ -530,7 +555,7 @@ class FlightJourneyStore(private val context: Context) {
 		val photosJson = root.optJSONArray("photos") ?: JSONArray()
 		val photos = (0 until photosJson.length()).mapNotNull { index ->
 			photosJson.optJSONObject(index)?.let { json ->
-				val storageName = safeFileName(json.optString("storageName"))
+				val storageName = flightPhotoStorageName(json.optString("storageName"))
 				val storedPosition = json.optNullableDouble("matchedSamplePosition")
 					?: json.optNullableDouble("matchedSampleIndex")
 				FlightPhotoAttachment(

@@ -12,6 +12,31 @@ import org.junit.Test
 
 class FlightCloudArchiveTest {
     @Test
+    fun deviceScheduleProtectsJournalBeforeAutomaticFlagIsSaved() = fixture { _, _, original ->
+        val journey = original.copy(plan = original.plan.copy(preparation = FlightPreparation(automatic = false)))
+        val photos = journey.photos.map { it.id }.toSet()
+        assertTrue(canRemovePublishedFlight(journey, journey.updatedAtMillis, photos, false, false))
+        assertFalse(canRemovePublishedFlight(journey, journey.updatedAtMillis, photos, false, true))
+        assertFalse(canRemovePublishedFlight(journey, journey.updatedAtMillis, photos, true, false))
+        assertFalse(canRemovePublishedFlight(journey, journey.updatedAtMillis - 1, photos, false, false))
+        assertFalse(canRemovePublishedFlight(journey, journey.updatedAtMillis, emptySet(), false, false))
+    }
+
+    @Test
+    fun uploadDetectsNewEditsEvenIfClockOrRevisionTimestampDidNotChange() = fixture { _, _, journey ->
+        assertFalse(journey.hasSameCloudContentAs(journey.copy(name = "New name")))
+        val edited = journey.photos.first().copy(rotationDegrees = 30f)
+        assertFalse(journey.hasSameCloudContentAs(journey.copy(photos = listOf(edited) + journey.photos.drop(1))))
+        assertFalse(journey.hasSameCloudContentAs(journey.copy(id = "another")))
+    }
+
+    @Test
+    fun downloadsOnlyDoNotInvalidatePreparedCloudUpload() = fixture { _, _, journey ->
+        assertTrue(journey.hasSameCloudContentAs(journey.copy(updatedAtMillis = 99,
+            offlineAssets = FlightOfflineAssets(), offlineRequest = FlightOfflineAssets())))
+    }
+
+    @Test
     fun cloudRowsKeepCopyProvenanceAndShowServerOnlyFlights() {
         val remote =
             FlightCloudEntry("shared", "Server flight", "a".repeat(64), 100, 20, emptySet(), 10)

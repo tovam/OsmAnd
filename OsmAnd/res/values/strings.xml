@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_archive_invalid">Archive de vol invalide : fichiers manquants, inattendus ou en double.</string>
+    <string name="flight_archive_photo_missing">Export impossible : une photo du journal manque sur ce téléphone.</string>
+    <string name="flight_cloud_upload_local_changed">Le vol a changé sur ce téléphone. Relance l’envoi pour partager la version actuelle.</string>
     <string name="flight_recording_policy_preset_minutes">%1$.0f min</string>
     <string name="flight_recording_policy_value_seconds">%1$s s</string>
     <string name="flight_library_active_points"> · %1$d points</string>

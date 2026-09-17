@@ -180,9 +180,15 @@ internal class FlightCloudController(
             val permission =
                 lease?.takeIf { it.expiresElapsed > android.os.SystemClock.elapsedRealtime() }
                     ?: throw FlightCloudFailure("edit_session_expired")
+            val current = io { store.load(selected.journey.id) }
+            if (!current.hasSameCloudContentAs(selected.journey)) {
+                // Never publish the stale snapshot shown before a local edit/recording completed.
+                upload = null
+                throw FlightCloudFailure("local_changed")
+            }
             val file = temporaryArchive()
             try {
-                io { store.writeCloudArchive(selected.journey, photoIds, file) }
+                io { store.writeCloudArchive(current, photoIds, file) }
                 operation = R.string.flight_cloud_sending
                 client = FlightCloudClient(config)
                 val result = io {
@@ -199,8 +205,8 @@ internal class FlightCloudController(
                         selected.journey.id,
                         result.id,
                         result.revision,
-                        selected.journey.updatedAtMillis,
-                        photoIds.containsAll(selected.journey.photos.map { it.id }),
+                        current.updatedAtMillis,
+                        photoIds.containsAll(current.photos.map { it.id }),
                     )
                 io { settings.bind(config.scope, binding) }
                 bindings = io { settings.bindings(config.scope) }
@@ -321,6 +327,7 @@ internal class FlightCloudController(
                             "invalid_token" -> R.string.flight_cloud_bad_token
                             "edit_session_expired" -> R.string.flight_cloud_expired
                             "revision_conflict" -> R.string.flight_cloud_conflict
+                            "local_changed" -> R.string.flight_cloud_upload_local_changed
                             "archive_too_large" -> R.string.flight_cloud_too_large
                             "cloud_photo_missing" -> R.string.flight_cloud_photo_missing
                             "refresh_required" -> R.string.flight_cloud_refresh_required

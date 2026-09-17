@@ -87,3 +87,19 @@ internal fun FlightUiState.hasSameJournalContentAs(
         flightSpans == source.flightSpans &&
         (!includeMeasurements || batteryHistory == source.batteryHistory) &&
         (!includeTrip || trip == source.trip)
+
+/** Offline downloads do not change the cloud payload; edits and new recorded fixes do. */
+internal fun FlightJourney.hasSameCloudContentAs(other: FlightJourney): Boolean =
+    id == other.id && name == other.name && createdAtMillis == other.createdAtMillis &&
+        plan == other.plan && trip == other.trip && flightSpans == other.flightSpans &&
+        photos == other.photos && batteryHistory == other.batteryHistory && simulation == other.simulation
+
+/** The device alarm registry is authoritative, even before its journal flag is autosaved. */
+internal fun canRemovePublishedFlight(
+    journey: FlightJourney,
+    publishedUpdatedAt: Long,
+    publishedPhotoIds: Set<String>,
+    recording: Boolean,
+    scheduledOnDevice: Boolean,
+): Boolean = !recording && !scheduledOnDevice && journey.plan.preparation?.automatic != true &&
+    journey.updatedAtMillis == publishedUpdatedAt && publishedPhotoIds.containsAll(journey.photos.map { it.id })
