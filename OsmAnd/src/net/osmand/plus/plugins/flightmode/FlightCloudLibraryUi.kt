@@ -134,6 +134,13 @@ internal fun FlightCloudListRow(
                 )
                 FlightLibraryGpsLabel(local?.id, state)
             }
+            row.logicalCloudId?.let { cloudId ->
+                Text(
+                    stringResource(R.string.flight_journey_logical_id, shortFlightJourneyId(cloudId)),
+                    color = Color.LightGray,
+                    fontSize = 10.sp,
+                )
+            }
             Text(
                 stringResource(
                     when {

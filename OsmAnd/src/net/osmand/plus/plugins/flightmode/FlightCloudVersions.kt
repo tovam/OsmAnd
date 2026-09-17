@@ -22,6 +22,13 @@ internal data class FlightLibraryRow(
     val name
         get() = local?.name ?: remote!!.name
 
+    /**
+     * The ID used for a journey's first upload stays stable across phones once it has a cloud
+     * binding. A never-uploaded journal uses its local ID because that is its future server ID.
+     */
+    val logicalCloudId: String?
+        get() = remote?.id ?: binding?.remoteId ?: local?.id
+
     fun canOpenLocal(state: FlightUiState, localRemovalInProgress: Boolean = false): Boolean =
         local != null && !state.loadingTrip && !localRemovalInProgress
 
@@ -43,6 +50,9 @@ internal data class FlightLibraryRow(
         }
     }
 }
+
+internal fun shortFlightJourneyId(id: String): String =
+    if (id.length <= 12) id else "${id.take(8)}…${id.takeLast(4)}"
 
 internal enum class FlightVersionState {
     UNVERIFIED,

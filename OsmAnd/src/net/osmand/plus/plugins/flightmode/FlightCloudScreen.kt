@@ -351,6 +351,16 @@ internal fun FlightCloudScreen(
                                         fontSize = 10.sp,
                                     )
                                 }
+                                row.logicalCloudId?.let { cloudId ->
+                                    Text(
+                                        stringResource(
+                                            R.string.flight_journey_logical_id,
+                                            shortFlightJourneyId(cloudId),
+                                        ),
+                                        color = Color.Gray,
+                                        fontSize = 10.sp,
+                                    )
+                                }
                                 if (row.local != null && row.remote != null)
                                     Text(
                                         stringResource(
