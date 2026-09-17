@@ -1866,8 +1866,9 @@ private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, o
 				?: stringResource(R.string.flight_mode_photo_not_matched),
 				color = if (sample != null) FlightGreen else FlightWarning, fontSize = 9.sp)
 		}
-		Text(stringResource(R.string.flight_cal_pairs, photo.calibration.points.count { it.x != null && it.latitude != null }),
-			color = FlightBlue, fontSize = 9.sp)
+		val pairCount = photo.calibration.points.count { it.x != null && it.latitude != null }
+		Text(stringResource(if (pairCount <= 1) R.string.flight_cal_single_pair else R.string.flight_cal_pairs, pairCount),
+			color = if (pairCount == 0) FlightMuted.copy(alpha = 0.5f) else FlightBlue, fontSize = 9.sp)
 	}
 	Box(Modifier.fillMaxWidth().height(1.dp).background(FlightLine))
 }
