@@ -142,7 +142,7 @@ jobs:
 
       - name: Restore stripped patched OsmAnd core
         id: patched-core-cache
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
           key: patched-osmand-core-arm64-debug-stripped-v2-${{ runner.os }}-api35-${{ steps.patched-core-identity.outputs.ndk_revision }}-${{ steps.patched-core-identity.outputs.core_sha }}-${{ steps.patched-core-identity.outputs.build_sha }}-${{ hashFiles('android/OsmAnd/patches/osmand-core/*.patch', 'android/OsmAnd/patches/osmand-core/*.h', 'android/OsmAnd/patches/osmand-core/*.cpp') }}
@@ -177,6 +177,15 @@ jobs:
           "${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" --dynamic --defined-only \
             binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so \
             | grep 'Java_net_osmand_core_jni_FlightVectorLineBridge_enableTubeNative'
+
+      - name: Save verified native core before Android compilation
+        # A later Kotlin/test failure must not discard a successfully built native library.
+        if: steps.patched-core-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so
+          key: ${{ steps.patched-core-cache.outputs.cache-primary-key }}
 
       - name: Publish OsmAnd core failure details
         if: failure()
