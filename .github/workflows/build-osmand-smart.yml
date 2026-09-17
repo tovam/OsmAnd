@@ -87,6 +87,12 @@ jobs:
           cmake -DWRAPPER_FILE="${GITHUB_WORKSPACE}/core/wrappers/java/CMakeLists.txt" \
             -P android/OsmAnd/test/native/CheckFlightJniCmake.cmake
 
+      - name: Check basemap overzoom fallback source path
+        run: |
+          cmake -DPRIMITIVISER_FILE="${GITHUB_WORKSPACE}/core/src/Map/MapPrimitiviser_P.cpp" \
+            -DPRIMITIVISER_PRIVATE_HEADER="${GITHUB_WORKSPACE}/core/src/Map/MapPrimitiviser_P.h" \
+            -P android/OsmAnd/test/native/CheckBasemapOverzoomFallbackSource.cmake
+
       - name: Test flight tube geometry
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \

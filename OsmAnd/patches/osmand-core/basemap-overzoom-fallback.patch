@@ -1,78 +1,126 @@
+diff --git a/src/Map/MapPrimitiviser_P.h b/src/Map/MapPrimitiviser_P.h
+--- a/src/Map/MapPrimitiviser_P.h
++++ b/src/Map/MapPrimitiviser_P.h
+@@ -85,6 +85,7 @@ namespace OsmAnd
+         static void obtainPrimitives(
+             const Context& context,
+             const ZoomLevel detailedZoom,
++            const bool useCoarseBasemapStyle,
+             const std::shared_ptr<PrimitivisedObjects>& primitivisedObjects,
+             const QList< std::shared_ptr<const OsmAnd::MapObject> >& source,
+             MapStyleEvaluationResult& evaluationResult,
 diff --git a/src/Map/MapPrimitiviser_P.cpp b/src/Map/MapPrimitiviser_P.cpp
 --- a/src/Map/MapPrimitiviser_P.cpp
 +++ b/src/Map/MapPrimitiviser_P.cpp
-@@ -632,34 +632,43 @@
+@@ -112,7 +112,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     MapStyleEvaluationResult evaluationResult(context.env->mapStyle->getValueDefinitionsCount());
+ 
+     const Stopwatch obtainPrimitivesStopwatch(metric != nullptr);
+-    obtainPrimitives(context, zoom, primitivisedObjects, objects, evaluationResult, cache, queryController, metric);
++    obtainPrimitives(context, zoom, false, primitivisedObjects, objects, evaluationResult, cache, queryController, metric);
+     if (metric)
+         metric->elapsedTimeForObtainingPrimitives += obtainPrimitivesStopwatch.elapsed();
+     
+@@ -446,6 +446,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     obtainPrimitives(
+         context,
+         detailedZoom,
++        false,
+         primitivisedObjects,
+         detailedmapMapObjects,
+         evaluationResult,
+@@ -461,6 +462,8 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+         obtainPrimitives(
+             context,
+             detailedZoom,
++            /* useCoarseBasemapStyle= */ detailedDataMissing &&
++                zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap),
+             primitivisedObjects,
+             basemapMapObjects,
+             evaluationResult,
+@@ -479,6 +482,8 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     obtainPrimitives(
+         context,
+         detailedZoom,
++        /* useCoarseBasemapStyle= */ detailedDataMissing &&
++            zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap),
+         primitivisedObjects,
+         polygonizedCoastlineObjects,
+         evaluationResult,
+@@ -582,7 +587,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+ 
+     const Stopwatch obtainPrimitivesFromDetailedmapStopwatch(metric != nullptr);
+     obtainPrimitives(
+-        context, zoom, primitivisedObjects, detailedmapMapObjects, evaluationResult, cache, queryController, metric);
++        context, zoom, false, primitivisedObjects, detailedmapMapObjects, evaluationResult, cache, queryController, metric);
+     if (metric)
+         metric->elapsedTimeForObtainingPrimitivesFromDetailedmap += obtainPrimitivesStopwatch.elapsed();
+ 
+@@ -590,7 +595,10 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     {
+         const Stopwatch obtainPrimitivesFromBasemapStopwatch(metric != nullptr);
+         obtainPrimitives(
+-            context, zoom, primitivisedObjects, basemapMapObjects, evaluationResult, cache, queryController, metric);
++            context, zoom,
++            /* useCoarseBasemapStyle= */ detailedDataMissing &&
++                zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap),
++            primitivisedObjects, basemapMapObjects, evaluationResult, cache, queryController, metric);
+         if (metric)
+             metric->elapsedTimeForObtainingPrimitivesFromBasemap += obtainPrimitivesStopwatch.elapsed();
+     }
+@@ -623,6 +631,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
+     const Context& context,
+     const ZoomLevel detailedZoom,
++    const bool useCoarseBasemapStyle,
+     const std::shared_ptr<PrimitivisedObjects>& primitivisedObjects,
+     const QList< std::shared_ptr<const OsmAnd::MapObject> >& source,
+     MapStyleEvaluationResult& evaluationResult,
+@@ -632,6 +641,10 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
  {
--    const auto& env = context.env;
--    const auto zoom = primitivisedObjects->zoom;
--    auto detailScaleFactor = static_cast<float>(1 << abs(detailedZoom - zoom));
--    if (detailedZoom > zoom)
--        detailScaleFactor = 1.0f / detailScaleFactor;
--
--    const Stopwatch obtainPrimitivesStopwatch(metric != nullptr);
--
--    // Initialize shared settings for order evaluation
--    MapStyleEvaluator orderEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
--    env->applyTo(orderEvaluator);
+     const auto& env = context.env;
+     const auto zoom = primitivisedObjects->zoom;
++    // A missing regional map retains the basemap's coarse rules while requested zoom still
++    // controls tile coordinates, projection and geometry.
++    const auto styleZoom = useCoarseBasemapStyle
++        ? static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap) : zoom;
+     auto detailScaleFactor = static_cast<float>(1 << abs(detailedZoom - zoom));
+     if (detailedZoom > zoom)
+         detailScaleFactor = 1.0f / detailScaleFactor;
+@@ -641,26 +654,28 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
+     // Initialize shared settings for order evaluation
+     MapStyleEvaluator orderEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+     env->applyTo(orderEvaluator);
 -    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
 -    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
--
--    // Initialize shared settings for polygon evaluation
--    MapStyleEvaluator polygonEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
--    env->applyTo(polygonEvaluator);
--    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
--    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
--
--    // Initialize shared settings for polyline evaluation
--    MapStyleEvaluator polylineEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
--    env->applyTo(polylineEvaluator);
--    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, detailedZoom);
--    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, detailedZoom);
--
--    // Initialize shared settings for point evaluation
--    MapStyleEvaluator pointEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
--    env->applyTo(pointEvaluator);
--    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
--    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
-+    const auto& env = context.env;
-+    const auto zoom = primitivisedObjects->zoom;
-+    // A missing regional map must retain the basemap's coarse styling when overzoomed.
-+    // Tile coordinates, projection and geometry stay at the requested zoom.
-+    const bool coarseBasemap = zoom > ObfMapSectionLevel::MaxBasemapZoomLevel && !source.isEmpty()
-+        && std::all_of(source.cbegin(), source.cend(), [](const std::shared_ptr<const MapObject>& object) {
-+            const auto binary = std::dynamic_pointer_cast<const BinaryMapObject>(object);
-+            return binary && binary->section->isBasemap;
-+        });
-+    const auto styleZoom = coarseBasemap
-+        ? static_cast<ZoomLevel>(ObfMapSectionLevel::MaxBasemapZoomLevel) : zoom;
-+    auto detailScaleFactor = static_cast<float>(1 << abs(detailedZoom - zoom));
-+    if (detailedZoom > zoom)
-+        detailScaleFactor = 1.0f / detailScaleFactor;
-+
-+    const Stopwatch obtainPrimitivesStopwatch(metric != nullptr);
-+
-+    // Initialize shared settings for order evaluation
-+    MapStyleEvaluator orderEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
-+    env->applyTo(orderEvaluator);
 +    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, styleZoom);
 +    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, styleZoom);
-+
-+    // Initialize shared settings for polygon evaluation
-+    MapStyleEvaluator polygonEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
-+    env->applyTo(polygonEvaluator);
+ 
+     // Initialize shared settings for polygon evaluation
+     MapStyleEvaluator polygonEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+     env->applyTo(polygonEvaluator);
+-    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
+-    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
 +    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, styleZoom);
 +    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, styleZoom);
-+
-+    // Initialize shared settings for polyline evaluation
-+    MapStyleEvaluator polylineEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
-+    env->applyTo(polylineEvaluator);
-+    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, coarseBasemap ? styleZoom : detailedZoom);
-+    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, coarseBasemap ? styleZoom : detailedZoom);
-+
-+    // Initialize shared settings for point evaluation
-+    MapStyleEvaluator pointEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
-+    env->applyTo(pointEvaluator);
+ 
+     // Initialize shared settings for polyline evaluation
+     MapStyleEvaluator polylineEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+     env->applyTo(polylineEvaluator);
+-    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, detailedZoom);
+-    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, detailedZoom);
++    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM,
++        useCoarseBasemapStyle ? styleZoom : detailedZoom);
++    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM,
++        useCoarseBasemapStyle ? styleZoom : detailedZoom);
+ 
+     // Initialize shared settings for point evaluation
+     MapStyleEvaluator pointEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+     env->applyTo(pointEvaluator);
+-    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
+-    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
 +    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, styleZoom);
 +    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, styleZoom);
-
+ 
      const auto pSharedPrimitivesGroups = cache ? cache->getPrimitivesGroupsPtr(zoom) : nullptr;
+     QList< proper::shared_future< std::shared_ptr<const PrimitivesGroup> > > futureSharedPrimitivesGroups;
