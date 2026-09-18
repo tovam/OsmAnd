@@ -100,7 +100,16 @@ diff --git a/src/Map/VectorLine_P.cpp b/src/Map/VectorLine_P.cpp
      float zoom = !_hasElevationDataProvider ? this->zoom() : _surfaceZoomLevel +
          (_surfaceVisualZoom >= 1.0f ? _surfaceVisualZoom - 1.0f : (_surfaceVisualZoom - 1.0f) * 2.0f);
      double scale = Utilities::getPowZoom(31 - zoom) * qSqrt(zoom) /
-@@ -1423,8 +1437,38 @@
+@@ -1373,6 +1387,7 @@
+     const auto zoomLevel = _mapZoomLevel < MaxZoomLevel ? static_cast<ZoomLevel>(_mapZoomLevel + 1) : _mapZoomLevel;
+     const auto cellsPerTileSize =
+-        _hasElevationDataResources ? (AtlasMapRenderer::HeixelsPerTileSide - 1) / (1 << (zoomLevel - _mapZoomLevel))
++        _isTubular ? FlightTubeMesh::gridCellsPerTile(_flatEarth, static_cast<int>(_mapZoomLevel))
++        : _hasElevationDataResources ? (AtlasMapRenderer::HeixelsPerTileSide - 1) / (1 << (zoomLevel - _mapZoomLevel))
+         // Use selective granularity to avoid collisions with the surface
+         : (_flatEarth ? (withHeights ? 1 : 0) : (_mapZoomLevel < 3 ? 4 : (_mapZoomLevel < 6 ? 2 : 1)));
+     bool tesselated = true;
+@@ -1423,8 +1438,38 @@
          }
  
          int patternLength = (int) _dashPattern.size();
@@ -141,7 +150,7 @@ diff --git a/src/Map/VectorLine_P.cpp b/src/Map/VectorLine_P.cpp
          {
              // Dashed line does not support distances yet, thus clear distances
              filteredDistances.clear();
-@@ -1630,7 +1672,7 @@
+@@ -1630,7 +1673,7 @@
      verticesAndIndices->partSizes = tesselated ? partSizes : nullptr;
      verticesAndIndices->zoomLevel = tesselated ? zoomLevel : InvalidZoomLevel;
      verticesAndIndices->isDenseObject =

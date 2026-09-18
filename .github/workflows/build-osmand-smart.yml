@@ -108,6 +108,11 @@ jobs:
             android/OsmAnd/test/native/FlightTubeMeshTest.cpp -o "${RUNNER_TEMP}/flight-tube-test"
           "${RUNNER_TEMP}/flight-tube-test"
 
+      - name: Test flight tubes through native terrain tile cutting
+        run: |
+          python3 android/OsmAnd/test/native/run_flight_tube_pipeline_test.py \
+            --core-root core --work-dir android
+
       - name: Test photo landmarks, pose solver and dehazing
         run: |
           mkdir -p "${RUNNER_TEMP}/flight-photo-tests"

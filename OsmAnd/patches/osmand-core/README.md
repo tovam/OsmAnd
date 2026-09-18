@@ -23,7 +23,7 @@ Its Java name is explicitly retained by ProGuard and CI checks that the exported
 native function is present even when the library comes from cache.
 
 The tube uses the native vector line's existing visible segments, sampled points,
-absolute heights, map origin, zoom width, tessellation and projection. A closed
+absolute heights, map origin, zoom width and projection. A closed
 12-sided cross-section replaces the flat ribbon. Neighbouring sections share
 vertices; the two ends are capped. The radius is converted from map units to
 metres separately at each sample's latitude, without converting or offsetting
@@ -34,6 +34,21 @@ the centreline height. Opaque depth writes provide correct self-occlusion.
 equal top/side diameters, bends, climbs, vertical segments, duplicate samples,
 reversals, invalid values and the bounded vertex count of a 4,000-point leg.
 The workflow runs these tests with address and undefined-behaviour sanitizers.
+
+Tubes are cut at tile boundaries, with coarse extra subdivisions at low globe
+zooms, but never against the terrain's heixel grid. The latter could multiply a
+4,000-point tube past the core's 4M-vertex safety limit, causing
+`generatePrimitive()` to fail and hide the whole route. Disabling the separate
+flat ribbon exposes that failure instead of masking it. The GPS centreline and its absolute
+altitudes do not require DEM subdivision.
+
+`run_flight_tube_pipeline_test.py` compiles the checked-out core's actual
+`GeometryModifiers::cutMeshWithGrid()` against minimal POD type substitutes. It
+reproduces that rejection with the old 64-cell grid and checks that the bounded
+grid preserves the complete opaque elevated mesh, its per-tile draw counts and
+its vertical diameter. CI checks that the patched `VectorLine_P.cpp` really uses
+this policy before running the test. This is a native mesh-pipeline test, not a
+GPU screenshot test.
 
 ## Recorded point altitude
 

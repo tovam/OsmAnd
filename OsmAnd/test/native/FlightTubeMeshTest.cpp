@@ -87,6 +87,10 @@ static void grazingEndCapKeepsRoundPhysicalDiameter(
 
 int main()
 {
+    assert(gridCellsPerTile(true, 2) == 1);
+    assert(gridCellsPerTile(false, 2) == 4);
+    assert(gridCellsPerTile(false, 5) == 2);
+    assert(gridCellsPerTile(false, 14) == 1);
     // Identical physical diameter from above, from the side and at a grazing angle, at 12 km altitude.
     const std::vector<Sample> level = {{0, 0, 12000, 0.02, 100, 0}, {100000, 0, 12000, 0.02, 100, 1}};
     const auto levelMesh = mesh(level);

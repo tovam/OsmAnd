@@ -14,6 +14,14 @@ namespace FlightTubeMesh
     constexpr unsigned Sides = 12;
     constexpr double Pi = 3.14159265358979323846;
 
+    // Absolute GPS heights do not follow the DEM. Cutting every tube face against every
+    // terrain heixel can exceed the native 4M-vertex limit and hide the entire route.
+    // Keep tile boundaries (and the existing coarse globe subdivision), not the DEM grid.
+    inline int gridCellsPerTile(bool flatEarth, int mapZoom)
+    {
+        return flatEarth ? 1 : (mapZoom < 3 ? 4 : (mapZoom < 6 ? 2 : 1));
+    }
+
     struct Vec3
     {
         double x, y, z;
