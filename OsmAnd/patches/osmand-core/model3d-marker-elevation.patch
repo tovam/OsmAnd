@@ -93,6 +93,11 @@ diff --git a/src/Map/MapMarker_P.cpp b/src/Map/MapMarker_P.cpp
 diff --git a/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp b/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp
 --- a/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp
 +++ b/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp
+@@ -1,3 +1,4 @@
+ #include "AtlasMapRendererSymbolsStageModel3D.h"
++#include "FlightModelPlacement.h"
+
+ #include <QPair>
 @@ -82,6 +82,21 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
      const auto offsetFromTarget = Utilities::convert31toFloat(offsetFromTarget31, currentState.zoomLevel);
      const auto positionOnPlane = offsetFromTarget * AtlasMapRenderer::TileSize3D;
@@ -131,7 +136,7 @@ diff --git a/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp b/src/Map/AtlasMapR
      const auto mElevationTranslate = glm::translate(glm::vec3(0.0f, height, 0.0f));
  
      const auto leftHeightsHalfSize = leftHeights.size() / 2;
-@@ -151,7 +173,9 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
+@@ -151,7 +173,12 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(
  
      bool modelElevated = !qFuzzyIsNull(height);
  
@@ -139,7 +144,11 @@ diff --git a/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp b/src/Map/AtlasMapR
 +    auto mRotateOnRelief = glm::mat4(1.0f);
 +    if (qIsNaN(model3DMapSymbol->elevation))
 +        mRotateOnRelief = mRotationX * mRotationZ;
-     auto mLocalModel = mDirectionInWorld * mRotateOnRelief * mScale;
+-    auto mLocalModel = mDirectionInWorld * mRotateOnRelief * mScale;
++    const auto verticalOffset = FlightModelPlacement::verticalOffset(
++        !qIsNaN(model3DMapSymbol->elevation), originalBBox.minY, originalBBox.maxY);
++    const auto mVerticalAnchor = glm::translate(glm::vec3(0.0f, verticalOffset, 0.0f));
++    auto mLocalModel = mDirectionInWorld * mRotateOnRelief * mScale * mVerticalAnchor;
  
      // Test against visible frustum area (if allowed)
 @@ -181,7 +205,8 @@ void OsmAnd::AtlasMapRendererSymbolsStageModel3D::obtainRenderables(

@@ -9,7 +9,7 @@ checked against `ee8cbbc6d952f6a625e89c7e0e0467fb6adbd015`. The workflow follows
 upstream rather than pinning either revision, so it checks every patch before
 applying it and publishes failures as check annotations.
 
-The build copies `FlightTubeMesh.h` and `BasemapOverzoom.h` to `core/src/Map/` and
+The build copies `FlightTubeMesh.h`, `FlightModelPlacement.h` and `BasemapOverzoom.h` to `core/src/Map/` and
 `FlightVectorLineBridge.cpp` to `core/wrappers/java/` before CMake runs. Changes
 to any patch or supplied source file invalidate the native library cache.
 
@@ -57,6 +57,17 @@ to billboard pin icons. Their creation path previously omitted both values.
 The patch initializes them in `createSymbolsGroup()`, matching the update path.
 Consequently stationary recorded points and photo pins start at their supplied
 absolute altitude without requiring an artificial marker update.
+
+## Aircraft vertical origin
+
+OsmAnd's OBJ loader puts the lowest vertex at local Y = 0. For models with an
+explicit absolute altitude, `FlightModelPlacement.h` recentres the vertical
+bounding box before scaling and heading rotation. The aircraft's midpoint,
+rather than its belly, now sits at the existing GPS altitude at every icon size.
+The same local matrix feeds rendering and visibility checks. Ground-following
+models retain the original bottom anchor; route, tether, heading and horizontal
+position are unchanged. `FlightModelPlacementTest.cpp` checks the bundled OBJ,
+multiple scales, arbitrary bounds and the native renderer's matrix wiring.
 
 ## World basemap without a country download
 

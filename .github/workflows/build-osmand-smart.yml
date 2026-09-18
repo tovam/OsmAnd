@@ -89,6 +89,7 @@ jobs:
             git -C core apply "${patch_file}"
           done
           cp android/OsmAnd/patches/osmand-core/FlightTubeMesh.h core/src/Map/
+          cp android/OsmAnd/patches/osmand-core/FlightModelPlacement.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/BasemapOverzoom.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/FlightVectorLineBridge.cpp core/wrappers/java/
 
@@ -115,6 +116,14 @@ jobs:
           g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
             android/OsmAnd/test/native/FlightTubeMeshTest.cpp -o "${RUNNER_TEMP}/flight-tube-test"
           "${RUNNER_TEMP}/flight-tube-test"
+
+      - name: Test aircraft vertical anchor
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            android/OsmAnd/test/native/FlightModelPlacementTest.cpp -o "${RUNNER_TEMP}/flight-model-placement-test"
+          "${RUNNER_TEMP}/flight-model-placement-test" \
+            core/src/Map/AtlasMapRendererSymbolsStageModel3D.cpp \
+            android/OsmAnd/assets/flightmode/aircraft/flight_airliner.obj
 
       - name: Test flight tubes through native terrain tile cutting
         run: |
