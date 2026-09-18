@@ -9,9 +9,9 @@ checked against `ee8cbbc6d952f6a625e89c7e0e0467fb6adbd015`. The workflow follows
 upstream rather than pinning either revision, so it checks every patch before
 applying it and publishes failures as check annotations.
 
-The build copies `FlightTubeMesh.h` to `core/src/Map/` and
+The build copies `FlightTubeMesh.h` and `BasemapOverzoom.h` to `core/src/Map/` and
 `FlightVectorLineBridge.cpp` to `core/wrappers/java/` before CMake runs. Changes
-to either patch or either source file invalidate the native library cache.
+to any patch or supplied source file invalidate the native library cache.
 
 ## Volumetric flight route
 
@@ -57,6 +57,27 @@ to billboard pin icons. Their creation path previously omitted both values.
 The patch initializes them in `createSymbolsGroup()`, matching the update path.
 Consequently stationary recorded points and photo pins start at their supplied
 absolute altitude without requiring an artificial marker update.
+
+## World basemap without a country download
+
+When a tile lacks regional cartography, the native renderer keeps the world
+basemap's last available level rather than applying street-level rules that
+discard its coarse features. Projection and tile coordinates still use the
+requested zoom: geography is enlarged in place, not moved to another tile.
+Detailed country data takes precedence; routing-only or contour-only overlays
+do not incorrectly suppress the background.
+
+The patch clamps both ordinary map-reader paths for supplementary world-map
+sections to their source zoom and parent bounding box, matching the existing
+main-basemap read path. Primitive styles and captions use coarse rules; detailed
+road captions in the same tile retain their requested zoom. Shared caches keep
+their original zoom/identity keys. The small `BasemapOverzoom.h` policy is tested
+locally and in CI; `CheckBasemapOverzoomFallbackSource.cmake` verifies its real
+call sites in the patched core, including the two readers and label evaluation.
+
+This requires a world basemap on the phone. It does not invent streets or fetch
+country maps automatically, and cannot provide geography if no basemap exists.
+These source/policy tests are not a device rendering test.
 
 ## Local check without compiling an APK
 

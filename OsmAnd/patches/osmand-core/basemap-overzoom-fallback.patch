@@ -1,64 +1,75 @@
 diff --git a/src/Map/MapPrimitiviser_P.h b/src/Map/MapPrimitiviser_P.h
+index 25e5538826..1ac35c151d 100644
 --- a/src/Map/MapPrimitiviser_P.h
 +++ b/src/Map/MapPrimitiviser_P.h
-@@ -85,6 +85,7 @@ namespace OsmAnd
-         static void obtainPrimitives(
-             const Context& context,
+@@ -87,2 +87,3 @@ namespace OsmAnd
              const ZoomLevel detailedZoom,
 +            const bool useCoarseBasemapStyle,
              const std::shared_ptr<PrimitivisedObjects>& primitivisedObjects,
-             const QList< std::shared_ptr<const OsmAnd::MapObject> >& source,
-             MapStyleEvaluationResult& evaluationResult,
 diff --git a/src/Map/MapPrimitiviser_P.cpp b/src/Map/MapPrimitiviser_P.cpp
+index 0ab324a555..79a9d5c112 100644
 --- a/src/Map/MapPrimitiviser_P.cpp
 +++ b/src/Map/MapPrimitiviser_P.cpp
-@@ -112,7 +112,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
-     MapStyleEvaluationResult evaluationResult(context.env->mapStyle->getValueDefinitionsCount());
- 
+@@ -2,2 +2,3 @@
+ #include "MapPrimitiviser.h"
++#include "BasemapOverzoom.h"
+
+@@ -114,3 +115,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
      const Stopwatch obtainPrimitivesStopwatch(metric != nullptr);
 -    obtainPrimitives(context, zoom, primitivisedObjects, objects, evaluationResult, cache, queryController, metric);
 +    obtainPrimitives(context, zoom, false, primitivisedObjects, objects, evaluationResult, cache, queryController, metric);
      if (metric)
-         metric->elapsedTimeForObtainingPrimitives += obtainPrimitivesStopwatch.elapsed();
-     
-@@ -446,6 +446,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
-     obtainPrimitives(
-         context,
+@@ -221,3 +222,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+             {
+-                detailedBinaryMapObjectsPresent = true;
++                detailedBinaryMapObjectsPresent |= !isContourLinesObject;
+             }
+@@ -422,6 +423,6 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     // Obtain primitives
+-    const bool detailedDataMissing =
+-        (zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap)) &&
+-        (detailedmapMapObjects.isEmpty() || hasContourLinesObjectOnly) &&
+-        detailedmapCoastlineObjects.isEmpty();
++    // Routing and contour-only files may add overlays, but cannot replace the world map.
++    const bool detailedDataMissing = BasemapOverzoom::needsFallback(
++        zoom, MapPrimitiviser::LastZoomToUseBasemap,
++        detailedLandDataPresent || !detailedmapCoastlineObjects.isEmpty());
+
+@@ -448,2 +449,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
          detailedZoom,
 +        false,
          primitivisedObjects,
-         detailedmapMapObjects,
-         evaluationResult,
-@@ -461,6 +462,8 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
-         obtainPrimitives(
-             context,
+@@ -463,2 +465,4 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
              detailedZoom,
 +            /* useCoarseBasemapStyle= */ detailedDataMissing &&
 +                zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap),
              primitivisedObjects,
-             basemapMapObjects,
-             evaluationResult,
-@@ -479,6 +482,8 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
-     obtainPrimitives(
-         context,
+@@ -481,2 +485,4 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
          detailedZoom,
 +        /* useCoarseBasemapStyle= */ detailedDataMissing &&
 +            zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap),
          primitivisedObjects,
-         polygonizedCoastlineObjects,
-         evaluationResult,
-@@ -582,7 +587,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
- 
-     const Stopwatch obtainPrimitivesFromDetailedmapStopwatch(metric != nullptr);
+@@ -537,2 +543,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     QList< std::shared_ptr<const MapObject> > detailedmapMapObjects, basemapMapObjects;
++    bool detailedLandDataPresent = false;
+     for (const auto& mapObject : constOf(objects))
+@@ -547,2 +554,4 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+             isBasemapObject = possiblyBasemapObject->section->isBasemap;
++            if (!isBasemapObject && !possiblyBasemapObject->section->isContourLines)
++                detailedLandDataPresent = true;
+             if (zoom < static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap) && !isBasemapObject)
+@@ -566,3 +575,4 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     // Obtain primitives
+-    const bool detailedDataMissing = (zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap)) && detailedmapMapObjects.isEmpty();
++    const bool detailedDataMissing = BasemapOverzoom::needsFallback(
++        zoom, MapPrimitiviser::LastZoomToUseBasemap, detailedLandDataPresent);
+
+@@ -584,3 +594,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
      obtainPrimitives(
 -        context, zoom, primitivisedObjects, detailedmapMapObjects, evaluationResult, cache, queryController, metric);
 +        context, zoom, false, primitivisedObjects, detailedmapMapObjects, evaluationResult, cache, queryController, metric);
      if (metric)
-         metric->elapsedTimeForObtainingPrimitivesFromDetailedmap += obtainPrimitivesFromDetailedmapStopwatch.elapsed();
- 
-@@ -590,7 +595,10 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
-     {
-         const Stopwatch obtainPrimitivesFromBasemapStopwatch(metric != nullptr);
+@@ -592,3 +602,6 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
          obtainPrimitives(
 -            context, zoom, primitivisedObjects, basemapMapObjects, evaluationResult, cache, queryController, metric);
 +            context, zoom,
@@ -66,46 +77,32 @@ diff --git a/src/Map/MapPrimitiviser_P.cpp b/src/Map/MapPrimitiviser_P.cpp
 +                zoom > static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap),
 +            primitivisedObjects, basemapMapObjects, evaluationResult, cache, queryController, metric);
          if (metric)
-             metric->elapsedTimeForObtainingPrimitivesFromBasemap += obtainPrimitivesFromBasemapStopwatch.elapsed();
-     }
-@@ -623,6 +631,7 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
- void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
-     const Context& context,
+@@ -625,2 +638,3 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
      const ZoomLevel detailedZoom,
 +    const bool useCoarseBasemapStyle,
      const std::shared_ptr<PrimitivisedObjects>& primitivisedObjects,
-     const QList< std::shared_ptr<const OsmAnd::MapObject> >& source,
-     MapStyleEvaluationResult& evaluationResult,
-@@ -632,6 +641,10 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
- {
-     const auto& env = context.env;
+@@ -634,2 +648,6 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
      const auto zoom = primitivisedObjects->zoom;
 +    // A missing regional map retains the basemap's coarse rules while requested zoom still
 +    // controls tile coordinates, projection and geometry.
-+    const auto styleZoom = useCoarseBasemapStyle
-+        ? static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap) : zoom;
++    const auto styleZoom = static_cast<ZoomLevel>(BasemapOverzoom::sourceZoom(
++        useCoarseBasemapStyle, zoom, MapPrimitiviser::LastZoomToUseBasemap));
      auto detailScaleFactor = static_cast<float>(1 << abs(detailedZoom - zoom));
-     if (detailedZoom > zoom)
-         detailScaleFactor = 1.0f / detailScaleFactor;
-@@ -641,26 +654,28 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
-     // Initialize shared settings for order evaluation
-     MapStyleEvaluator orderEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+@@ -643,4 +661,4 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
      env->applyTo(orderEvaluator);
 -    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
 -    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
 +    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, styleZoom);
 +    orderEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, styleZoom);
- 
-     // Initialize shared settings for polygon evaluation
-     MapStyleEvaluator polygonEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+
+@@ -649,4 +667,4 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
      env->applyTo(polygonEvaluator);
 -    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
 -    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
 +    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, styleZoom);
 +    polygonEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, styleZoom);
- 
-     // Initialize shared settings for polyline evaluation
-     MapStyleEvaluator polylineEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+
+@@ -655,4 +673,6 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
      env->applyTo(polylineEvaluator);
 -    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, detailedZoom);
 -    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, detailedZoom);
@@ -113,14 +110,73 @@ diff --git a/src/Map/MapPrimitiviser_P.cpp b/src/Map/MapPrimitiviser_P.cpp
 +        useCoarseBasemapStyle ? styleZoom : detailedZoom);
 +    polylineEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM,
 +        useCoarseBasemapStyle ? styleZoom : detailedZoom);
- 
-     // Initialize shared settings for point evaluation
-     MapStyleEvaluator pointEvaluator(env->mapStyle, env->displayDensityFactor * env->mapScaleFactor);
+
+@@ -661,4 +681,4 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitives(
      env->applyTo(pointEvaluator);
 -    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, zoom);
 -    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, zoom);
 +    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, styleZoom);
 +    pointEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, styleZoom);
- 
-     const auto pSharedPrimitivesGroups = cache ? cache->getPrimitivesGroupsPtr(zoom) : nullptr;
-     QList< proper::shared_future< std::shared_ptr<const PrimitivesGroup> > > futureSharedPrimitivesGroups;
+
+@@ -1385,2 +1405,3 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitivesSymbols(
+     QList< proper::shared_future< std::shared_ptr<const SymbolsGroup> > > futureSharedSymbolGroups;
++    auto previousTextZoom = zoom;
+     for (const auto& primitivesGroup : constOf(primitivisedObjects->primitivesGroups))
+@@ -1390,2 +1411,16 @@ void OsmAnd::MapPrimitiviser_P::obtainPrimitivesSymbols(
+
++        // Basemap captions must use the same coarse rules as their geometry. Applying
++        // the requested street-level zoom can otherwise erase the only available names.
++        // Choose per object, so any detailed road overlays keep their normal styling.
++        const auto binaryObject = std::dynamic_pointer_cast<const BinaryMapObject>(primitivesGroup->sourceObject);
++        const auto textZoom = static_cast<ZoomLevel>(BasemapOverzoom::sourceZoom(
++            binaryObject && binaryObject->section->isBasemap, zoom, MapPrimitiviser::LastZoomToUseBasemap));
++        if (textZoom != previousTextZoom)
++        {
++            textOrderCache.clear();
++            textEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MINZOOM, textZoom);
++            textEvaluator.setIntegerValue(env->styleBuiltinValueDefs->id_INPUT_MAXZOOM, textZoom);
++            previousTextZoom = textZoom;
++        }
++
+         // If using shared context is allowed, check if this group was already processed
+diff --git a/src/ObfDataInterface.cpp b/src/ObfDataInterface.cpp
+index dc3f656bda..5195c92281 100644
+--- a/src/ObfDataInterface.cpp
++++ b/src/ObfDataInterface.cpp
+@@ -34,2 +34,3 @@
+ #include "Building.h"
++#include "Map/BasemapOverzoom.h"
+
+@@ -146,3 +147,8 @@ bool OsmAnd::ObfDataInterface::loadBinaryMapObjects(
+
+-            // Read objects from each map section
++            // Supplementary world-map sections also stop at the basemap's max zoom.
++            // Read their parent area instead of asking them for unavailable country detail.
++            const auto sectionZoom = static_cast<ZoomLevel>(BasemapOverzoom::sourceZoom(
++                mapSection->isBasemap, zoom, ObfMapSectionLevel::MaxBasemapZoomLevel));
++            const auto sectionBBox31 = sectionZoom < zoom
++                ? Utilities::roundBoundingBox31(tileBBox31, sectionZoom) : tileBBox31;
+             auto surfaceTypeToMerge = MapSurfaceType::Undefined;
+@@ -152,4 +158,4 @@ bool OsmAnd::ObfDataInterface::loadBinaryMapObjects(
+                 environment,
+-                zoom,
+-                &tileBBox31,
++                sectionZoom,
++                &sectionBBox31,
+                 resultOut,
+@@ -377,3 +383,7 @@ bool OsmAnd::ObfDataInterface::loadMapObjects(
+
+-            // Read objects from each map section
++            // Keep the supplementary world map available when no country map is installed.
++            const auto sectionZoom = static_cast<ZoomLevel>(BasemapOverzoom::sourceZoom(
++                mapSection->isBasemap, zoom, ObfMapSectionLevel::MaxBasemapZoomLevel));
++            const auto sectionBBox31 = sectionZoom < zoom
++                ? Utilities::roundBoundingBox31(tileBBox31, sectionZoom) : tileBBox31;
+             auto surfaceTypeToMerge = MapSurfaceType::Undefined;
+@@ -383,4 +393,4 @@ bool OsmAnd::ObfDataInterface::loadMapObjects(
+                 environment,
+-                zoom,
+-                &tileBBox31,
++                sectionZoom,
++                &sectionBBox31,
+                 outBinaryMapObjects,

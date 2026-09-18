@@ -89,6 +89,7 @@ jobs:
             git -C core apply "${patch_file}"
           done
           cp android/OsmAnd/patches/osmand-core/FlightTubeMesh.h core/src/Map/
+          cp android/OsmAnd/patches/osmand-core/BasemapOverzoom.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/FlightVectorLineBridge.cpp core/wrappers/java/
 
       - name: Validate patched JNI CMake syntax
@@ -100,7 +101,14 @@ jobs:
         run: |
           cmake -DPRIMITIVISER_FILE="${GITHUB_WORKSPACE}/core/src/Map/MapPrimitiviser_P.cpp" \
             -DPRIMITIVISER_PRIVATE_HEADER="${GITHUB_WORKSPACE}/core/src/Map/MapPrimitiviser_P.h" \
+            -DDATA_INTERFACE_FILE="${GITHUB_WORKSPACE}/core/src/ObfDataInterface.cpp" \
             -P android/OsmAnd/test/native/CheckBasemapOverzoomFallbackSource.cmake
+
+      - name: Test world basemap overzoom policy
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            android/OsmAnd/test/native/BasemapOverzoomTest.cpp -o "${RUNNER_TEMP}/basemap-overzoom-test"
+          "${RUNNER_TEMP}/basemap-overzoom-test"
 
       - name: Test flight tube geometry
         run: |
