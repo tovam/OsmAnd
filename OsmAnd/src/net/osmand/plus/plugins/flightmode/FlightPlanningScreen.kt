@@ -49,7 +49,10 @@ internal fun FlightPlanningScreen(
     val context = LocalContext.current
     val prep = state.plan.preparation ?: FlightPreparation()
     val quote = state.offlineQuote
-    val quoting = quote == null && state.offlineCoverageError == null && FlightOfflinePreparation.canSimulate(state.plan)
+    val quoting =
+        quote == null &&
+            state.offlineCoverageError == null &&
+            FlightOfflinePreparation.canSimulate(state.plan)
     val error = state.offlineCoverageError
     var mapEditor by remember { mutableStateOf(false) }
     var section by remember { mutableStateOf(initialSection.coerceIn(0, 2)) }
@@ -80,8 +83,16 @@ internal fun FlightPlanningScreen(
     fun change(next: FlightPreparation) = onUpdate(state.plan.copy(preparation = next))
     fun addVia(type: FlightStopType = FlightStopType.WAYPOINT) {
         val stops = state.plan.stops.toMutableList()
-        stops.add(stops.lastIndex, FlightStop(context.getString(
-            if (type == FlightStopType.WAYPOINT) R.string.flight_route_waypoint else R.string.flight_route_stopover), type = type))
+        stops.add(
+            stops.lastIndex,
+            FlightStop(
+                context.getString(
+                    if (type == FlightStopType.WAYPOINT) R.string.flight_route_waypoint
+                    else R.string.flight_route_stopover
+                ),
+                type = type,
+            ),
+        )
         selected = stops.lastIndex - 1
         onUpdate(state.plan.copy(stops = stops, preparation = prep))
         mapEditor = true
@@ -210,6 +221,23 @@ internal fun FlightPlanningScreen(
                     }
                 }
         }
+        if (section == 1) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                FlightOfflineSizeSummary(state)
+                quote?.let {
+                    Text(
+                        stringResource(
+                            R.string.flight_offline_size_route,
+                            it.distanceKm,
+                            prep.bands.maxOfOrNull { band -> band.radiusKm } ?: 0,
+                        ),
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+            HorizontalDivider(color = Color(0xFF293740))
+        }
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             if (section == 0)
                 item {
@@ -258,13 +286,33 @@ internal fun FlightPlanningScreen(
                                     )
                             }
                             if (i in 1 until state.plan.stops.lastIndex) {
-                                PlanAction(stringResource(if (stop.type == FlightStopType.WAYPOINT)
-                                    R.string.flight_route_waypoint else R.string.flight_route_stopover), {
-                                    onUpdate(state.plan.copy(stops = state.plan.stops.mapIndexed { index, item ->
-                                        if (index == i) item.copy(type = if (item.type == FlightStopType.WAYPOINT)
-                                            FlightStopType.STOPOVER else FlightStopType.WAYPOINT) else item
-                                    }))
-                                })
+                                PlanAction(
+                                    stringResource(
+                                        if (stop.type == FlightStopType.WAYPOINT)
+                                            R.string.flight_route_waypoint
+                                        else R.string.flight_route_stopover
+                                    ),
+                                    {
+                                        onUpdate(
+                                            state.plan.copy(
+                                                stops =
+                                                    state.plan.stops.mapIndexed { index, item ->
+                                                        if (index == i)
+                                                            item.copy(
+                                                                type =
+                                                                    if (
+                                                                        item.type ==
+                                                                            FlightStopType.WAYPOINT
+                                                                    )
+                                                                        FlightStopType.STOPOVER
+                                                                    else FlightStopType.WAYPOINT
+                                                            )
+                                                        else item
+                                                    }
+                                            )
+                                        )
+                                    },
+                                )
                             }
                         }
                         if (state.citySearchStopIndex != null) {
@@ -282,7 +330,10 @@ internal fun FlightPlanningScreen(
                             }
                         }
                         PlanAction(stringResource(R.string.flight_plan_add_via), { addVia() })
-                        PlanAction(stringResource(R.string.flight_route_add_stopover), { addVia(FlightStopType.STOPOVER) })
+                        PlanAction(
+                            stringResource(R.string.flight_route_add_stopover),
+                            { addVia(FlightStopType.STOPOVER) },
+                        )
                         FlightDateField(
                             stringResource(R.string.flight_plan_departure),
                             prep.departureMillis,
@@ -421,6 +472,20 @@ internal fun FlightPlanningScreen(
                                 }
                             }
                             val latitude = state.plan.stops.firstOrNull()?.latitude ?: 45.0
+                            quote
+                                ?.takeIf {
+                                    it.bands == prep.bands.sortedBy { band -> band.radiusKm }
+                                }
+                                ?.let { q ->
+                                    Text(
+                                        stringResource(
+                                            R.string.flight_offline_size_band,
+                                            flightOfflineGb(q.bandEstimatedBytes[i] ?: 0L),
+                                        ),
+                                        color = color,
+                                        fontSize = 12.sp,
+                                    )
+                                }
                             Text(
                                 stringResource(
                                     R.string.flight_plan_resolution,
@@ -431,6 +496,16 @@ internal fun FlightPlanningScreen(
                                 ),
                                 color = Color.LightGray,
                                 fontSize = 10.sp,
+                            )
+                        }
+                        quote?.bandEstimatedBytes?.get(-1)?.let { bytes ->
+                            Text(
+                                stringResource(
+                                    R.string.flight_offline_size_fallback,
+                                    flightOfflineGb(bytes),
+                                ),
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
                             )
                         }
                         Row {
@@ -467,30 +542,12 @@ internal fun FlightPlanningScreen(
                         if (quoting) LinearProgressIndicator(Modifier.fillMaxWidth())
                         error?.let { Text(it, color = Color(0xFFFFBD39), fontSize = 11.sp) }
                         quote?.let { q ->
+                            FlightOfflineProgressPanel(state, includeSizes = false)
                             Text(
-                                stringResource(
-                                    R.string.flight_plan_estimate,
-                                    q.satelliteCount,
-                                    q.terrainCount,
-                                    q.estimatedBytes / 1e9,
-                                ),
-                                color = Color.White,
-                                fontSize = 12.sp,
-                            )
-                            Text(
-                                stringResource(R.string.flight_plan_estimate_hint),
-                                color = Color.LightGray,
-                                fontSize = 10.sp,
-                            )
-                            Text(
-                                stringResource(
-                                    R.string.flight_plan_free_space,
-                                    freeBytes / 1e9,
-                                ),
+                                stringResource(R.string.flight_plan_free_space, freeBytes / 1e9),
                                 color = Color.LightGray,
                                 fontSize = 11.sp,
                             )
-                            FlightOfflineProgressPanel(state)
                             PlanAction(
                                 stringResource(R.string.flight_plan_download),
                                 {
@@ -504,9 +561,10 @@ internal fun FlightPlanningScreen(
                         }
                         val offline = state.offlinePreloadStatus
                         if (offline.phase != FlightTerrainPhase.IDLE) {
-                            if (offline.phase == FlightTerrainPhase.ERROR) offline.message?.let {
-                                Text(it, color = Color(0xFFFFCC66), fontSize = 11.sp)
-                            }
+                            if (offline.phase == FlightTerrainPhase.ERROR)
+                                offline.message?.let {
+                                    Text(it, color = Color(0xFFFFCC66), fontSize = 11.sp)
+                                }
                             if (offline.phase == FlightTerrainPhase.DOWNLOADING)
                                 PlanAction(
                                     stringResource(R.string.flight_plan_pause),
@@ -675,7 +733,10 @@ internal fun FlightPlanningScreen(
                         PlanAction("${i+1} ${s.name}", { selected = i }, selected == i)
                     }
                     PlanAction(stringResource(R.string.flight_plan_add_via), { addVia() })
-                    PlanAction(stringResource(R.string.flight_route_add_stopover), { addVia(FlightStopType.STOPOVER) })
+                    PlanAction(
+                        stringResource(R.string.flight_route_add_stopover),
+                        { addVia(FlightStopType.STOPOVER) },
+                    )
                     if (selected > 0 && selected < state.plan.stops.lastIndex)
                         PlanAction(
                             stringResource(R.string.flight_plan_remove_via),
@@ -826,6 +887,7 @@ private fun PlanNumber(
             it.toIntOrNull()?.takeIf { n -> n in range }?.let(onValue)
         },
         label = { Text(label, fontSize = 10.sp) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         singleLine = true,
         modifier = modifier.padding(2.dp),
         textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),

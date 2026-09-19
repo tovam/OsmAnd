@@ -119,6 +119,10 @@ class FlightMonitoringTest {
         assertEquals(1, progress.missing)
         assertEquals(120_000L, progress.storedBytes)
         assertEquals(45_000L, progress.estimatedRemainingBytes)
+        assertEquals(120_000L, progress.terrainStoredBytes)
+        assertEquals(0L, progress.satelliteStoredBytes)
+        assertEquals(45_000L, progress.satelliteRemainingBytes)
+        assertEquals(0L, progress.terrainRemainingBytes)
         assertEquals(.5f, progress.fraction, 0f)
     }
 
@@ -182,6 +186,47 @@ class FlightMonitoringTest {
         }
         assertEquals(4_000_000_000L, index.snapshot().storedBytes)
         assertEquals(1_000_000_000L, index.snapshot().estimatedRemainingBytes)
+    }
+
+    @Test
+    fun tinyOverviewTilesDoNotUnderestimateDetailedSatelliteOrTerrain() {
+        val overview = (0..7).map { FlightOfflineRequest(TerrainTileId(3, it, 0), true, -1) }
+        val detail = (0..9).map { FlightOfflineRequest(TerrainTileId(14, it, 0), true, 0) }
+        val heights = detail.map { it.copy(satellite = false) }
+        val index = FlightOfflineInventory(overview + detail + heights)
+        overview.forEach { index.changed(FlightOfflineTileKey(it.tile, true), 1000) }
+        assertEquals(450_000L, index.snapshot().satelliteRemainingBytes)
+        assertEquals(1_100_000L, index.snapshot().terrainRemainingBytes)
+        detail.take(8).forEach { index.changed(FlightOfflineTileKey(it.tile, true), 90_000) }
+        val snapshot = index.snapshot()
+        assertEquals(728_000L, snapshot.satelliteStoredBytes)
+        assertEquals(180_000L, snapshot.satelliteRemainingBytes)
+        assertEquals(
+            snapshot.storedBytes,
+            snapshot.satelliteStoredBytes + snapshot.terrainStoredBytes,
+        )
+        assertEquals(
+            snapshot.estimatedRemainingBytes,
+            snapshot.satelliteRemainingBytes + snapshot.terrainRemainingBytes,
+        )
+    }
+
+    @Test
+    fun inventoryHeaderProbeIsIndependentOfPausedSceneAndKeepsCompositeTexturesValid() {
+        val source =
+            java.io
+                .File("OsmAnd/src/net/osmand/plus/plugins/flightmode/FlightTerrainRepository.kt")
+                .readText()
+        val inventory =
+            source
+                .substringAfter("suspend fun observeOfflineCoverage")
+                .substringBefore("\n\tprivate ")
+        assertTrue(inventory.contains("hasReadableTileHeader(file)"))
+        assertFalse(inventory.contains("isDecodableImage(file)"))
+        val header =
+            source.substringAfter("private fun hasReadableTileHeader").substringBefore("\n\t}")
+        assertFalse(header.contains("ensureWorkActive"))
+        assertTrue(header.contains("options.outWidth > 0 && options.outHeight > 0"))
     }
 
     @Test

@@ -1446,6 +1446,12 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 
 	private fun isDecodableImage(file: File): Boolean {
 		ensureWorkActive()
+		return hasReadableTileHeader(file)
+	}
+
+	// Inventory is lifecycle-owned but is not a 3D scene job. Preparation deliberately
+	// suspends scene work; applying that guard here aborts the inventory on its first file.
+	private fun hasReadableTileHeader(file: File): Boolean {
 		val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
 		BitmapFactory.decodeFile(file.absolutePath, options)
 		return options.outWidth > 0 && options.outHeight > 0
@@ -1472,7 +1478,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 						val key = FlightOfflineTileKey(request.tile, request.satellite)
 						val revision = inventory.revision(key) ?: continue
 						val file = if (request.satellite) satelliteFile(request.tile) else tileFile(request.tile)
-						val bytes = if (file.isFile && file.length() > 0 && isDecodableImage(file)) file.length() else 0L
+						val bytes = if (file.isFile && file.length() > 0 && hasReadableTileHeader(file)) file.length() else 0L
 						inventory.inspected(key, revision, bytes)
 					}
 				}

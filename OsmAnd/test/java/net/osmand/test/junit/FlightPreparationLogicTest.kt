@@ -9,6 +9,43 @@ import org.junit.Test
 /** Synthetic routes only; no files, devices, accounts or network are used by this suite. */
 class FlightPreparationLogicTest {
     @Test
+    fun offlineEstimateRespondsToCorridorWidthQualityAndRouteLength() = runBlocking {
+        fun plan(radius: Int = 20, satellite: Int = 9, terrain: Int = 9, longitude: Double = 11.0) =
+            FlightPlan(
+                stops =
+                    listOf(
+                        FlightStop("A", latitude = 45.0, longitude = 10.0),
+                        FlightStop("B", latitude = 45.0, longitude = longitude),
+                    ),
+                preparation =
+                    FlightPreparation(bands = listOf(FlightOfflineBand(radius, satellite, terrain))),
+            )
+        val base = FlightOfflinePreparation.quote(plan())
+        val wide = FlightOfflinePreparation.quote(plan(radius = 100))
+        val satellite = FlightOfflinePreparation.quote(plan(satellite = 11))
+        val terrain = FlightOfflinePreparation.quote(plan(terrain = 11))
+        val longer = FlightOfflinePreparation.quote(plan(longitude = 13.0))
+        assertTrue(wide.estimatedBytes > base.estimatedBytes)
+        assertTrue(satellite.satelliteEstimatedBytes > base.satelliteEstimatedBytes)
+        assertEquals(base.terrainEstimatedBytes, satellite.terrainEstimatedBytes)
+        assertTrue(terrain.terrainEstimatedBytes > base.terrainEstimatedBytes)
+        assertEquals(base.satelliteEstimatedBytes, terrain.satelliteEstimatedBytes)
+        assertTrue(longer.estimatedBytes > base.estimatedBytes)
+        assertTrue(longer.distanceKm > base.distanceKm)
+        for (quote in listOf(base, wide, satellite, terrain, longer)) {
+            assertEquals(quote.estimatedBytes, quote.bandEstimatedBytes.values.sum())
+            assertEquals(
+                quote.estimatedBytes,
+                quote.satelliteEstimatedBytes + quote.terrainEstimatedBytes,
+            )
+            assertEquals(
+                quote.requests.size,
+                quote.requests.map { it.satellite to it.tile }.toSet().size,
+            )
+        }
+    }
+
+    @Test
     fun routeNameTracksCitiesButPreservesCustomTitles() {
         val before = FlightPlan(listOf(FlightStop("Départ"), FlightStop("Arrivée")))
         val after =
@@ -45,7 +82,8 @@ class FlightPreparationLogicTest {
 
     private val base = 1_800_000_000_000L
 
-    @Test fun cancelledOrPostponedAlarmsDoNotStartFromAnOldBroadcast() {
+    @Test
+    fun cancelledOrPostponedAlarmsDoNotStartFromAnOldBroadcast() {
         assertFalse(flightScheduleIsDue(null, base))
         assertFalse(flightScheduleIsDue(0L, base))
         assertFalse(flightScheduleIsDue(base + 60_000L, base))
@@ -262,11 +300,12 @@ class FlightPreparationLogicTest {
         val plan =
             route(45.0 to 0.0, 45.0 to 10.0).let {
                 it.copy(
-                    stops = listOf(
-                        it.stops.first(),
-                        FlightStop("Via", 45.0, 5.0, FlightStopType.WAYPOINT),
-                        it.stops.last(),
-                    ),
+                    stops =
+                        listOf(
+                            it.stops.first(),
+                            FlightStop("Via", 45.0, 5.0, FlightStopType.WAYPOINT),
+                            it.stops.last(),
+                        ),
                     preparation =
                         it.preparation!!.copy(
                             departureMillis = base,

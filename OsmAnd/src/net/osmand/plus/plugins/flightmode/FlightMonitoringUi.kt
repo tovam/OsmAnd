@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.DateFormat
@@ -76,21 +77,39 @@ internal fun FlightLiveRecordingSummary(
 @Composable
 internal fun FlightRecordingCadenceInfo(live: FlightLiveState, details: Boolean = false) {
     val decision = live.recordingDecision ?: return
-    val cadence = stringResource(when (decision.cadence) {
-        FlightRecordingCadence.FIXED_INTERVAL -> R.string.flight_cadence_fixed
-        FlightRecordingCadence.DISTANCE_OR_MAXIMUM_INTERVAL -> R.string.flight_cadence_distance
-        FlightRecordingCadence.TURN -> R.string.flight_cadence_turn
-        FlightRecordingCadence.ROUTE_DEVIATION_ENTRY -> R.string.flight_cadence_deviation
-    })
-    Text(stringResource(R.string.flight_cadence_current, decision.intervalSeconds, cadence), color = Color.LightGray, fontSize = 10.sp)
+    val cadence =
+        stringResource(
+            when (decision.cadence) {
+                FlightRecordingCadence.FIXED_INTERVAL -> R.string.flight_cadence_fixed
+                FlightRecordingCadence.DISTANCE_OR_MAXIMUM_INTERVAL ->
+                    R.string.flight_cadence_distance
+                FlightRecordingCadence.TURN -> R.string.flight_cadence_turn
+                FlightRecordingCadence.ROUTE_DEVIATION_ENTRY -> R.string.flight_cadence_deviation
+            }
+        )
+    Text(
+        stringResource(R.string.flight_cadence_current, decision.intervalSeconds, cadence),
+        color = Color.LightGray,
+        fontSize = 10.sp,
+    )
     if (details) {
-        Text(stringResource(R.string.flight_cadence_received, live.receivedFixesThisSession), color = Color.LightGray, fontSize = 11.sp)
+        Text(
+            stringResource(R.string.flight_cadence_received, live.receivedFixesThisSession),
+            color = Color.LightGray,
+            fontSize = 11.sp,
+        )
         live.lastSavedReason?.let { reason ->
-            Text(stringResource(when (reason) {
-                FlightRecordingSaveReason.FIRST_FIX -> R.string.flight_cadence_first
-                FlightRecordingSaveReason.LANDING -> R.string.flight_cadence_landing
-                else -> R.string.flight_cadence_due
-            }), color = Color.LightGray, fontSize = 11.sp)
+            Text(
+                stringResource(
+                    when (reason) {
+                        FlightRecordingSaveReason.FIRST_FIX -> R.string.flight_cadence_first
+                        FlightRecordingSaveReason.LANDING -> R.string.flight_cadence_landing
+                        else -> R.string.flight_cadence_due
+                    }
+                ),
+                color = Color.LightGray,
+                fontSize = 11.sp,
+            )
         }
     }
 }
@@ -157,46 +176,13 @@ internal fun FlightOfflineProgressPanel(
     state: FlightUiState,
     compact: Boolean = false,
     modifier: Modifier = Modifier,
+    includeSizes: Boolean = true,
 ) {
     val coverage = state.offlineCoverage
     val status = state.offlinePreloadStatus
     Column(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
-        if (coverage == null) {
-            Text(
-                stringResource(
-                    if (state.offlineCoverageError != null) R.string.flight_offline_count_failed
-                    else R.string.flight_offline_counting
-                ),
-                color = Color.LightGray,
-                fontSize = 11.sp,
-            )
-            state.offlineCoverageError
-                ?.takeIf { !compact }
-                ?.let { Text(it, color = Color(0xFFFFCC66), fontSize = 10.sp) }
-            return@Column
-        }
-        Text(
-            stringResource(
-                if (coverage.inventoried) R.string.flight_offline_stored_count
-                else R.string.flight_offline_inventory_count,
-                if (coverage.inventoried) coverage.stored else coverage.inspected,
-                coverage.total,
-            ),
-            color = Color.White,
-            fontSize = 12.sp,
-        )
-        if (coverage.inventoried) {
-            Text(
-                stringResource(
-                    R.string.flight_offline_remaining,
-                    coverage.missing,
-                    coverage.storedBytes / 1e9,
-                    coverage.estimatedRemainingBytes / 1e9,
-                ),
-                color = Color.LightGray,
-                fontSize = 11.sp,
-            )
-        }
+        if (includeSizes) FlightOfflineSizeSummary(state)
+        if (coverage == null) return@Column
         if (!compact) {
             if (coverage.inventoried)
                 LinearProgressIndicator(
@@ -253,11 +239,6 @@ internal fun FlightOfflineProgressPanel(
                     color = if (verified) Color(0xFF88DEBF) else Color.LightGray,
                     fontSize = 11.sp,
                 )
-            Text(
-                stringResource(R.string.flight_offline_estimate_note),
-                color = Color.LightGray,
-                fontSize = 10.sp,
-            )
         }
         if (coverage.inventoried && state.offlineCoverageRefreshing)
             Text(
@@ -272,4 +253,119 @@ internal fun FlightOfflineProgressPanel(
                 fontSize = 11.sp,
             )
     }
+}
+
+@Composable
+internal fun flightOfflineGb(bytes: Long): String =
+    if (bytes in 1L..999_999L) stringResource(R.string.flight_offline_size_small)
+    else stringResource(R.string.flight_offline_size_gb, bytes / 1e9)
+
+/** Kept above the planning editor's scroll area so every value change has visible feedback. */
+@Composable
+internal fun FlightOfflineSizeSummary(state: FlightUiState) {
+    val quote = state.offlineQuote
+    val coverage = state.offlineCoverage
+    if (quote == null) {
+        Text(
+            stringResource(
+                if (state.offlineCoverageError == null) R.string.flight_offline_counting
+                else R.string.flight_offline_count_failed
+            ),
+            color = Color.LightGray,
+            fontSize = 12.sp,
+        )
+        state.offlineCoverageError?.let { Text(it, color = Color(0xFFFFCC66), fontSize = 11.sp) }
+        return
+    }
+    val inventoried = coverage?.inventoried == true
+    val total =
+        if (inventoried) coverage!!.storedBytes + coverage.estimatedRemainingBytes
+        else quote.estimatedBytes
+    Text(
+        stringResource(R.string.flight_offline_size_total, flightOfflineGb(total)),
+        color = Color.White,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+    )
+    Row(Modifier.fillMaxWidth()) {
+        Spacer(Modifier.weight(0.8f))
+        Text(
+            stringResource(R.string.flight_offline_size_present),
+            color = Color.LightGray,
+            fontSize = 11.sp,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            stringResource(R.string.flight_offline_size_remaining),
+            color = Color.LightGray,
+            fontSize = 11.sp,
+            modifier = Modifier.weight(1.2f),
+        )
+    }
+    for (satellite in listOf(true, false)) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+            Text(
+                stringResource(
+                    if (satellite) R.string.flight_offline_size_satellite
+                    else R.string.flight_offline_size_terrain
+                ),
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(0.8f),
+            )
+            Text(
+                if (inventoried)
+                    flightOfflineGb(
+                        if (satellite) coverage!!.satelliteStoredBytes
+                        else coverage!!.terrainStoredBytes
+                    )
+                else "—",
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                flightOfflineGb(
+                    if (inventoried) {
+                        if (satellite) coverage!!.satelliteRemainingBytes
+                        else coverage!!.terrainRemainingBytes
+                    } else {
+                        // Until inventory finishes this is an upper estimate, including possibly
+                        // cached files.
+                        if (satellite) quote.satelliteEstimatedBytes
+                        else quote.terrainEstimatedBytes
+                    }
+                ),
+                color = Color(0xFFFFCC66),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1.2f),
+            )
+        }
+    }
+    Text(
+        if (inventoried)
+            stringResource(R.string.flight_offline_stored_count, coverage!!.stored, coverage.total)
+        else
+            stringResource(
+                R.string.flight_offline_inventory_count,
+                coverage?.inspected ?: 0,
+                quote.requests.size,
+            ),
+        color = Color.LightGray,
+        fontSize = 11.sp,
+    )
+    Text(
+        stringResource(
+            if (inventoried) R.string.flight_offline_size_note
+            else R.string.flight_offline_size_pending
+        ),
+        color = Color.LightGray,
+        fontSize = 10.sp,
+    )
+    if (state.offlineCoverageError != null)
+        Text(
+            stringResource(R.string.flight_offline_count_failed),
+            color = Color(0xFFFFCC66),
+            fontSize = 11.sp,
+        )
 }

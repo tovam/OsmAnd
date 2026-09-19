@@ -14,7 +14,21 @@ class FlightOfflineQuote(
 ) {
     val satelliteCount = requests.count { it.satellite }
     val terrainCount = requests.size - satelliteCount
-    val estimatedBytes = satelliteCount * 45_000L + terrainCount * 110_000L
+    val satelliteEstimatedBytes = FlightOfflineSizeEstimate.bytes(satelliteCount, 0)
+    val terrainEstimatedBytes = FlightOfflineSizeEstimate.bytes(0, terrainCount)
+    val estimatedBytes = satelliteEstimatedBytes + terrainEstimatedBytes
+    val distanceKm =
+        route.zipWithNext().sumOf { (a, b) ->
+            FlightTerrainTilePlanner.distanceKm(a.first, a.second, b.first, b.second)
+        }
+    // Precomputed off the UI thread. Each source tile is counted once, including shared ancestors.
+    val bandEstimatedBytes: Map<Int, Long> =
+        requests
+            .groupBy { it.band }
+            .mapValues { (_, items) ->
+                val satellite = items.count { it.satellite }
+                FlightOfflineSizeEstimate.bytes(satellite, items.size - satellite)
+            }
 
     val assets =
         FlightOfflineAssets(
@@ -51,13 +65,22 @@ object FlightOfflinePreparation {
     /** The same requested coverage as the downloader, including legacy Standard corridors. */
     suspend fun corridorQuote(plan: FlightPlan, trip: FlightTrip?): FlightOfflineQuote {
         if (plan.preparation != null) return quote(plan)
-        val tiles = trip?.samples?.takeIf { it.size >= 2 }?.let {
-            FlightTerrainTilePlanner.trackCorridorPlan(it, plan.terrainCorridorKm)
-        } ?: FlightTerrainTilePlanner.corridorPlan(plan.stops, plan.terrainCorridorKm)
+        val tiles =
+            trip
+                ?.samples
+                ?.takeIf { it.size >= 2 }
+                ?.let { FlightTerrainTilePlanner.trackCorridorPlan(it, plan.terrainCorridorKm) }
+                ?: FlightTerrainTilePlanner.corridorPlan(plan.stops, plan.terrainCorridorKm)
         requireNotNull(tiles) { "No route available for offline coverage" }
-        return FlightOfflineQuote(tiles.tiles.flatMap {
-            listOf(FlightOfflineRequest(it, false, 0), FlightOfflineRequest(it, true, 0))
-        }, plan.stops.mapNotNull { stop -> stop.latitude?.let { lat -> stop.longitude?.let { lat to it } } }, emptyList())
+        return FlightOfflineQuote(
+            tiles.tiles.flatMap {
+                listOf(FlightOfflineRequest(it, false, 0), FlightOfflineRequest(it, true, 0))
+            },
+            plan.stops.mapNotNull { stop ->
+                stop.latitude?.let { lat -> stop.longitude?.let { lat to it } }
+            },
+            emptyList(),
+        )
     }
 
     fun canSimulate(plan: FlightPlan): Boolean =
@@ -211,76 +234,94 @@ object FlightOfflinePreparation {
             (prep.arrivalMillis - start).takeIf { it > 0 }
                 ?: (total / 750 * 3_600_000).toLong().coerceAtLeast(600_000) +
                     stopoverCount * STOPOVER_MILLIS
-        val dwellTotal = (stopoverCount * STOPOVER_MILLIS)
-            .coerceAtMost((duration - 1L).coerceAtLeast(0L))
+        val dwellTotal =
+            (stopoverCount * STOPOVER_MILLIS).coerceAtMost((duration - 1L).coerceAtLeast(0L))
         val dwellPerStop = if (stopoverCount == 0) 0L else dwellTotal / stopoverCount
         val flightDuration = (duration - dwellTotal).coerceAtLeast(1L)
         val targetCount = (duration / 15_000L).toInt().coerceIn(60, 4000)
         val sampleInterval = (duration / targetCount).coerceAtLeast(1L)
-        val samples = mutableListOf(
-            FlightSample(
-                0,
-                0,
-                start,
-                coordinates.first().first,
-                coordinates.first().second,
-                0.0,
-                0f,
-                null,
-                null,
-            ),
-        )
+        val samples =
+            mutableListOf(
+                FlightSample(
+                    0,
+                    0,
+                    start,
+                    coordinates.first().first,
+                    coordinates.first().second,
+                    0.0,
+                    0f,
+                    null,
+                    null,
+                )
+            )
         var timestamp = start
         var sampleIndex = 1
         var blockStart = 0
         while (blockStart < distances.size) {
-            val blockEnd = (blockStart until distances.size).firstOrNull { leg ->
-                leg == distances.lastIndex || plan.isIntermediateStopover(leg + 1)
-            } ?: distances.lastIndex
+            val blockEnd =
+                (blockStart until distances.size).firstOrNull { leg ->
+                    leg == distances.lastIndex || plan.isIntermediateStopover(leg + 1)
+                } ?: distances.lastIndex
             val blockDistances = distances.subList(blockStart, blockEnd + 1)
             val blockDistance = blockDistances.sum().coerceAtLeast(0.001)
             val cruise = min(12_000.0, max(2000.0, blockDistance * 25))
             for (leg in blockStart..blockEnd) {
                 val legDistance = distances[leg]
                 val legDuration = (flightDuration * legDistance / total).toLong().coerceAtLeast(1L)
-                val count = kotlin.math.ceil(legDuration / sampleInterval.toDouble()).toInt().coerceAtLeast(1)
+                val count =
+                    kotlin.math
+                        .ceil(legDuration / sampleInterval.toDouble())
+                        .toInt()
+                        .coerceAtLeast(1)
                 val distanceBefore = distances.subList(blockStart, leg).sum()
                 for (step in 1..count) {
                     val fraction = step.toDouble() / count
-                    val at = FlightTerrainTilePlanner.greatCircleInterpolate(
-                        coordinates[leg], coordinates[leg + 1], fraction,
-                    )
-                    val blockProgress = ((distanceBefore + legDistance * fraction) / blockDistance)
-                        .coerceIn(0.0, 1.0)
+                    val at =
+                        FlightTerrainTilePlanner.greatCircleInterpolate(
+                            coordinates[leg],
+                            coordinates[leg + 1],
+                            fraction,
+                        )
+                    val blockProgress =
+                        ((distanceBefore + legDistance * fraction) / blockDistance).coerceIn(
+                            0.0,
+                            1.0,
+                        )
                     timestamp += (legDuration / count).coerceAtLeast(1L)
-                    samples += FlightSample(
-                        sampleIndex++,
-                        0,
-                        timestamp,
-                        at.first,
-                        at.second,
-                        altitudeForBlock(blockProgress, cruise),
-                        (legDistance * 1000 / (legDuration / 1000.0)).toFloat(),
-                        null,
-                        null,
-                    )
+                    samples +=
+                        FlightSample(
+                            sampleIndex++,
+                            0,
+                            timestamp,
+                            at.first,
+                            at.second,
+                            altitudeForBlock(blockProgress, cruise),
+                            (legDistance * 1000 / (legDuration / 1000.0)).toFloat(),
+                            null,
+                            null,
+                        )
                 }
             }
             if (blockEnd < distances.lastIndex && dwellPerStop > 0L) {
-                val count = kotlin.math.ceil(dwellPerStop / sampleInterval.toDouble()).toInt().coerceAtLeast(1)
+                val count =
+                    kotlin.math
+                        .ceil(dwellPerStop / sampleInterval.toDouble())
+                        .toInt()
+                        .coerceAtLeast(1)
                 repeat(count) {
                     timestamp += (dwellPerStop / count).coerceAtLeast(1L)
-                    samples += FlightSample(
-                        sampleIndex++,
-                        0,
-                        timestamp,
-                        coordinates[blockEnd + 1].first,
-                        coordinates[blockEnd + 1].second,
-                        0.0,
-                        0f,
-                        null,
-                        null,
-                    )
+                    samples +=
+                        FlightSample(
+                            sampleIndex++,
+                            0,
+                            timestamp,
+                            coordinates[blockEnd + 1].first,
+                            coordinates[blockEnd + 1].second,
+                            0.0,
+                            0f,
+                            null,
+                            null,
+                        )
                 }
             }
             blockStart = blockEnd + 1
@@ -289,11 +330,12 @@ object FlightOfflinePreparation {
         return recordedFlightTrip("Simulation", FlightTrackMath.fillMissingBearings(samples))
     }
 
-    private fun altitudeForBlock(progress: Double, cruise: Double): Double = when {
-        progress < 0.15 -> cruise * progress / 0.15
-        progress < 0.82 -> cruise
-        else -> cruise * (1.0 - progress) / 0.18
-    }
+    private fun altitudeForBlock(progress: Double, cruise: Double): Double =
+        when {
+            progress < 0.15 -> cruise * progress / 0.15
+            progress < 0.82 -> cruise
+            else -> cruise * (1.0 - progress) / 0.18
+        }
 
     private const val STOPOVER_MILLIS = 45 * 60_000L
 }
