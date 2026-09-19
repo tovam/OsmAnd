@@ -45,6 +45,19 @@ def main():
             "-I", str(work), str(test_source), "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True, timeout=120)
+        # Compile the production width formula, not a second implementation of the fix.
+        width_start = vector_line.index("    float zoom =", vector_line.index("::generatePrimitive("))
+        width_end = vector_line.index("    double outlineThickness", width_start)
+        width_formula = vector_line[width_start:width_end]
+        tile_size = re.search(r"TileSize3D\s*=\s*(\d+)", (core_map / "AtlasMapRenderer.h").read_text()).group(1)
+        width_test = Path(__file__).with_name("FlightTubeWidthTest.cpp").resolve()
+        (work / "FlightCoreWidthExtract.h").write_text(width_formula + "return thickness;\n")
+        binary = work / "flight-tube-width-test"
+        subprocess.run([
+            os.environ.get("CXX", "c++"), "-std=c++11", "-O1", "-fsanitize=undefined",
+            "-DCORE_TILE_SIZE=" + tile_size, "-I", str(work), str(width_test), "-o", str(binary),
+        ], check=True)
+        subprocess.run([str(binary)], check=True, timeout=30)
 
 
 if __name__ == "__main__":
