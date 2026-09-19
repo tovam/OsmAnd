@@ -71,8 +71,10 @@ namespace FlightTubeMesh
 
     // Emit triangles directly into the renderer's vertex buffer. Shared cross-sections join
     // consecutive cylinders without cracks. Duplicate samples are skipped in linear time.
-    template<class Emit>
-    void append(const std::vector<Sample>& input, Emit emit)
+    // Do not name this callback `emit`: Qt defines that keyword as an empty macro in
+    // VectorLine_P.cpp. It silently turns emit(vertex) into (vertex), emitting no mesh.
+    template<class EmitVertex>
+    void append(const std::vector<Sample>& input, EmitVertex emitVertex)
     {
         std::vector<Sample> points;
         points.reserve(input.size());
@@ -114,8 +116,8 @@ namespace FlightTubeMesh
                 for (unsigned j = 0; j < Sides; ++j)
                 {
                     const unsigned next = (j + 1) % Sides;
-                    emit(previousRing[j]); emit(previousRing[next]); emit(ring[j]);
-                    emit(previousRing[next]); emit(ring[next]); emit(ring[j]);
+                    emitVertex(previousRing[j]); emitVertex(previousRing[next]); emitVertex(ring[j]);
+                    emitVertex(previousRing[next]); emitVertex(ring[next]); emitVertex(ring[j]);
                 }
             }
             if (i == 0 || i + 1 == points.size())
@@ -125,9 +127,9 @@ namespace FlightTubeMesh
                 for (unsigned j = 0; j < Sides; ++j)
                 {
                     const unsigned next = (j + 1) % Sides;
-                    emit(centre);
-                    emit(ring[i == 0 ? next : j]);
-                    emit(ring[i == 0 ? j : next]);
+                    emitVertex(centre);
+                    emitVertex(ring[i == 0 ? next : j]);
+                    emitVertex(ring[i == 0 ? j : next]);
                 }
             }
             previousRing = ring;

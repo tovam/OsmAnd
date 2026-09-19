@@ -1,4 +1,8 @@
+// Match qobjectdefs.h in the production VectorLine_P.cpp translation unit. Without
+// this keyword, the standalone test used to pass while the APK emitted zero vertices.
+#define emit
 #include "../../patches/osmand-core/FlightTubeMesh.h"
+#undef emit
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -94,6 +98,8 @@ int main()
     // Identical physical diameter from above, from the side and at a grazing angle, at 12 km altitude.
     const std::vector<Sample> level = {{0, 0, 12000, 0.02, 100, 0}, {100000, 0, 12000, 0.02, 100, 1}};
     const auto levelMesh = mesh(level);
+    // 12 sides, two triangles per side, and two 12-triangle caps: 48 triangles.
+    assert(levelMesh.size() == 144);
     double minZ = 1e9, maxZ = -1e9, minH = 1e9, maxH = -1e9;
     for (const auto& v : levelMesh)
     {
@@ -137,6 +143,6 @@ int main()
         longLeg.push_back({i * 1000.0, std::sin(i * 0.01) * 1000, 12000, 0.02, 100, float(i)});
     const auto longMesh = mesh(longLeg);
     assert(longMesh.size() == 6 * Sides * longLeg.size());
-    std::cout << "PASS: closed volume, equal top/side diameter, unchanged centres and heights, "
+    std::cout << "PASS: Qt keyword compatibility, closed volume, equal top/side diameter, unchanged centres and heights, "
         "joined bends, vertical segments, duplicates, reversals, invalid inputs, bounded 4000-point mesh\n";
 }

@@ -111,7 +111,7 @@ jobs:
             android/OsmAnd/test/native/BasemapOverzoomTest.cpp -o "${RUNNER_TEMP}/basemap-overzoom-test"
           "${RUNNER_TEMP}/basemap-overzoom-test"
 
-      - name: Test flight tube geometry
+      - name: Test flight tube geometry with Qt keywords
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
             android/OsmAnd/test/native/FlightTubeMeshTest.cpp -o "${RUNNER_TEMP}/flight-tube-test"

@@ -38,7 +38,10 @@ struct VectorMapSymbol {
 }
 #include "FlightCoreGridExtract.h"
 #include "FlightCoreGridExtract.cpp"
+// The actual native translation unit includes Qt before the mesh helper.
+#define emit
 #include "../../patches/osmand-core/FlightTubeMesh.h"
+#undef emit
 
 static void checkGrid(int cells, double radiusInTiles, bool expectOverflow, int pointCount = 4000)
 {
