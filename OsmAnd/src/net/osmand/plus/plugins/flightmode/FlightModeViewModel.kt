@@ -93,8 +93,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun preloadPreparation(quote: FlightOfflineQuote) {
-		if (uiState.plan.stops.map { it.latitude to it.longitude } != quote.route ||
-			(uiState.plan.preparation ?: FlightPreparation()).bands != quote.bands) return
+		if (quote !== uiState.offlineQuote && (uiState.plan.stops.map { it.latitude to it.longitude } != quote.route ||
+			(uiState.plan.preparation ?: FlightPreparation()).bands != quote.bands)) return
+		terrainStreamingEngine.cancelBackgroundWork()
 		val previousDownload=preparationDownload
 		previousDownload?.cancel()
 		val generation=++preparationDownloadGeneration
@@ -121,6 +122,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 	fun pausePreparationDownload() {
+		terrainStreamingEngine.cancelBackgroundWork()
 		preparationDownloadGeneration++
 		preparationDownload?.cancel()
 		uiState=uiState.copy(offlinePreloadStatus=uiState.offlinePreloadStatus.copy(phase=FlightTerrainPhase.PAUSED,bytesPerSecond=0,

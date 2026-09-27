@@ -57,7 +57,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			if (sockets.isNotEmpty()) Thread({ sockets.forEach { runCatching { it.disconnect() } } }, "FlightPauseDownloads").start()
 		}
 	}
-	fun close() { setSceneWorkEnabled(false); assetScheduler.close() }
+	private var inventoryQuote: FlightOfflineQuote? = null
+	private var retainedInventory: FlightOfflineInventory? = null
+	private var stopInventory: (() -> Unit)? = null
+	fun close() {
+		setSceneWorkEnabled(false)
+		assetScheduler.close()
+		synchronized(this) { stopInventory?.invoke(); stopInventory = null; retainedInventory = null; inventoryQuote = null }
+	}
 	fun cancelPendingAssets() = assetScheduler.reconcile(emptyList())
 
 	/** Calibration never substitutes zero for unavailable relief. */
@@ -944,85 +951,11 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		trip: FlightTrip?,
 		onStatus: suspend (FlightTerrainStatus) -> Unit
 	): FlightTerrainStatus {
-		if (plan.preparation != null) {
-			val quote = withContext(Dispatchers.Default) { FlightOfflinePreparation.quote(plan) }
-			return preloadPrepared(quote,onStatus).status
-		}
 		onStatus(FlightTerrainStatus(phase = FlightTerrainPhase.PLANNING))
-		val tilePlan = withContext(Dispatchers.Default) {
-			trip?.samples?.takeIf { it.size >= 2 }?.let {
-				FlightTerrainTilePlanner.trackCorridorPlan(it, plan.terrainCorridorKm)
-			} ?: FlightTerrainTilePlanner.corridorPlan(plan.stops, plan.terrainCorridorKm)
-		} ?: throw IllegalArgumentException("Il faut une trace ou les coordonnées d’au moins deux villes")
-		var available = 0
-		var downloaded = 0
-		var failed = 0
-		var satelliteAvailable = 0
-		var satelliteFailed = 0
-		var satelliteDownloadsEnabled = true
-		var bytesDownloaded = 0L
-		for (chunk in tilePlan.tiles.chunked(PARALLEL_DOWNLOADS)) {
-			val allowSatelliteDownload = satelliteDownloadsEnabled
-			val results = coroutineScope {
-				chunk.map { tileId ->
-					async(Dispatchers.IO) {
-						runCatching { ensureOfflineTileFiles(tileId, allowSatelliteDownload) }
-					}
-				}.awaitAll()
-			}
-			results.forEach { result ->
-				result.onSuccess { cached ->
-					available++
-					if (cached.downloaded) downloaded++
-					if (cached.standardSatellite != null) satelliteAvailable++
-					else satelliteFailed++
-					bytesDownloaded += cached.downloadedBytes
-				}.onFailure {
-					failed++
-				}
-			}
-			if (satelliteAvailable == 0 && satelliteFailed >= SATELLITE_FAILURE_CIRCUIT_BREAKER) {
-				satelliteDownloadsEnabled = false
-			}
-			onStatus(
-				FlightTerrainStatus(
-					phase = FlightTerrainPhase.DOWNLOADING,
-					requestedTiles = tilePlan.tiles.size,
-					availableTiles = available,
-					downloadedTiles = downloaded,
-					failedTiles = failed,
-					coarseRequestedTiles = tilePlan.tiles.size,
-					coarseAvailableTiles = available,
-					coarseFailedTiles = failed,
-					satelliteTiles = satelliteAvailable,
-					requestedSatelliteTiles = tilePlan.tiles.size,
-					satelliteFailedTiles = satelliteFailed,
-					bytesDownloaded = bytesDownloaded,
-					zoom = tilePlan.zoom
-				)
-			)
-		}
-		if (available == 0) throw IOException("Aucune tuile de relief n’a pu être préchargée")
-		return FlightTerrainStatus(
-			phase = if (failed == 0 && satelliteAvailable == tilePlan.tiles.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR,
-			requestedTiles = tilePlan.tiles.size,
-			availableTiles = available,
-			downloadedTiles = downloaded,
-			failedTiles = failed,
-			coarseRequestedTiles = tilePlan.tiles.size,
-			coarseAvailableTiles = available,
-			coarseFailedTiles = failed,
-			satelliteTiles = satelliteAvailable,
-			requestedSatelliteTiles = tilePlan.tiles.size,
-			satelliteFailedTiles = satelliteFailed,
-			bytesDownloaded = bytesDownloaded,
-			zoom = tilePlan.zoom,
-			message = when {
-				failed > 0 -> "$failed tuiles de relief indisponibles"
-				satelliteFailed > 0 -> "Relief prêt · satellite Standard partiel ($satelliteFailed manquantes)"
-				else -> "Relief + satellite Standard rattachés au trajet"
-			}
-		)
+		val quote = withContext(Dispatchers.Default) { FlightOfflinePreparation.corridorQuote(plan, trip) }
+		// One cancellable, verified download path for prepared and imported/live flights.
+		// A transient failure must never disable satellite downloads for the remaining corridor.
+		return preloadPrepared(quote, onStatus).status
 	}
 
 	/** Verify each expected source independently, including cached files, before declaring readiness. */
@@ -1056,14 +989,13 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			message=app.getString(net.osmand.plus.R.string.flight_plan_missing_tiles,terrain+satellite,quote.requests.size,failedTerrain+failedSatellite,
 				quote.requests.size-terrain-satellite-failedTerrain-failedSatellite) +
 				(lastFailure?.let { "\n$it" } ?: ""))
-		for (offset in quote.requests.indices step PARALLEL_DOWNLOADS) {
-			currentCoroutineContext().ensureActive()
-			val chunk = quote.requests.subList(offset, minOf(offset + PARALLEL_DOWNLOADS, quote.requests.size))
-			if(withContext(Dispatchers.IO) { app.filesDir.usableSpace<256L*1024*1024 && chunk.any {
-				!(if(it.satellite) satelliteFile(it.tile) else tileFile(it.tile)).isFile } })
-				return result(status(FlightTerrainPhase.ERROR).copy(message=app.getString(net.osmand.plus.R.string.flight_plan_low_space)))
-			val results=coroutineScope { chunk.map { request -> async {
+		var completedCount = 0
+		onStatus(status(FlightTerrainPhase.DOWNLOADING))
+		flightConcurrentTransfers(quote.requests, 3, transfer = { request ->
 				runInterruptible(Dispatchers.IO) {
+				if (app.filesDir.usableSpace < 256L * 1024 * 1024 &&
+					!(if (request.satellite) satelliteFile(request.tile) else tileFile(request.tile)).isFile)
+					throw IOException(app.getString(net.osmand.plus.R.string.flight_plan_low_space))
 				preparationCancellation.set(cancellation)
 				try {
 					var cached=if(request.satellite) ensureSatelliteSourceFile(request.tile,true)
@@ -1086,28 +1018,27 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					Result.success(cached)
 				} catch(e:CancellationException) { throw e } catch(e:Exception) { Result.failure<CachedAsset>(e) }
 				finally { preparationCancellation.remove() }
-			} } }.awaitAll() }
-			currentCoroutineContext().ensureActive()
-			results.forEachIndexed { i,result ->
+			}
+		}, completed = { request, result ->
+				completedCount++
 				result.onSuccess {
-					(if(chunk[i].satellite)verifiedSatellite else verifiedTerrain).add(chunk[i].tile)
-					if(chunk[i].satellite) satellite++ else terrain++
+					(if(request.satellite)verifiedSatellite else verifiedTerrain).add(request.tile)
+					if(request.satellite) satellite++ else terrain++
 					if(it.downloaded) downloaded++
 					bytes+=it.downloadedBytes
 				}.onFailure { error ->
-					if(chunk[i].satellite) failedSatellite++ else failedTerrain++
-					val tile=chunk[i].tile
+					if(request.satellite) failedSatellite++ else failedTerrain++
+					val tile=request.tile
 					lastFailure=app.getString(net.osmand.plus.R.string.flight_plan_tile_failure,
-						if(chunk[i].satellite) "Satellite" else "Relief", "${tile.zoom}/${tile.x}/${tile.y}",
+						if(request.satellite) "Satellite" else "Relief", "${tile.zoom}/${tile.x}/${tile.y}",
 						error.message ?: error.javaClass.simpleName)
 				}
-			}
 			val now = android.os.SystemClock.elapsedRealtime()
-			if (now - lastPublished >= 250 || offset + chunk.size == quote.requests.size) {
+			if (now - lastPublished >= 250 || completedCount == quote.requests.size) {
 				onStatus(status(FlightTerrainPhase.DOWNLOADING))
 				lastPublished = now
 			}
-		}
+		})
 		return result(status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR))
 	}
 
@@ -1468,9 +1399,16 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 	/** Lifecycle-owned, read-only inventory. It never starts a download or scans unrelated files. */
 	suspend fun observeOfflineCoverage(quote: FlightOfflineQuote,
 		onProgress: suspend (FlightOfflineCoverage) -> Unit): Unit = withContext(Dispatchers.IO) {
-		val inventory = FlightOfflineInventory(quote.requests)
-		val stopObserving = FlightOfflineTileChanges.observe(inventory::changed)
-		try {
+		val inventory = synchronized(this@FlightTerrainRepository) {
+			if (inventoryQuote !== quote || retainedInventory == null) {
+				stopInventory?.invoke()
+				retainedInventory = FlightOfflineInventory(quote.requests)
+				inventoryQuote = quote
+				stopInventory = FlightOfflineTileChanges.observe(retainedInventory!!::changed)
+			}
+			retainedInventory!!
+		}
+		run {
 			coroutineScope {
 				launch {
 					for (request in quote.requests) {
@@ -1489,7 +1427,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					delay(500)
 				}
 			}
-		} finally { stopObserving() }
+		}
 	}
 
 	private fun decodeTile(tileId: TerrainTileId, file: File): TerrariumTile? {

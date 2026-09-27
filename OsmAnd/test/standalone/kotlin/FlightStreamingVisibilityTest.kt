@@ -7,6 +7,33 @@ import org.junit.Test
 
 /** Real reconciler with a synthetic no-I/O repository, never device tiles or user trips. */
 class FlightStreamingVisibilityTest {
+    @Test
+    fun cameraChangesDoNotRestartCorridorDownloadsAndPauseReallyStopsThem() = runBlocking {
+        val repository = FlightTerrainRepository()
+        val engine = FlightSceneStreamingEngine(this, repository, { null }, {}, {})
+        val started = CompletableDeferred<Unit>()
+        var runs = 0
+        var cancelled = false
+        try {
+            engine.scheduleBackgroundWork(0) {
+                runs++
+                started.complete(Unit)
+                try { awaitCancellation() } finally { cancelled = true }
+            }
+            started.await()
+            engine.submit(demand())
+            yield()
+            engine.submit(demand(49.0))
+            yield()
+            assertEquals(1, runs)
+            assertFalse(cancelled)
+            engine.cancelBackgroundWork()
+            yield()
+            assertTrue(cancelled)
+            assertFalse(engine.hasBackgroundWork)
+        } finally { engine.close() }
+    }
+
     private fun demand(latitude: Double = 48.0) =
         FlightSceneDemand(
             FlightSample(

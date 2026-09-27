@@ -229,8 +229,8 @@ class FlightSceneStreamingEngine(
 	}
 
 	/**
-	 * Registers low-priority corridor work. It runs only while the visible scene is stable,
-	 * is pre-empted by any real aircraft/camera demand, then resumes automatically.
+	 * Corridor downloads have their own bounded I/O workers. Camera/GPS updates must
+	 * not restart verification from tile zero. Lifecycle exit still cancels the work.
 	 */
 	fun scheduleBackgroundWork(delayMillis: Long = BACKGROUND_START_DELAY_MILLIS, block: suspend () -> Unit) {
 		if (closed) return
@@ -239,6 +239,13 @@ class FlightSceneStreamingEngine(
 		backgroundJob = null
 		backgroundWork = BackgroundWork(++backgroundGeneration, delayMillis, block)
 		startBackgroundWorkIfIdle()
+	}
+
+	fun cancelBackgroundWork() {
+		backgroundExecutionGeneration++
+		backgroundJob?.cancel()
+		backgroundJob = null
+		backgroundWork = null
 	}
 
 	fun reset() {
@@ -272,7 +279,6 @@ class FlightSceneStreamingEngine(
 		targetChanged: Boolean
 	) {
 		if (settleJob?.isActive == true && settleReason == reason && !targetChanged) return
-		preemptBackgroundWork()
 		settleJob?.cancel()
 		settleReason = reason
 		settleJob = scope.launch {
@@ -286,7 +292,6 @@ class FlightSceneStreamingEngine(
 	private fun startDesiredDemand() {
 		if (!foreground || closed) return
 		val demand = desiredDemand ?: return
-		preemptBackgroundWork()
 		settleJob?.cancel()
 		settleJob = null
 		settleReason = null
@@ -349,22 +354,13 @@ class FlightSceneStreamingEngine(
 		job.start()
 	}
 
-	private fun preemptBackgroundWork() {
-		backgroundExecutionGeneration++
-		backgroundJob?.cancel()
-		backgroundJob = null
-	}
-
 	private fun startBackgroundWorkIfIdle() {
-		if (closed || !foreground || activeJob?.isActive == true || settleJob?.isActive == true ||
-			backgroundJob?.isActive == true
-		) return
+		if (closed || !foreground || backgroundJob?.isActive == true) return
 		val work = backgroundWork ?: return
 		val executionGeneration = ++backgroundExecutionGeneration
 		val job = scope.launch(start = CoroutineStart.LAZY) {
 			try {
 				delay(work.delayMillis)
-				if (activeJob?.isActive == true || settleJob?.isActive == true) return@launch
 				work.block()
 				if (backgroundWork?.generation == work.generation) backgroundWork = null
 			} catch (error: CancellationException) {
