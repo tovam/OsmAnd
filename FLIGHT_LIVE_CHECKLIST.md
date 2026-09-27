@@ -1,6 +1,6 @@
 # Flight live feedback — 2026-09-27
 
-Status: implementation and local verification complete; GitHub delivery in progress. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
+Status: implementation, local verification and push complete; GitHub build 106.1 launched. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
 
 ## Requested changes
 
@@ -28,7 +28,7 @@ Status: implementation and local verification complete; GitHub delivery in progr
 
 - [x] Run targeted source/synthetic tests; record limitations.
 - [x] Commit changes by coherent topic, including the previously prepared basemap fix/build names.
-- [ ] Push and launch GitHub APK build after implementation.
+- [x] Push and launch GitHub APK build after implementation: [106.1](https://github.com/tovam/OsmAnd/actions/runs/36351078625), started from `bd9b5ebfa9`.
 
 ## Findings / verification
 
@@ -41,6 +41,7 @@ Status: implementation and local verification complete; GitHub delivery in progr
 - Native orthographic matrices cover rendering, projection, unprojection, pinch aiming and frustum planes. Altitudes remain unchanged. Elevated flight markers bypass only the asynchronous ground-visibility test.
 - Verification: 222 synthetic JVM tests passed, including transfer concurrency/cancellation, camera changes during corridor downloads, viewport geometry, inventory accounting, scales and route dashes. Kotlin syntax parsed; resource XML and patch applicability checked. Native projection/basemap tests ran with address/undefined-behaviour sanitizers; the production basemap raster path also passed its synthetic pipeline test.
 - Limitations: no Android SDK/NDK build or physical Pixel test locally (disk constraint). GitHub performs the full native/APK compilation. On-device validation still needs the real gestures, orthographic-to-perspective transition, marker visibility, mixed opacity and live download behaviour.
+- Temporary downloaded test tools/native reference sources and the three generated synthetic JVM output directories were removed after verification (approximately 77 MB); all committed tests remain reproducible.
 
 ## Implementation commits
 
