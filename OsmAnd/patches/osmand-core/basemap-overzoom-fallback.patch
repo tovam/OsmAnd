@@ -33,7 +33,7 @@ index 0ab324a555..79a9d5c112 100644
 +    // Routing and contour-only files may add overlays, but cannot replace the world map.
 +    const bool detailedDataMissing = BasemapOverzoom::needsFallback(
 +        zoom, MapPrimitiviser::LastZoomToUseBasemap,
-+        detailedLandDataPresent || !detailedmapCoastlineObjects.isEmpty());
++        detailedBinaryMapObjectsPresent || !detailedmapCoastlineObjects.isEmpty());
 
 @@ -448,2 +449,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
          detailedZoom,

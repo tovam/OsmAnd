@@ -34,7 +34,7 @@ require_source("polygonizedCoastlineObjects" "generated coastline/surface fallba
 require_source("useCoarseBasemapStyle= [*]/ detailedDataMissing" "fallback policy is based on missing detail")
 require_source("useCoarseBasemapStyle [?] styleZoom : detailedZoom" "polyline evaluator preserves detailed style outside fallback")
 require_source("detailedBinaryMapObjectsPresent [|]= !isContourLinesObject" "contours are not regional cartography")
-require_source("detailedLandDataPresent [|][|] !detailedmapCoastlineObjects.isEmpty[(][)]" "routing-only objects cannot hide the world map")
+require_source("detailedBinaryMapObjectsPresent [|][|] !detailedmapCoastlineObjects.isEmpty[(][)]" "routing-only objects cannot hide the world map")
 require_source("!isBasemapObject && !possiblyBasemapObject->section->isContourLines" "non-surface fallback also excludes contours")
 require_source("binaryObject && binaryObject->section->isBasemap, zoom, MapPrimitiviser::LastZoomToUseBasemap" "label zoom chosen per source object")
 require_source("textOrderCache.clear[(][)]" "text style cache is reset between coarse and detailed objects")
