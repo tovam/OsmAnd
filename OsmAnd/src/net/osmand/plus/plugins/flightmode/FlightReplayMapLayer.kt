@@ -82,11 +82,17 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val plan=hypothesisPlan?:return; val sample=hypothesisSample?:return
 		val route=FlightLiveTimeline.build(plan,null,sample).samples
 		if(route.size<2)return
-		val points=QVectorPointI().apply { route.forEach { add(point31(it)) } }
 		val collection=VectorLinesCollection(true)
-		val heights=QListFloat().apply { route.forEach { add((it.altitudeMeters?:0.0).toFloat()+VISUAL_CLEARANCE_METERS) } }
-		buildNativeStroke(collection,9180,pointsOrder+3,
-			1.5*GeometryWayDrawer.getVectorLineScale(application),Color.rgb(100,150,165),points,heights)
+		val lineScale = GeometryWayDrawer.getVectorLineScale(application)
+		// Bounded physical dashes, not a flat blue overlay. Intermediate route vertices
+		// remain in each dash so turns and altitude changes keep their true position.
+		flightRouteDashes(route).forEachIndexed { index, dash ->
+			val points = QVectorPointI().apply { dash.forEach { add(point31(it)) } }
+			val heights = QListFloat().apply { dash.forEach { add((it.altitudeMeters ?: 0.0).toFloat() + VISUAL_CLEARANCE_METERS) } }
+			val line = buildNativeStroke(collection, 9180 + index, pointsOrder + 3,
+				TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
+			enableFlightTube(line)
+		}
 		hypothesisCollection=collection
 	}
 	private var pointMarkersCollection: MapMarkersCollection? = null
