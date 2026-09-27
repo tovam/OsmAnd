@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_controls_hide">Masquer les commandes</string>
+    <string name="flight_controls_show">Afficher les commandes</string>
+    <string name="flight_map_heading_up">Cap en haut</string>
+    <string name="flight_map_blend">Satellite %1$d%%</string>
+    <string name="flight_map_time_scale">%1$s à la vitesse actuelle</string>
+    <string name="flight_tiles_overview">Couverture</string>
+    <string name="flight_tiles_images">Images</string>
+    <string name="flight_tiles_fit">Cadrer</string>
+    <string name="flight_tiles_progress_short">%1$d / %2$d tuiles</string>
+    <string name="flight_tiles_used_short">Stocké %1$s</string>
+    <string name="flight_tiles_remaining_short">Reste ≈ %1$s</string>
+    <string name="flight_tiles_unknown_short">Vérification %1$d / %2$d</string>
+    <string name="flight_tiles_rate_short">%1$.1f Mo/s</string>
+    <string name="flight_tiles_legend_short">Vert : les deux · bleu : satellite · or : relief · gris : manquant</string>
     <string name="routing_attr_motor_type_name">Énergie utilisée par le moteur</string>
     <string name="routing_attr_motor_type_description">Sélectionner le carburant utilisé par le moteur de votre véhicule pour calculer les émissions de CO₂.</string>
     <string name="routing_attr_motor_type_diesel_name">Gazole</string>

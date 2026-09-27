@@ -14,6 +14,9 @@ class FlightOfflineQuote(
 ) {
     val satelliteCount = requests.count { it.satellite }
     val terrainCount = requests.size - satelliteCount
+    val requestsByZoom = requests.groupBy { it.tile.zoom }
+    val zoomLevels = requestsByZoom.keys.sorted()
+    val defaultPreviewZoom = requestsByZoom.maxByOrNull { it.value.size }?.key
     val satelliteEstimatedBytes = FlightOfflineSizeEstimate.bytes(satelliteCount, 0)
     val terrainEstimatedBytes = FlightOfflineSizeEstimate.bytes(0, terrainCount)
     val estimatedBytes = satelliteEstimatedBytes + terrainEstimatedBytes

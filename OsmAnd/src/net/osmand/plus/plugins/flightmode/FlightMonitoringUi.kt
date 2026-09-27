@@ -262,7 +262,7 @@ internal fun flightOfflineGb(bytes: Long): String =
 
 /** Kept above the planning editor's scroll area so every value change has visible feedback. */
 @Composable
-internal fun FlightOfflineSizeSummary(state: FlightUiState) {
+internal fun FlightOfflineSizeSummary(state: FlightUiState, compact: Boolean = false) {
     val quote = state.offlineQuote
     val coverage = state.offlineCoverage
     if (quote == null) {
@@ -279,7 +279,7 @@ internal fun FlightOfflineSizeSummary(state: FlightUiState) {
     }
     val inventoried = coverage?.inventoried == true
     val total =
-        if (inventoried) coverage!!.storedBytes + coverage.estimatedRemainingBytes
+        if (coverage != null) coverage.storedBytes + coverage.estimatedRemainingBytes
         else quote.estimatedBytes
     Text(
         stringResource(R.string.flight_offline_size_total, flightOfflineGb(total)),
@@ -314,10 +314,10 @@ internal fun FlightOfflineSizeSummary(state: FlightUiState) {
                 modifier = Modifier.weight(0.8f),
             )
             Text(
-                if (inventoried)
-                    flightOfflineGb(
-                        if (satellite) coverage!!.satelliteStoredBytes
-                        else coverage!!.terrainStoredBytes
+                if (coverage != null)
+                    (if (inventoried) "" else "≥ ") + flightOfflineGb(
+                        if (satellite) coverage.satelliteStoredBytes
+                        else coverage.terrainStoredBytes
                     )
                 else "—",
                 color = Color.White,
@@ -326,9 +326,9 @@ internal fun FlightOfflineSizeSummary(state: FlightUiState) {
             )
             Text(
                 flightOfflineGb(
-                    if (inventoried) {
-                        if (satellite) coverage!!.satelliteRemainingBytes
-                        else coverage!!.terrainRemainingBytes
+                    if (coverage != null) {
+                        if (satellite) coverage.satelliteRemainingBytes
+                        else coverage.terrainRemainingBytes
                     } else {
                         // Until inventory finishes this is an upper estimate, including possibly
                         // cached files.
@@ -342,6 +342,7 @@ internal fun FlightOfflineSizeSummary(state: FlightUiState) {
             )
         }
     }
+    if (compact) return
     Text(
         if (inventoried)
             stringResource(R.string.flight_offline_stored_count, coverage!!.stored, coverage.total)

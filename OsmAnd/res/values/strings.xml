@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_controls_hide">Hide controls</string>
+	<string name="flight_controls_show">Show controls</string>
+	<string name="flight_map_heading_up">Heading up</string>
+	<string name="flight_map_blend">Satellite %1$d%%</string>
+	<string name="flight_map_time_scale">%1$s at current speed</string>
+	<string name="flight_tiles_overview">Coverage</string>
+	<string name="flight_tiles_images">Images</string>
+	<string name="flight_tiles_fit">Fit</string>
+	<string name="flight_tiles_progress_short">%1$d / %2$d tiles</string>
+	<string name="flight_tiles_used_short">Stored %1$s</string>
+	<string name="flight_tiles_remaining_short">Remaining ≈ %1$s</string>
+	<string name="flight_tiles_unknown_short">Checking %1$d / %2$d</string>
+	<string name="flight_tiles_rate_short">%1$.1f MB/s</string>
+	<string name="flight_tiles_legend_short">Green: both · blue: satellite · gold: terrain · grey: missing</string>
     <string name="flight_offline_size_pending">Inventaire en cours : estimation avant déduction des fichiers présents.</string>
     <string name="flight_offline_size_total">Total estimé : %1$s</string>
     <string name="flight_offline_size_present">Présent</string>
