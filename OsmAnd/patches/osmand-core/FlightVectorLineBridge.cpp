@@ -1,6 +1,14 @@
 #include <jni.h>
 #include <memory>
 #include <OsmAndCore/Map/VectorLine.h>
+#include "../../src/Map/FlightMapProjection.h"
+
+extern "C" JNIEXPORT void JNICALL
+Java_net_osmand_core_jni_FlightVectorLineBridge_setFlightProjection(
+    JNIEnv*, jclass, jboolean enabled)
+{
+    FlightMapProjection::enabled().store(enabled, std::memory_order_relaxed);
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_net_osmand_core_jni_FlightVectorLineBridge_enableTubeNative(

@@ -1,0 +1,177 @@
+diff --git a/src/Map/OpenGL/AtlasMapRenderer_OpenGL.cpp b/src/Map/OpenGL/AtlasMapRenderer_OpenGL.cpp
+--- a/src/Map/OpenGL/AtlasMapRenderer_OpenGL.cpp
++++ b/src/Map/OpenGL/AtlasMapRenderer_OpenGL.cpp
+@@ -1,4 +1,5 @@
+ #include "AtlasMapRenderer_OpenGL.h"
++#include "../FlightMapProjection.h"
+ 
+ #include <cassert>
+ 
+@@ -413,8 +414,41 @@
+     // Get camera position
+     internalState->worldCameraPosition = (internalState->mCameraViewInv * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)).xyz();
+ 
+-    if (neededSteps == RequiredToUnproject)
++    // Tile selection on the sea-level plane has the identical footprint in the
++    // top-down perspective and orthographic cameras. Keep that upstream LOD
++    // calculation; replace the render/project/unproject matrices together.
++    const auto applyFlightProjection = [&](float farPlane) {
++        if (!FlightMapProjection::useOrthographic(state.flatEarth, state.elevationAngle))
++            return;
++        const auto meters = Utilities::getMetersPerTileUnit(state.zoomLevel, state.target31, TileSize3D);
++        const auto e = FlightMapProjection::extents(internalState->distanceFromCameraToTarget,
++            fovTangent, internalState->aspectRatio, meters, farPlane);
++        internalState->mPerspectiveProjection = glm::ortho(-e.halfWidth, e.halfWidth,
++            -e.halfHeight, e.halfHeight, e.nearPlane, e.farPlane);
++        internalState->mPerspectiveProjectionInv = glm::inverse(internalState->mPerspectiveProjection);
++        internalState->mPerspectiveProjectionView = internalState->mPerspectiveProjection * internalState->mCameraView;
++        const auto nearTL = internalState->mCameraViewInv * glm::vec4(-e.halfWidth, e.halfHeight, -e.nearPlane, 1.0f);
++        const auto nearBR = internalState->mCameraViewInv * glm::vec4(e.halfWidth, -e.halfHeight, -e.nearPlane, 1.0f);
++        const auto farBR = internalState->mCameraViewInv * glm::vec4(e.halfWidth, -e.halfHeight, -e.farPlane, 1.0f);
++        const auto rotation = glm::mat3(internalState->mCameraViewInv);
++        internalState->leftVisibleEdgeN = rotation * glm::vec3(-1, 0, 0);
++        internalState->rightVisibleEdgeN = rotation * glm::vec3(1, 0, 0);
++        internalState->topVisibleEdgeN = rotation * glm::vec3(0, 1, 0);
++        internalState->bottomVisibleEdgeN = rotation * glm::vec3(0, -1, 0);
++        internalState->frontVisibleEdgeN = rotation * glm::vec3(0, 0, 1);
++        internalState->backVisibleEdgeN = rotation * glm::vec3(0, 0, -1);
++        internalState->leftVisibleEdgeD = glm::dot(internalState->leftVisibleEdgeN, nearTL.xyz());
++        internalState->topVisibleEdgeD = glm::dot(internalState->topVisibleEdgeN, nearTL.xyz());
++        internalState->rightVisibleEdgeD = glm::dot(internalState->rightVisibleEdgeN, nearBR.xyz());
++        internalState->bottomVisibleEdgeD = glm::dot(internalState->bottomVisibleEdgeN, nearBR.xyz());
++        internalState->frontVisibleEdgeD = glm::dot(internalState->frontVisibleEdgeN, nearTL.xyz());
++        internalState->backVisibleEdgeD = glm::dot(internalState->backVisibleEdgeN, farBR.xyz());
++        internalState->frontVisibleEdgeP = nearTL.xyz();
++    };
++    if (neededSteps == RequiredToUnproject) {
++        applyFlightProjection(1000.0f);
+         return true;
++    }
+ 
+     // Calculate synthetic parameters to make map flat if needed
+     const auto shiftToFlatten = state.flatEarth ? qMax(_zoomForFlattening - state.zoomLevel, 0) : 0;
+@@ -502,8 +536,10 @@
+         internalState->distanceFromCameraToGroundInMeters = distanceFromCameraToGround * metersPerUnit;
+     }
+ 
+-    if (neededSteps == RequiredToProject)
++    if (neededSteps == RequiredToProject) {
++        applyFlightProjection(1000.0f);
+         return true;
++    }
+ 
+     // Calculate maximum visible distance
+     const auto factorOfDistance = radiusInWorld / distanceToCamera;
+@@ -655,6 +691,7 @@
+ 
+     // Compute visible area
+     computeVisibleArea(internalState, state, zLowerDetail, state.flatEarth ? 0.0 : elevationCosine, neededSteps);
++    applyFlightProjection(internalState->zFar);
+ 
+     return true;
+ }
+@@ -2454,7 +2491,11 @@
+     const MapRendererState& state, const PointD& screenPoint, PointI64& location,
+     const float height /* = 0.0f */) const
+ {
+-    const auto camPos = glm::dvec3(internalState.worldCameraPosition);
++    const auto camPos = internalState.mPerspectiveProjection[3][3] == 1.0f
++        ? glm::unProject(glm::dvec3(screenPoint.x, static_cast<double>(state.windowSize.y) - screenPoint.y, 0.0),
++            glm::dmat4(internalState.mCameraView), glm::dmat4(internalState.mPerspectiveProjection),
++            glm::dvec4(internalState.glmViewport))
++        : glm::dvec3(internalState.worldCameraPosition);
+     const auto farInWorld = glm::unProject(
+         glm::dvec3(screenPoint.x, static_cast<double>(state.windowSize.y) - screenPoint.y, 1.0),
+         glm::dmat4(internalState.mCameraView),
+@@ -2468,8 +2509,8 @@
+         const glm::dvec3 planeO(0.0, static_cast<double>(height), 0.0);
+         double length;
+         const auto intersects = Utilities_OpenGL_Common::rayIntersectPlane(planeN, planeO, rayD, camPos, length);
+-        if (!intersects || !((length > 0.0 && internalState.worldCameraPosition.y > height)
+-            || (length < 0.0 && internalState.worldCameraPosition.y < height))
++        if (!intersects || !((length > 0.0 && camPos.y > height)
++            || (length < 0.0 && camPos.y < height))
+             || (height == 0.0f && glm::dot(rayD, -planeN) < MIN_COS_SURFACE))
+             return false;
+ 
+@@ -2514,7 +2555,11 @@
+     const MapRendererState& state, const PointD& screenPoint, glm::dvec3& position,
+     const float height /* = 0.0f */) const
+ {
+-    const auto camPos = glm::dvec3(internalState.worldCameraPosition);
++    const auto camPos = internalState.mPerspectiveProjection[3][3] == 1.0f
++        ? glm::unProject(glm::dvec3(screenPoint.x, static_cast<double>(state.windowSize.y) - screenPoint.y, 0.0),
++            glm::dmat4(internalState.mCameraView), glm::dmat4(internalState.mPerspectiveProjection),
++            glm::dvec4(internalState.glmViewport))
++        : glm::dvec3(internalState.worldCameraPosition);
+     const auto farInWorld = glm::unProject(
+         glm::dvec3(screenPoint.x, static_cast<double>(state.windowSize.y) - screenPoint.y, 1.0),
+         glm::dmat4(internalState.mCameraView),
+@@ -2528,8 +2573,8 @@
+         const glm::dvec3 planeO(0.0, static_cast<double>(height), 0.0);
+         double length;
+         const auto intersects = Utilities_OpenGL_Common::rayIntersectPlane(planeN, planeO, rayD, camPos, length);
+-        if (!intersects || !((length > 0.0 && internalState.worldCameraPosition.y > height)
+-            || (length < 0.0 && internalState.worldCameraPosition.y < height))
++        if (!intersects || !((length > 0.0 && camPos.y > height)
++            || (length < 0.0 && camPos.y < height))
+             || (height == 0.0f && glm::dot(rayD, -planeN) < MIN_COS_SURFACE))
+             return false;
+ 
+@@ -3230,6 +3275,22 @@
+         secondLocation31, secondPoint, secondNeeded, secondCurrent);
+     if (!ok)
+         return false;
++
++    if (internalState.mPerspectiveProjection[3][3] == 1.0f)
++    {
++        // Parallel rays have no height-dependent parallax. In particular, the
++        // centre point is not a singular zero-length camera-to-ground ray.
++        const PointD currentSegment(secondCurrent - firstCurrent);
++        const PointD neededSegment(secondNeeded - firstNeeded);
++        const auto currentDistance = currentSegment.norm();
++        const auto neededDistance = neededSegment.norm();
++        if (currentDistance <= 0.0 || neededDistance <= 0.0)
++            return false;
++        zoomAndRotate.x = getZoomOffset(state.zoomLevel, state.visualZoom, currentDistance / neededDistance);
++        zoomAndRotate.y = qRadiansToDegrees(Utilities::getSignedAngle(
++            currentSegment / currentDistance, neededSegment / neededDistance));
++        return !qIsNaN(zoomAndRotate.x) && !qIsNaN(zoomAndRotate.y);
++    }
+ 
+     // Calculate camera location on the plane
+     PointD position(internalState.groundCameraPosition);
+@@ -3818,6 +3879,10 @@
+     const MapRendererState& state, const PointI& location31, const float height, PointI& outLocation31) const
+ {
+     const auto internalState = static_cast<const InternalState*>(&internalState_);
++    if (internalState->mPerspectiveProjection[3][3] == 1.0f) {
++        outLocation31 = location31;
++        return true;
++    }
+ 
+     const auto offsetFromTarget31 = Utilities::shortestVector31(state.target31, location31);
+     const auto offsetFromTarget = Utilities::convert31toFloat(offsetFromTarget31, state.zoomLevel);
+diff --git a/src/Map/AtlasMapRendererSymbolsStage.cpp b/src/Map/AtlasMapRendererSymbolsStage.cpp
+--- a/src/Map/AtlasMapRendererSymbolsStage.cpp
++++ b/src/Map/AtlasMapRendererSymbolsStage.cpp
+@@ -1,4 +1,5 @@
+ #include "AtlasMapRendererSymbolsStage.h"
++#include "FlightMapProjection.h"
+ 
+ #include "QtExtensions.h"
+ #include "ignore_warnings_on_external_includes.h"
+@@ -2040,7 +2041,12 @@
+         renderable->visibleBBox = visibleBBox;
+         renderable->offsetOnScreen = offsetOnScreen;
+ 
+-        if (allowFastCheckByFrustum)
++        // Raised flight markers are rendered at their real altitude. The asynchronous
++        // terrain query uses ground visibility and can reject them while the split
++        // viewport moves. Keep ordinary map symbols and terrain depth testing intact.
++        const bool raisedFlightMarker = !isntMarker && std::isfinite(elevationInMeters)
++            && FlightMapProjection::enabled().load(std::memory_order_relaxed);
++        if (allowFastCheckByFrustum && !raisedFlightMarker)
+         {
+             renderable->queryIndex = startTerrainVisibilityFiltering(PointF(symbolOnScreen.x, symbolOnScreen.y),
+                 positionInWorld, positionInWorld, positionInWorld, positionInWorld);

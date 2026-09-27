@@ -14,4 +14,7 @@ public final class FlightVectorLineBridge {
     }
 
     private static native void enableTubeNative(long pointer, VectorLine keepAlive);
+
+    /** Scoped to the flight map; the normal map and window renderer are unchanged. */
+    public static native void setFlightProjection(boolean enabled);
 }
