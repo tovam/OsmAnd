@@ -27,17 +27,21 @@ import net.osmand.plus.utils.AndroidUtils
 import net.osmand.plus.utils.InsetTargetsCollection
 import net.osmand.plus.views.layers.base.OsmandMapLayer
 import net.osmand.plus.views.corenative.NativeCoreContext
+import net.osmand.core.jni.FlightVectorLineBridge
 
 class FlightModeFragment : BaseFullScreenFragment() {
 
 	private lateinit var viewModel: FlightModeViewModel
 	private var previousHudVisibility = View.VISIBLE
 	private var previousMapState: MapState? = null
+	private var pausedFlightMapState: MapState? = null
 	private var lastMapRefreshMillis = 0L
 	private var splitMapViewport: FlightSplitMapViewport? = null
 	private var splitMapBounds: android.graphics.Rect? = null
 	private var mapInteractionBlockerLayer: FlightMapInteractionBlockerLayer? = null
 	private var replayMapLayer: FlightReplayMapLayer? = null
+	private var satelliteMapOverlay: FlightSatelliteMapOverlay? = null
+	private var satelliteBlend = 0f
 	private var previousGpxObjectsDelegate: OsmandMapLayer.CustomMapObjects<SelectedGpxFile>? = null
 	private var gpxLayerSuppressed = false
 	private var showFlightCamera by mutableStateOf(false)
@@ -131,6 +135,13 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onAdvanceReplay = viewModel::advanceReplay,
 					onMapState = ::showReplayStateOnMap,
 					onSplitMapBounds = ::updateSplitMapBounds,
+					onMapSatelliteBlend = { opacity ->
+						satelliteBlend = opacity
+						if (isResumed) {
+							val overlay = satelliteMapOverlay ?: FlightSatelliteMapOverlay(requireContext()).also { satelliteMapOverlay = it }
+							overlay.update(app.osmandMap.mapView.mapRenderer, opacity)
+						}
+					},
 					onSetWindowAltitudeOverride = viewModel::setWindowAltitudeOverride,
 					onMoveWindow = viewModel::moveWindow,
 					onSaveWindowPlacement = viewModel::saveWindowPlacement,
@@ -235,18 +246,34 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		hud.visibility = View.GONE
 		captureMapState()
 		ensureFlightMapRenderer()
+		setFlightProjection(true)
+		pausedFlightMapState?.let { state ->
+			val map = app.osmandMap.mapView
+			map.setLatLon(state.latitude, state.longitude)
+			map.setZoomWithFloatPart(state.zoom, state.zoomFloatPart)
+			map.setRotate(state.rotation, true)
+			map.setElevationAngle(state.elevationAngle)
+			flightMapViewInitialized = true
+		}
 		disableNativeFlightRelief()
 		suppressSurfaceGpxTracks()
 		installMapInteractionGuard()
 		splitMapBounds?.let(::updateSplitMapBounds)
+		updateSatelliteOverlay()
 		activity.refreshMap()
 	}
 
 	override fun onPause() {
 		viewModel.setUiVisible(false)
 		viewModel.saveWindowPlacement()
+		app.osmandMap.mapView.let { map ->
+			pausedFlightMapState = MapState(map.latitude, map.longitude, map.zoom,
+				map.zoomFloatPart, map.rotate, map.elevationAngle)
+		}
 		cancelNativeMapGesture()
+		setFlightProjection(false)
 		splitMapViewport?.restore()
+		satelliteMapOverlay?.clear()
 		removeMapInteractionGuard()
 		restoreSurfaceGpxTracks()
 		restoreMapState()
@@ -259,6 +286,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	}
 
 	override fun onDestroyView() {
+		setFlightProjection(false)
 		viewModel.setUiVisible(false)
 		setFlightCameraVisible(false)
 		// onPause normally performs this cleanup. Repeating it here is deliberate:
@@ -267,6 +295,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		cancelNativeMapGesture()
 		splitMapViewport?.dispose()
 		splitMapViewport = null
+		satelliteMapOverlay?.clear()
+		satelliteMapOverlay = null
 		splitMapBounds = null
 		removeMapInteractionGuard()
 		restoreSurfaceGpxTracks()
@@ -310,7 +340,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 			splitMapViewport?.restore()
 			return
 		}
-		if (!isResumed || viewModel.uiState.page != FlightPage.MIXED) return
+		if (!isResumed || viewModel.uiState.page !in listOf(FlightPage.MAP, FlightPage.MIXED)) return
 		val activity = requireMapActivity()
 		val viewport = splitMapViewport ?: FlightSplitMapViewport(activity,
 			activity.findViewById(R.id.map_view_with_layers), activity.mapPositionManager).also { splitMapViewport = it }
@@ -368,6 +398,25 @@ class FlightModeFragment : BaseFullScreenFragment() {
 				layer.update(state.trip, state.snapshot?.sample, state.showTrackPoints, state.photos)
 			}
 		}
+	}
+
+	private fun setFlightProjection(enabled: Boolean) {
+		val map = app.osmandMap.mapView
+		try { FlightVectorLineBridge.setFlightProjection(enabled) } catch (_: LinkageError) { return }
+		// Flight top-down uses a plane. Restore the normal map's globe preference on exit.
+		map.mapRenderer?.setFlatEarth(enabled || !app.settings.SPHERICAL_MAP.get())
+		// Invalidate the native cached camera even if the geographic target is unchanged.
+		map.mapRenderer?.let { renderer ->
+			renderer.setElevationAngle(map.elevationAngle - 0.001f)
+			renderer.setElevationAngle(map.elevationAngle)
+		}
+		map.refreshMap()
+	}
+
+	private fun updateSatelliteOverlay() {
+		if (!isResumed) return
+		val overlay = satelliteMapOverlay ?: FlightSatelliteMapOverlay(requireContext()).also { satelliteMapOverlay = it }
+		overlay.update(app.osmandMap.mapView.mapRenderer, satelliteBlend)
 	}
 
 	private fun removeMapInteractionGuard() {
@@ -476,6 +525,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 			app.osmandMap.setupRenderingView()
 			app.osmandMap.mapView.mapActivity?.refreshMapComplete()
 			flightRendererSetupRequested = false
+			if (isResumed) { setFlightProjection(true); updateSatelliteOverlay() }
 		}
 		if (NativeCoreContext.isInit()) {
 			attachRenderer()

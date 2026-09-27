@@ -4,12 +4,7 @@ import android.graphics.Rect
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.viewinterop.AndroidView
 import net.osmand.plus.views.OsmandMapTileView
-import kotlin.math.roundToInt
 
 /** Both halves share one flight snapshot. Each owns a disjoint pointer surface. */
 @Composable
@@ -25,10 +20,9 @@ internal fun FlightMixedScreen(
     onRetry: () -> Unit,
     onRendererError: (String) -> Unit,
     onRenderStats: (FlightTerrainRenderStats) -> Unit,
+    onFollow: () -> Unit,
+    onLockCenter: () -> Unit,
 ) {
-    val hostView = LocalView.current
-    val latestBounds by rememberUpdatedState(onMapBounds)
-    DisposableEffect(Unit) { onDispose { latestBounds(null) } }
     Column(Modifier.fillMaxSize()) {
         FlightWindowScene(
             placement = state.windowPlacement, look = state.windowLook, trip = state.trip,
@@ -46,20 +40,9 @@ internal fun FlightMixedScreen(
             onRetryTerrain = onRetry, onRendererError = onRendererError, onRenderStats = onRenderStats,
             gesturesOnly = true, modifier = Modifier.weight(1f).fillMaxWidth(),
         )
-        Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { coordinates ->
-            val location = IntArray(2)
-            hostView.getLocationOnScreen(location)
-            val offset = coordinates.positionInRoot()
-            val left = location[0] + offset.x.roundToInt()
-            val top = location[1] + offset.y.roundToInt()
-            latestBounds(Rect(left, top, left + coordinates.size.width, top + coordinates.size.height))
-        }) {
-            if (mapView != null) AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { FlightMapGestureProxyView(it, mapView, onMapExplore) },
-                update = { it.update(mapView, onMapExplore); it.lockedCenter = null },
-            )
-        }
+        FlightMapPanel(state, mapView, onMapExplore, onMapBounds,
+            modifier = Modifier.weight(1f).fillMaxWidth(), showCone = true,
+            onFollow = onFollow, onLockCenter = onLockCenter)
         FlightBottomNavigation(state, onPage, minimalChrome = true)
     }
 }
