@@ -1,5 +1,5 @@
 name: Release OsmAnd Smart APK
-run-name: "5.4.0#smart${{ github.event.workflow_run.run_number }}.${{ github.event.workflow_run.run_attempt }} — Release OsmAnd Smart APK"
+run-name: "${{ github.event.workflow_run.run_number }}.${{ github.event.workflow_run.run_attempt }} — Release OsmAnd Smart APK"
 
 on:
   workflow_run:
@@ -45,7 +45,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: smart-build-${{ github.event.workflow_run.run_number }}-${{ github.event.workflow_run.run_attempt }}
-          RELEASE_TITLE: OsmAnd Smart OpenGL build #${{ github.event.workflow_run.run_number }}
+          RELEASE_TITLE: "${{ github.event.workflow_run.run_number }}.${{ github.event.workflow_run.run_attempt }} — OsmAnd Smart OpenGL"
           TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
           APK_PATH: ${{ steps.apk.outputs.path }}
         run: |

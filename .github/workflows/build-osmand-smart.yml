@@ -1,5 +1,5 @@
 name: Build OsmAnd Smart APK
-run-name: "5.4.0#smart${{ github.run_number }}.${{ github.run_attempt }} — Build OsmAnd Smart APK"
+run-name: "${{ github.run_number }}.${{ github.run_attempt }} — Build OsmAnd Smart APK"
 # Manual rebuild requested: 2026-09-15 13:28:19 UTC. Application sources are unchanged.
 
 on:
@@ -74,7 +74,7 @@ jobs:
       - name: Apply flight altitude and volumetric geometry to OsmAnd core
         run: |
           set -euo pipefail
-          for patch_name in model3d-marker-elevation flight-volumetric-geometry basemap-overzoom-fallback; do
+          for patch_name in model3d-marker-elevation flight-volumetric-geometry basemap-overzoom-fallback basemap-raster-overzoom flight-map-projection; do
             patch_file="../android/OsmAnd/patches/osmand-core/${patch_name}.patch"
             if ! patch_details="$(git -C core apply --check --verbose "${patch_file}" 2>&1)"; then
               printf '%s\n' "${patch_details}"
@@ -91,12 +91,19 @@ jobs:
           cp android/OsmAnd/patches/osmand-core/FlightTubeMesh.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/FlightModelPlacement.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/BasemapOverzoom.h core/src/Map/
+          cp android/OsmAnd/patches/osmand-core/FlightMapProjection.h core/src/Map/
           cp android/OsmAnd/patches/osmand-core/FlightVectorLineBridge.cpp core/wrappers/java/
 
       - name: Validate patched JNI CMake syntax
         run: |
           cmake -DWRAPPER_FILE="${GITHUB_WORKSPACE}/core/wrappers/java/CMakeLists.txt" \
             -P android/OsmAnd/test/native/CheckFlightJniCmake.cmake
+
+      - name: Test flight orthographic projection bounds
+        run: |
+          c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            android/OsmAnd/test/native/FlightMapProjectionTest.cpp -o flight-projection-test
+          ./flight-projection-test
 
       - name: Check basemap overzoom fallback source path
         run: |
@@ -110,6 +117,12 @@ jobs:
           g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
             android/OsmAnd/test/native/BasemapOverzoomTest.cpp -o "${RUNNER_TEMP}/basemap-overzoom-test"
           "${RUNNER_TEMP}/basemap-overzoom-test"
+
+      - name: Test native basemap raster fallback pipeline
+        run: |
+          mkdir -p .native-test-workspace
+          python3 android/OsmAnd/test/native/run_basemap_raster_pipeline_test.py \
+            --core-root core --work-dir .native-test-workspace
 
       - name: Test flight tube geometry with Qt keywords
         run: |
@@ -199,6 +212,9 @@ jobs:
           "${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" --dynamic --defined-only \
             binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so \
             | grep 'Java_net_osmand_core_jni_FlightVectorLineBridge_enableTubeNative'
+          "${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" --dynamic --defined-only \
+            binaries/android/clang-arm64-v8a/Debug/libOsmAndCoreWithJNI.so \
+            | grep 'Java_net_osmand_core_jni_FlightVectorLineBridge_setFlightProjection'
 
       - name: Save verified native core before Android compilation
         # A later Kotlin/test failure must not discard a successfully built native library.
