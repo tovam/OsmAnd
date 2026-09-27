@@ -40,6 +40,9 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	)
 
 	private var worker = Executors.newSingleThreadExecutor()
+	private var scanner = Executors.newSingleThreadExecutor()
+	private var refreshQueued = false
+	private val refreshTask = Runnable { refreshQueued = false; if (!scanRunning) launchTileScan() }
 	private var workVisible = false
 	private var workGeneration = 0L
 	private val workLifecycle = FlightViewVisibility(this) { visible ->
@@ -47,10 +50,14 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		workGeneration++
 		if (visible) {
 			if (worker.isShutdown) worker = Executors.newSingleThreadExecutor()
+			if (scanner.isShutdown) scanner = Executors.newSingleThreadExecutor()
 			reloadTiles()
 			invalidate()
 		} else {
 			worker.shutdownNow()
+			scanner.shutdownNow()
+			removeCallbacks(refreshTask)
+			refreshQueued = false
 			queued.clear()
 			scanRunning = false
 		}
@@ -179,6 +186,8 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		this.viewConeDegrees = viewConeDegrees.coerceIn(0.25f, 170f)
 		this.quality = quality
 		this.baseZoom = baseZoom
+		// Gaze feedback must not wait for a disk scan or a bitmap decode.
+		postInvalidateOnAnimation()
 		if (this.cacheKey != cacheKey) {
 			this.cacheKey = cacheKey
 			reloadTiles()
@@ -190,7 +199,10 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	private fun reloadTiles() {
 		if (detached || !workVisible) return
 		scanGeneration++
-		if (!scanRunning) launchTileScan()
+		if (!scanRunning && !refreshQueued) {
+			refreshQueued = true
+			postDelayed(refreshTask, if (tiles.isEmpty()) 0L else 1000L)
+		}
 	}
 
 	private fun launchTileScan() {
@@ -200,7 +212,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		val generation = scanGeneration
 		val requestedQuality = quality
 		val requestedBaseZoom = baseZoom
-		worker.execute {
+		scanner.execute {
 			val standard = scan(
 				File(context.applicationContext.filesDir, FlightSatelliteSource.CACHE_DIRECTORY),
 				detailLayer = 0
@@ -234,12 +246,11 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 				if (lifecycleGeneration != workGeneration || !workVisible) return@post
 				scanRunning = false
 				if (detached) return@post
-				if (generation == scanGeneration) {
-					if (scanned.isNotEmpty()) tiles = scanned
-					invalidate()
-				} else {
-					// Coalesce every intermediate cache notification into one fresh scan.
-					launchTileScan()
+				if (scanned.isNotEmpty()) tiles = scanned
+				invalidate()
+				if (generation != scanGeneration && !refreshQueued) {
+					refreshQueued = true
+					postDelayed(refreshTask, 1000L)
 				}
 			}
 		}
@@ -426,6 +437,8 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		workLifecycle.detach()
 		scanGeneration++
 		worker.shutdownNow()
+		scanner.shutdownNow()
+		removeCallbacks(refreshTask)
 		bitmaps.evictAll()
 		super.onDetachedFromWindow()
 	}
