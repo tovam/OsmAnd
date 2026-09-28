@@ -12,8 +12,13 @@ def annotation_chunks(text, size=2500):
 
 def resource_revision(lines):
     revisions = []
+    in_resources = False
     for line in lines:
-        if "Checkout OsmAnd resources" in line:
+        # `gh run view --log` may label every step UNKNOWN STEP. The checkout
+        # payload still contains the repository name and its final `git log` SHA.
+        if "Syncing repository: " in line:
+            in_resources = "Syncing repository: osmandapp/OsmAnd-resources" in line
+        if in_resources or "Checkout OsmAnd resources" in line:
             match = re.search(r"\b([0-9a-f]{40})\s*$", line)
             if match:
                 revisions.append(match.group(1))
