@@ -1,6 +1,6 @@
 # Flight live feedback — 2026-09-27
 
-Status: implementation and local verification complete. Build 106.1's native patch failure was fixed by `54cc07f5c7`; build 107.1 passed native compilation but failed upstream Java tests because its floating resources were incompatible with this fork. Resources are now pinned to the exact version from successful build 105.1; the next APK build will verify the complete fix. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
+Status: implementation and local verification complete. Build 106.1's native patch failure was fixed by `54cc07f5c7`; build 107.1 passed native compilation but failed upstream Java tests because its floating resources were incompatible with this fork. Resources are now pinned to the exact version from successful build 105.1; replacement build 108.1 is running to verify the complete fix. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
 
 ## Requested changes
 
@@ -69,4 +69,4 @@ Status: implementation and local verification complete. Build 106.1's native pat
 - [x] Identify cross-repository version skew: resource commit `fb5e1559264194e6ed012bb9362f802cdbe20f9d` introduced lane expectations and per-case maps requiring newer routing/test-loader code. This fork still loads a single `Turn_lanes_test.obf`. Routing source/test code and Gradle configuration have not changed since successful build 105.1.
 - [x] Recover the exact resource checkout from build 105.1's CI log: `13bb530595a2671f4baef431a1e0c7aa5f0b12fa`. Pin the complete resource repository to this coherent baseline rather than disabling tests or mixing new runtime resources with old test fixtures. Refresh this pin deliberately alongside upstream routing/test updates; it also versions routing XML, rendering and POI assets.
 - [x] Add automatic bounded CI failure annotations and successful-build resource provenance, allowing diagnostics without a local GitHub token or downloading build artifacts. Synthetic tests cover named and unnamed log steps, missing revisions, escaping and chunking.
-- [ ] Launch the replacement APK build and record its URL. Full Gradle/APK verification runs on GitHub, not locally.
+- [x] Push fix `322838fe9f` and launch [build 108.1](https://github.com/tovam/OsmAnd/actions/runs/36464758175). Full Gradle/APK verification runs on GitHub, not locally; final result is pending.
