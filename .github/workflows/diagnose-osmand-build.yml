@@ -1,0 +1,42 @@
+name: Diagnose failed OsmAnd build
+run-name: "Build diagnostics — ${{ github.event.workflow_run.run_number || inputs.run_id || 'latest failure' }}"
+
+on:
+  workflow_run:
+    workflows: [Build OsmAnd Smart APK]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Failed build run ID (empty selects the latest failure)
+        required: false
+        type: string
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/diagnose-osmand-build.yml
+      - .github/scripts/publish-build-test-failures.py
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Publish failed-test context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id || inputs.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SOURCE_RUN}" ]; then
+            SOURCE_RUN="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-osmand-smart.yml/runs?status=failure&per_page=1" --jq '.workflow_runs[0].id')"
+          fi
+          [[ "${SOURCE_RUN}" =~ ^[0-9]+$ ]]
+          echo "Inspecting build run ${SOURCE_RUN}"
+          gh run view "${SOURCE_RUN}" --repo "${GITHUB_REPOSITORY}" --log-failed \
+            | python3 .github/scripts/publish-build-test-failures.py
