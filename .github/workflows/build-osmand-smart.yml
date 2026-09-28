@@ -29,6 +29,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: osmandapp/OsmAnd-resources
+          # Match the routing/test code in this fork: exact resources from build 105.1.
+          # Refresh this SHA together with upstream routing/test-loader updates;
+          # floating HEAD can require code and OBF fixtures the fork does not have.
+          ref: 13bb530595a2671f4baef431a1e0c7aa5f0b12fa
           path: resources
 
       - name: Checkout OsmAnd core
