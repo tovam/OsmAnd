@@ -40,3 +40,13 @@ jobs:
           echo "Inspecting build run ${SOURCE_RUN}"
           gh run view "${SOURCE_RUN}" --repo "${GITHUB_REPOSITORY}" --log-failed \
             | python3 .github/scripts/publish-build-test-failures.py
+      - name: Identify resources from the latest successful build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BASELINE_RUN="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-osmand-smart.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id')"
+          [[ "${BASELINE_RUN}" =~ ^[0-9]+$ ]]
+          echo "::notice title=Successful baseline run::${BASELINE_RUN}"
+          gh run view "${BASELINE_RUN}" --repo "${GITHUB_REPOSITORY}" --log \
+            | python3 .github/scripts/publish-build-test-failures.py --resource-revision

@@ -5,6 +5,27 @@ import re
 import sys
 
 
+def annotation_chunks(text, size=2500):
+    # GitHub truncates long annotation messages even when the log keeps them.
+    return [text[start:start + size] for start in range(0, len(text), size)]
+
+
+def resource_revision(lines):
+    revisions = []
+    for line in lines:
+        if "Checkout OsmAnd resources" in line:
+            match = re.search(r"\b([0-9a-f]{40})\s*$", line)
+            if match:
+                revisions.append(match.group(1))
+    if not revisions:
+        raise ValueError("No resource checkout revision found in build log")
+    return revisions[-1]
+
+
+def escape_annotation(text):
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def failure_context(lines):
     selected = set()
     for index, line in enumerate(lines):
@@ -16,8 +37,15 @@ def failure_context(lines):
 
 
 if __name__ == "__main__":
-    details = failure_context(sys.stdin.read().splitlines())
-    if not details:
-        raise SystemExit("No failed-step log was returned")
-    escaped = details.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-    print(f"::error title=Failed build test details::{escaped}")
+    lines = sys.stdin.read().splitlines()
+    if sys.argv[1:] == ["--resource-revision"]:
+        print(f"::notice title=OsmAnd resources revision::{resource_revision(lines)}")
+    elif sys.argv[1:]:
+        raise SystemExit("Only --resource-revision is supported")
+    else:
+        details = failure_context(lines)
+        if not details:
+            raise SystemExit("No failed-step log was returned")
+        chunks = annotation_chunks(details)
+        for index, chunk in enumerate(chunks, 1):
+            print(f"::error title=Failed build test details {index}/{len(chunks)}::{escape_annotation(chunk)}")
