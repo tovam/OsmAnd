@@ -1,6 +1,6 @@
 # Flight live feedback — 2026-09-27
 
-Status: implementation and local verification complete; build 106.1 failed during native patch application. Compatibility fix verified locally; replacement build pending. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
+Status: implementation and local verification complete; build 106.1 failed during native patch application. Compatibility fix `54cc07f5c7` is pushed; replacement build 107.1 is running. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
 
 ## Requested changes
 
@@ -61,4 +61,4 @@ Status: implementation and local verification complete; build 106.1 failed durin
 - [x] Update the production-formula test fixture and source assertion to the same upstream API.
 - [x] Apply all five patches, in CI order, to upstream core `3a5be42e57c3245d31078b9217bfb5569f469d75` using only their small source-file subset (no repository clone or Android build).
 - [x] Pass the actual native grid-cutting pipeline, 36 width/DEM combinations, basemap raster pipeline and patched JNI CMake validation. An independent read-only Kotlin review found no concrete compile issue; full compilation remains GitHub's check.
-- [ ] Push the compatibility correction and launch the replacement build.
+- [x] Push the compatibility correction and launch [build 107.1](https://github.com/tovam/OsmAnd/actions/runs/36444624147). APK compilation is still pending completion.
