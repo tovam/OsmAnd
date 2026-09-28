@@ -1,6 +1,6 @@
 # Flight live feedback — 2026-09-27
 
-Status: implementation, local verification and push complete; GitHub build 106.1 launched. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
+Status: implementation and local verification complete; build 106.1 failed during native patch application. Compatibility fix verified locally; replacement build pending. Checked items mean implemented and checked in code/tests, not validated on a physical phone. No real flight/user data is used.
 
 ## Requested changes
 
@@ -53,3 +53,12 @@ Status: implementation, local verification and push complete; GitHub build 106.1
 - `164f8733fd`: orthographic projection and elevated marker visibility.
 - `e385eee136`: shared map/mixed controls, viewport, scales, blending and resume camera.
 - `707309fdc8`: native/JVM verification wiring and number-first GitHub build titles.
+
+## Build 106.1 follow-up — 2026-09-28
+
+- [x] Identify failure: upstream `VectorLine_P` replaced the separate map/surface zoom fields with `ZoomState`; the flight volumetric patch still matched the removed expressions. The failure occurred before native or Kotlin compilation.
+- [x] Adapt tube width and grid selection to `geometryZoom`, `surfaceGeometryZoom` and the current local `mapZoomLevel`, preserving upstream snapped zoom and our altitude/width policy.
+- [x] Update the production-formula test fixture and source assertion to the same upstream API.
+- [x] Apply all five patches, in CI order, to upstream core `3a5be42e57c3245d31078b9217bfb5569f469d75` using only their small source-file subset (no repository clone or Android build).
+- [x] Pass the actual native grid-cutting pipeline, 36 width/DEM combinations, basemap raster pipeline and patched JNI CMake validation. An independent read-only Kotlin review found no concrete compile issue; full compilation remains GitHub's check.
+- [ ] Push the compatibility correction and launch the replacement build.

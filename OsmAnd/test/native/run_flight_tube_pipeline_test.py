@@ -23,7 +23,7 @@ def main():
     vector_line = (core_map / "VectorLine_P.cpp").read_text()
     assert re.search(
         r"const auto cellsPerTileSize\s*=\s*_isTubular\s*\?\s*"
-        r"FlightTubeMesh::gridCellsPerTile\(_flatEarth, static_cast<int>\(_mapZoomLevel\)\)",
+        r"FlightTubeMesh::gridCellsPerTile\(_flatEarth, static_cast<int>\(mapZoomLevel\)\)",
         vector_line,
     ), "The actual native tube must use the bounded grid policy being tested"
     header = (core_map / "GeometryModifiers.h").read_text()
