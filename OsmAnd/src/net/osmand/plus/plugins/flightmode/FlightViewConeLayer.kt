@@ -6,7 +6,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import net.osmand.core.android.MapRendererView
 import net.osmand.core.jni.PointI
-import net.osmand.core.jni.Polygon
 import net.osmand.core.jni.PolygonBuilder
 import net.osmand.core.jni.PolygonsCollection
 import net.osmand.core.jni.QVectorPointI
@@ -28,7 +27,6 @@ internal class FlightViewConeLayer(context: Context) : OsmandMapLayer(context) {
     private var attached = false
     private var owner: MapRendererView? = null
     private var collection: PolygonsCollection? = null
-    private var polygon: Polygon? = null
     private var renderedCone: FlightMapViewCone? = null
     private var renderedRadius = 0.0
     private val fallbackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = CONE_COLOR }
@@ -68,23 +66,24 @@ internal class FlightViewConeLayer(context: Context) : OsmandMapLayer(context) {
         }
         owner = renderer
         val radius = radiusMeters(tileBox)
-        if (renderedCone != current || abs(radius - renderedRadius) > renderedRadius * 0.01 || polygon == null) {
+        if (renderedCone != current || abs(radius - renderedRadius) > renderedRadius * 0.01 || collection == null) {
             val points = QVectorPointI().apply {
                 vertices(current, radius).forEach {
                     add(PointI(MapUtils.get31TileNumberX(it.longitude), MapUtils.get31TileNumberY(it.latitude)))
                 }
             }
-            val existing = polygon
+            val existing = collection
             if (existing == null) {
                 val provider = PolygonsCollection(ZoomLevel.ZoomLevel0, ZoomLevel.ZoomLevel31)
-                polygon = PolygonBuilder().setPolygonId(1).setBaseOrder(baseOrder)
+                PolygonBuilder().setPolygonId(CONE_POLYGON_ID).setBaseOrder(baseOrder)
                     .setIsHidden(false).setPoints(points)
                     .setFillColor(NativeUtilities.createFColorARGB(CONE_COLOR))
                     .buildAndAddToCollection(provider)
                 collection = provider
             } else {
-                // Retain the provider and symbol identity; never remove/re-add it per movement.
-                existing.setPoints(points)
+                // Polygon itself is opaque in the Java bindings. Update it through the collection
+                // so its provider and native symbol identity survive look/zoom changes.
+                existing.setPolygonPoints(CONE_POLYGON_ID, points)
             }
             renderedCone = current
             renderedRadius = radius
@@ -118,7 +117,6 @@ internal class FlightViewConeLayer(context: Context) : OsmandMapLayer(context) {
 
     private fun clearNative() {
         collection?.let { owner?.removeSymbolsProvider(it) }
-        polygon = null
         collection = null
         owner = null
         renderedCone = null
@@ -141,6 +139,7 @@ internal class FlightViewConeLayer(context: Context) : OsmandMapLayer(context) {
 
     companion object {
         const val Z_ORDER = 998f // Under flight route/aircraft symbols, above the basemap.
+        private const val CONE_POLYGON_ID = 1
         private const val CONE_COLOR = 0x905099DF.toInt() // 56% opacity, previously 25%.
     }
 }
