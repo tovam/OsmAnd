@@ -358,7 +358,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	) {
 		// Photo editing must not rebuild the hidden native flight layer on every finger movement.
 		if (!isResumed || viewModel.uiState.page !in listOf(FlightPage.MAP, FlightPage.MIXED)) return
-		replayMapLayer?.update(trip, sample, showPoints, photos)
+		replayMapLayer?.update(trip, sample, showPoints, photos,
+			recorded = viewModel.uiState.sessionMode != FlightSessionMode.PREPARE)
 		replayMapLayer?.updateHypothesis(if(viewModel.uiState.sessionMode==FlightSessionMode.LIVE) viewModel.uiState.plan else null,
 			viewModel.uiState.liveState.latest)
 		if (sample == null || !viewModel.uiState.mapFollowing) return
@@ -398,7 +399,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 				mapView.addLayer(layer, REPLAY_MAP_LAYER_Z_ORDER)
 				replayMapLayer = layer
 				val state = viewModel.uiState
-				layer.update(state.trip, state.snapshot?.sample, state.showTrackPoints, state.photos)
+				layer.update(state.trip, state.snapshot?.sample, state.showTrackPoints, state.photos,
+					recorded = state.sessionMode != FlightSessionMode.PREPARE)
 			}
 		}
 	}

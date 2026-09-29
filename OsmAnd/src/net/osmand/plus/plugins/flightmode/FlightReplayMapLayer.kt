@@ -46,7 +46,9 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val trip: FlightTrip? = null,
 		val sample: FlightSample? = null,
 		val showPoints: Boolean = false,
-		val photos: List<FlightPhotoAttachment> = emptyList()
+		val photos: List<FlightPhotoAttachment> = emptyList(),
+		val recorded: Boolean = true,
+		val routeSegments: List<FlightRouteSegment> = emptyList(),
 	)
 
 	@Volatile
@@ -63,7 +65,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	private data class RouteStroke(
 		val core: VectorLine,
 		val tube: VectorLine,
-		val tubeEnabled: Boolean
+		val tubeEnabled: Boolean,
+		val color: Int
 	)
 	private val routeStrokes = mutableListOf<RouteStroke>()
 	private var hypothesisCollection: VectorLinesCollection? = null
@@ -127,6 +130,18 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		strokeCap = Paint.Cap.ROUND
 		strokeJoin = Paint.Join.ROUND
 	}
+	private val fallbackGapSleevePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+		color = GAP_SLEEVE_COLOR
+		style = Paint.Style.STROKE
+		strokeCap = Paint.Cap.ROUND
+		strokeJoin = Paint.Join.ROUND
+	}
+	private val fallbackGapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+		color = GPS_GAP_COLOR
+		style = Paint.Style.STROKE
+		strokeCap = Paint.Cap.ROUND
+		strokeJoin = Paint.Join.ROUND
+	}
 	private val fallbackPointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = POINT_COLOR }
 	private val fallbackPhotoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = PHOTO_COLOR }
 	private val fallbackAircraftPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -135,14 +150,20 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		trip: FlightTrip?,
 		sample: FlightSample?,
 		showPoints: Boolean,
-		photos: List<FlightPhotoAttachment>
+		photos: List<FlightPhotoAttachment>,
+		recorded: Boolean = true,
 	) {
 		val previous = state
 		if (previous.trip === trip && previous.sample == sample && previous.showPoints == showPoints &&
-			previous.photos == photos
+			previous.photos == photos && previous.recorded == recorded
 		) return
-		state = LayerState(trip, sample, showPoints, photos)
-		if (previous.trip !== trip) {
+		val routeSegments = if (previous.trip === trip && previous.recorded == recorded) {
+			previous.routeSegments
+		} else {
+			flightRouteSegments(trip?.samples.orEmpty(), recorded = recorded)
+		}
+		state = LayerState(trip, sample, showPoints, photos, recorded, routeSegments)
+		if (previous.trip !== trip || previous.recorded != recorded) {
 			routeGeometryDirty = true
 			pointGeometryDirty = true
 			photoGeometryDirty = true
@@ -201,7 +222,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			aircraftDirty = true
 			mapRendererChanged = false
 		}
-		if (routeGeometryDirty) rebuildRoute(current.trip)
+		if (routeGeometryDirty) rebuildRoute(current.trip, current.routeSegments)
 		if (hypothesisDirty) rebuildHypothesis()
 		if (pointGeometryDirty) rebuildRecordedPoints(current.trip, current.showPoints)
 		if (photoGeometryDirty) rebuildPhotoMarkers(current.trip, current.photos)
@@ -236,7 +257,10 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val density = context.resources.displayMetrics.density.coerceAtLeast(1f)
 		fallbackRouteSleevePaint.strokeWidth = (TUBE_SLEEVE_WIDTH_DP * density).toFloat()
 		fallbackRoutePaint.strokeWidth = (TUBE_CORE_WIDTH_DP * density).toFloat()
-		contiguousLegRanges(samples).forEach { range ->
+		fallbackGapSleevePaint.strokeWidth = (TUBE_SLEEVE_WIDTH_DP * density).toFloat()
+		fallbackGapPaint.strokeWidth = (TUBE_CORE_WIDTH_DP * density).toFloat()
+		current.routeSegments.forEach { segment ->
+			val range = segment.range
 			if (range.last <= range.first) return@forEach
 			val path = Path()
 			sampledIndices(range, MAXIMUM_ROUTE_POINTS).forEachIndexed { pathIndex, sampleIndex ->
@@ -245,8 +269,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				val y = tileBox.getPixYFromLatLon(sample.latitude, sample.longitude)
 				if (pathIndex == 0) path.moveTo(x, y) else path.lineTo(x, y)
 			}
-			canvas.drawPath(path, fallbackRouteSleevePaint)
-			canvas.drawPath(path, fallbackRoutePaint)
+			canvas.drawPath(path, if (segment.isGap) fallbackGapSleevePaint else fallbackRouteSleevePaint)
+			canvas.drawPath(path, if (segment.isGap) fallbackGapPaint else fallbackRoutePaint)
 		}
 
 		if (current.showPoints) {
@@ -286,7 +310,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		canvas.restore()
 	}
 
-	private fun rebuildRoute(trip: FlightTrip?) {
+	private fun rebuildRoute(trip: FlightTrip?, routeSegments: List<FlightRouteSegment>) {
 		nativeTrip = trip
 		nativeHeights = trip?.samples?.let(::resolveVisualHeights) ?: FloatArray(0)
 		val samples = trip?.samples.orEmpty()
@@ -306,16 +330,13 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			routeLinesCollection = it
 		}
 		val lineScale = GeometryWayDrawer.getVectorLineScale(application).toDouble()
-		val ranges = contiguousLegRanges(samples).filter { it.last - it.first >= 1 }
-		val updatePlan = flightNativeTrackUpdatePlan(
-			existingRouteStrokes = routeStrokes.size,
-			requiredRouteStrokes = ranges.size,
-			existingPointMarkers = 0,
-			requiredPointMarkers = 0,
-			pointsVisible = false
-		)
-		var strokeIndex = 0
-		for (range in ranges) {
+		val segments = routeSegments.filter { it.range.last - it.range.first >= 1 }
+		val usedStrokes = mutableSetOf<RouteStroke>()
+		val colorIndexes = mutableMapOf<Int, Int>()
+		val strokesByColor = routeStrokes.groupBy { it.color }
+		for (segment in segments) {
+			val range = segment.range
+			val color = if (segment.isGap) GPS_GAP_COLOR else TUBE_CORE_COLOR
 			val points = QVectorPointI()
 			val heights = QListFloat()
 			for (index in sampledIndices(range, MAXIMUM_ROUTE_POINTS)) {
@@ -323,9 +344,11 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 				heights.add(nativeHeights[index])
 			}
 
-			val stroke = routeStrokes.getOrNull(strokeIndex) ?: createRouteStroke(
-				collection, strokeIndex, lineScale, points, heights
-			).also { routeStrokes.add(it) }
+			val colorIndex = colorIndexes.getOrDefault(color, 0)
+			colorIndexes[color] = colorIndex + 1
+			val stroke = strokesByColor[color]?.getOrNull(colorIndex)
+				?: createRouteStroke(collection, routeStrokes.size, lineScale, color, points, heights)
+					.also { routeStrokes.add(it) }
 			updateNativeStroke(stroke.core, TUBE_CORE_WIDTH_DP * lineScale, points, heights)
 			updateNativeStroke(stroke.tube, TUBE_CORE_WIDTH_DP * lineScale, points, heights)
 			// The native tube is a closed cylinder. The elevated flat line remains only for cores
@@ -333,11 +356,11 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			// grazing camera angle.
 			stroke.core.setIsHidden(stroke.tubeEnabled)
 			stroke.tube.setIsHidden(!stroke.tubeEnabled)
-			strokeIndex++
+			usedStrokes += stroke
 		}
-		for (index in routeStrokes.size - updatePlan.routeStrokesToHide until routeStrokes.size) {
-			routeStrokes[index].core.setIsHidden(true)
-			routeStrokes[index].tube.setIsHidden(true)
+		routeStrokes.filterNot { it in usedStrokes }.forEach { stroke ->
+			stroke.core.setIsHidden(true)
+			stroke.tube.setIsHidden(true)
 		}
 		routeGeometryDirty = false
 	}
@@ -376,14 +399,15 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		collection: VectorLinesCollection,
 		strokeIndex: Int,
 		lineScale: Double,
+		color: Int,
 		points: QVectorPointI,
 		heights: QListFloat
 	): RouteStroke {
 		val core = buildNativeStroke(collection, strokeIndex * 2 + 1, pointsOrder + 2,
-			TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
+			TUBE_CORE_WIDTH_DP * lineScale, color, points, heights)
 		val tube = buildNativeStroke(collection, strokeIndex * 2 + 2, pointsOrder + 1,
-			TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
-		return RouteStroke(core, tube, enableFlightTube(tube))
+			TUBE_CORE_WIDTH_DP * lineScale, color, points, heights)
+		return RouteStroke(core, tube, enableFlightTube(tube), color)
 	}
 
 	private fun enableFlightTube(line: VectorLine): Boolean {
@@ -850,6 +874,8 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		private const val PHOTO_MARKER_ID_START = 1_900_000_000
 		private val TUBE_SLEEVE_COLOR = Color.argb(230, 6, 15, 20)
 		private val TUBE_CORE_COLOR = Color.BLACK
+		private val GPS_GAP_COLOR = Color.rgb(255, 72, 72)
+		private val GAP_SLEEVE_COLOR = Color.argb(230, 64, 0, 0)
 		private val POINT_COLOR = Color.rgb(255, 145, 58)
 		private val PHOTO_COLOR = Color.rgb(123, 224, 163)
 		private val TETHER_COLOR = Color.rgb(255, 58, 58)

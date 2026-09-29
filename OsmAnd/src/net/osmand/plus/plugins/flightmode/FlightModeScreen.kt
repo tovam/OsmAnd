@@ -820,6 +820,8 @@ private fun MapScreen(
 			}
 			FlightProfileView(
 				profile = altitudeProfile.profile,
+				gpsGaps = altitudeProfile.gaps,
+				gapTrip = altitudeProfile.gapTrip,
 				progress = altitudeProfile.progress(sample?.timestampMillis, state.replayProgress),
 				futureStartProgress = flightProfileFutureStart(altitudeProfile.trip, state.liveState.latest?.timestampMillis),
 				flightSpans = state.flightSpans,
@@ -1028,6 +1030,8 @@ private fun WindowScreen(
 				if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty()) {
 					FlightProfileView(
 						profile = altitudeProfile.profile,
+						gpsGaps = altitudeProfile.gaps,
+						gapTrip = altitudeProfile.gapTrip,
 						progress = altitudeProfile.progress(state.snapshot?.sample?.timestampMillis, state.replayProgress),
 						futureStartProgress = flightProfileFutureStart(altitudeProfile.trip, state.liveState.latest?.timestampMillis),
 						flightSpans = state.flightSpans,
@@ -2668,6 +2672,8 @@ private fun AltitudeProfileSelector(includeFuture: Boolean, onChange: (Boolean) 
 @Composable
 private fun FlightProfileView(
 	profile: FlightProfile,
+	gpsGaps: List<FlightGpsGap> = emptyList(),
+	gapTrip: FlightTrip? = null,
 	progress: Float?,
 	futureStartProgress: Float? = null,
 	flightSpans: List<FlightSpan> = emptyList(),
@@ -2729,7 +2735,16 @@ private fun FlightProfileView(
 				drawLine(FlightWarning.copy(alpha = 0.65f), Offset(stopX, top), Offset(stopX, bottom), 1.dp.toPx())
 				drawCircle(FlightWarning, radius = 3.dp.toPx(), center = Offset(stopX, bottom))
 			}
-			}
+		}
+		gpsGaps.forEach { gap ->
+			val fromProgress = gapTrip?.progressFor(gap.from) ?: return@forEach
+			val toProgress = gapTrip.progressFor(gap.to)
+			val fromX = left + (right - left) * fromProgress
+			val toX = left + (right - left) * toProgress
+			val fromY = bottom - chartHeight * ((gap.from.altitudeMeters?.toFloat() ?: 0f) / maxAltitude)
+			val toY = bottom - chartHeight * ((gap.to.altitudeMeters?.toFloat() ?: 0f) / maxAltitude)
+			drawLine(Color(0xFFFF5A52), Offset(fromX, fromY), Offset(toX, toY), 3.dp.toPx(), cap = StrokeCap.Round)
+		}
 		photoProgress.forEach { position ->
 			val x = left + (right - left) * position.coerceIn(0f, 1f)
 			drawLine(FlightGreen.copy(alpha = 0.8f), Offset(x, top), Offset(x, bottom), 1.dp.toPx())
