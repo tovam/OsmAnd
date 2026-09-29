@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="local_crash_report">Rapport de crash local</string>
+    <string name="local_report_private">Aucun envoi. Vous pouvez copier ou enregistrer le rapport.</string>
+    <string name="local_report_save">Enregistrer .txt</string>
+    <string name="local_report_saving">Enregistrement…</string>
+    <string name="local_report_saved">Fichier texte enregistré</string>
+    <string name="local_report_load_failed">Lecture impossible. Réessayez.</string>
+    <string name="local_report_save_failed">Fichier non enregistré. Essayez un autre dossier.</string>
+    <string name="local_report_copy_failed">Copie impossible. Enregistrez le fichier texte.</string>
+    <string name="local_report_previous_crash">Le dernier lancement a planté. Son rapport reste sur ce téléphone.</string>
+    <string name="local_report_render_failed">Le moteur graphique a échoué. Un rapport local est disponible.</string>
+    <string name="local_report_logcat">Voir le journal</string>
     <string name="flight_tiles_zoom">Niveau %1$d</string>
     <string name="flight_tiles_help">Aide</string>
     <string name="flight_tiles_help_title">Carte des tuiles</string>

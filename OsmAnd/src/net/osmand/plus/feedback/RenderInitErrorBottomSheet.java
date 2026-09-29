@@ -23,12 +23,12 @@ public class RenderInitErrorBottomSheet extends MenuBottomSheetDialogFragment {
 	@Override
 	public void createMenuItems(Bundle savedInstanceState) {
 		items.add(new TitleItem(getString(R.string.rendering_engine_failed)));
-		items.add(new LongDescriptionItem(getString(R.string.rendering_engine_failed_descr)));
+		items.add(new LongDescriptionItem(getString(R.string.local_report_render_failed)));
 	}
 
 	@Override
 	protected int getRightBottomButtonTextId() {
-		return R.string.share_crash_log;
+		return R.string.local_crash_report;
 	}
 
 	@Override
@@ -67,4 +67,3 @@ public class RenderInitErrorBottomSheet extends MenuBottomSheetDialogFragment {
 		}
 	}
 }
-

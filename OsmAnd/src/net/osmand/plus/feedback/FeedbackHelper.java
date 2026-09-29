@@ -15,16 +15,12 @@ import net.osmand.plus.R;
 import net.osmand.plus.Version;
 import net.osmand.plus.utils.AndroidUtils;
 import net.osmand.util.Algorithms;
+import net.osmand.util.CrashReportText;
 
 import org.apache.commons.logging.Log;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 public class FeedbackHelper {
 
@@ -54,10 +50,15 @@ public class FeedbackHelper {
 
 	@NonNull
 	public String getCopyableCrashReport() {
-		StringBuilder report = new StringBuilder(getDeviceInfo());
-		report.append("\n\n").append(EXCEPTION_PATH).append(":\n");
+		return getCopyableCrashReport(getCrashLog());
+	}
 
-		File crashLog = getCrashLog();
+	@NonNull
+	public String getCopyableCrashReport(@Nullable File crashLog) {
+		StringBuilder report = new StringBuilder(getDeviceInfo());
+		report.append("\nBuild version : ").append(Version.getFullVersionWithReleaseDate(app));
+		LocalCrashDiagnostics.appendTo(report, app);
+		report.append("\n\n").append(crashLog != null ? crashLog.getName() : EXCEPTION_PATH).append(":\n");
 		String crashText = crashLog != null ? readCrashLogTail(crashLog) : null;
 		if (Algorithms.isEmpty(crashText)) {
 			report.append(app.getString(R.string.data_is_not_available));
@@ -69,71 +70,21 @@ public class FeedbackHelper {
 
 	@Nullable
 	private String readCrashLogTail(@NonNull File file) {
-		try (RandomAccessFile input = new RandomAccessFile(file, "r")) {
-			long length = input.length();
-			long offset = Math.max(0, length - MAX_VISIBLE_CRASH_LOG_BYTES);
-			byte[] data = new byte[(int) (length - offset)];
-			input.seek(offset);
-			input.readFully(data);
-
-			String text = new String(data, StandardCharsets.UTF_8);
-			if (offset > 0) {
-				int firstCompleteLine = text.indexOf('\n');
-				if (firstCompleteLine >= 0 && firstCompleteLine + 1 < text.length()) {
-					text = text.substring(firstCompleteLine + 1);
-				}
-				text = "[… earlier crash entries omitted …]\n" + text;
-			}
-			return text;
+		try {
+			return CrashReportText.readUtf8Tail(file, MAX_VISIBLE_CRASH_LOG_BYTES);
 		} catch (IOException | RuntimeException e) {
 			log.error(e);
 			return null;
 		}
 	}
 
-	@NonNull
-	private List<File> collectCrashLogFiles() {
-		List<File> files = nativeCrashHandler.collectCrashLogs();
-		File crashLog = getCrashLog();
-		if (crashLog != null) {
-			files.add(0, crashLog);
-		}
-		return files;
-	}
-
+	// Keep upstream call sites compatible, but never send crash reports from this fork.
 	public void sendCrashLog() {
-		sendCrashLog(collectCrashLogFiles());
+		LocalCrashReportActivity.show(app, null);
 	}
 
 	public void sendCrashLog(@NonNull File file) {
-		sendCrashLog(Collections.singletonList(file));
-	}
-
-	private void sendCrashLog(@NonNull List<File> files) {
-		if (files.isEmpty()) {
-			app.showToastMessage(R.string.data_is_not_available);
-			return;
-		}
-		String deviceInfo = getDeviceInfo();
-		Intent intent = new Intent(files.size() > 1 ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND);
-		intent.putExtra(Intent.EXTRA_EMAIL, new String[] {"crash@osmand.net"});
-
-		if (files.size() == 1) {
-			intent.putExtra(Intent.EXTRA_STREAM, AndroidUtils.getUriForFile(app, files.get(0)));
-		} else {
-			ArrayList<Uri> uris = new ArrayList<>(files.size());
-			for (File file : files) {
-				uris.add(AndroidUtils.getUriForFile(app, file));
-			}
-			intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
-		}
-		intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-		intent.setType("vnd.android.cursor.dir/email");
-		intent.putExtra(Intent.EXTRA_SUBJECT, "OsmAnd bug");
-		intent.putExtra(Intent.EXTRA_TEXT, deviceInfo);
-		Intent chooserIntent = Intent.createChooser(intent, app.getString(R.string.send_report));
-		chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-		AndroidUtils.startActivityIfSafe(app, intent, chooserIntent);
+		LocalCrashReportActivity.show(app, file);
 	}
 
 	public void sendSupportEmail(@NonNull String screenName) {

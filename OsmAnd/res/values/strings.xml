@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="local_crash_report">Local crash report</string>
+	<string name="local_report_private">Nothing is sent. Copy or save the report yourself.</string>
+	<string name="local_report_save">Save .txt</string>
+	<string name="local_report_saving">Saving…</string>
+	<string name="local_report_saved">Text file saved</string>
+	<string name="local_report_load_failed">Cannot read the report. Retry.</string>
+	<string name="local_report_save_failed">File not saved. Try another location.</string>
+	<string name="local_report_copy_failed">Copy failed. Save the text file instead.</string>
+	<string name="local_report_previous_crash">The previous run crashed. Its report stays on this phone.</string>
+	<string name="local_report_render_failed">The graphics engine failed. A local report is available.</string>
+	<string name="local_report_logcat">View app log</string>
 	<string name="flight_tiles_zoom">Level %1$d</string>
 	<string name="flight_tiles_help">Help</string>
 	<string name="flight_tiles_help_title">Tile map</string>

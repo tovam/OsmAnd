@@ -155,15 +155,13 @@ public class HelpMainFragment extends BaseFullScreenFragment implements OnItemCl
 
 		HelpActivity activity = (HelpActivity) requireActivity();
 
-		if (app.getFeedbackHelper().hasCrashLogs()) {
-			items.add(new PopUpMenuItem.Builder(activity)
-					.setTitleId(R.string.send_crash_log)
-					.setIcon(getContentIcon(R.drawable.ic_action_bug_outlined_send))
-					.setOnClickListener(v -> app.getFeedbackHelper().sendCrashLog()).create());
-		}
 		items.add(new PopUpMenuItem.Builder(activity)
-				.setTitleId(R.string.send_logcat_log)
-				.setIcon(getContentIcon(R.drawable.ic_action_file_report_outlined_send))
+				.setTitleId(R.string.local_crash_report)
+				.setIcon(getContentIcon(R.drawable.ic_crashlog))
+				.setOnClickListener(v -> app.getFeedbackHelper().sendCrashLog()).create());
+		items.add(new PopUpMenuItem.Builder(activity)
+				.setTitleId(R.string.local_report_logcat)
+				.setIcon(getContentIcon(R.drawable.ic_crashlog))
 				.setOnClickListener(v -> activity.readAndSaveLogs()).create());
 
 		items.add(new PopUpMenuItem.Builder(activity)
@@ -307,18 +305,13 @@ public class HelpMainFragment extends BaseFullScreenFragment implements OnItemCl
 	private void createReportIssuesCategory(@NonNull List<ContextMenuItem> items) {
 		items.add(createCategory(app.getString(R.string.report_an_issues)));
 
-		items.add(createMenuItem(app.getString(R.string.open_issue_on_github), app.getString(R.string.open_issue_on_github_descr),
-				R.drawable.ic_action_social_github, getUrlItemClickListener(app.getString(R.string.issues_github))));
-
-		if (app.getFeedbackHelper().hasCrashLogs()) {
-			items.add(createMenuItem(app.getString(R.string.send_crash_log), app.getString(R.string.send_crash_log_descr),
-					R.drawable.ic_action_bug_outlined_send, (uiAdapter, view, item, isChecked) -> {
-						app.getFeedbackHelper().sendCrashLog();
-						return false;
-					}));
-		}
-		items.add(createMenuItem(app.getString(R.string.send_logcat_log), app.getString(R.string.send_logcat_log_descr),
-				R.drawable.ic_action_file_report_outlined_send, (uiAdapter, view, item, isChecked) -> {
+		items.add(createMenuItem(app.getString(R.string.local_crash_report), app.getString(R.string.local_report_private),
+				R.drawable.ic_crashlog, (uiAdapter, view, item, isChecked) -> {
+					app.getFeedbackHelper().sendCrashLog();
+					return false;
+				}));
+		items.add(createMenuItem(app.getString(R.string.local_report_logcat), null,
+				R.drawable.ic_crashlog, (uiAdapter, view, item, isChecked) -> {
 					callActivity(HelpActivity.class, activity -> activity.readAndSaveLogs());
 					return false;
 				}));
