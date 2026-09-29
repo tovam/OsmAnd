@@ -149,7 +149,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				val trip=withContext(Dispatchers.Default) { FlightOfflinePreparation.simulation(plan) }
 				if (!journalOperations.isCurrent(operation) || FlightOfflinePreparation.simulationInput(uiState.plan) != FlightOfflinePreparation.simulationInput(plan) ||
 					uiState.sessionMode != FlightSessionMode.PREPARE) return@launch
-				replayEngine = FlightReplayEngine(trip)
+				replayEngine = FlightReplayEngine(trip, recordedSampleCount = 0)
 				val progress=uiState.replayProgress
 				uiState=uiState.copy(page=page, sessionMode=FlightSessionMode.PREPARE,
 					trip=trip, profile=FlightProfilePlanner.fromTrip(trip), snapshot=replayEngine?.snapshotAt(progress),
@@ -358,7 +358,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		liveTimelineJob = viewModelScope.launch {
 			val timeline = withContext(Dispatchers.Default) { FlightLiveTimeline.build(plan, live.trip, fix) }
 			if (uiState.journeyId != live.journeyId || uiState.sessionMode != FlightSessionMode.LIVE || uiState.plan != plan) return@launch
-			replayEngine = FlightReplayEngine(timeline)
+			replayEngine = FlightReplayEngine(timeline,
+				recordedSampleCount = timeline.samples.indexOfLast { it.timestampMillis <= fix.timestampMillis } + 1)
 			val time = liveCursorMillis.takeIf { uiState.browsingLiveTimeline } ?: fix.timestampMillis
 			val progress = FlightLiveTimeline.progress(timeline, time)
 			uiState = uiState.copy(liveTimeline=timeline, profile=FlightProfilePlanner.fromTrip(timeline),
@@ -402,7 +403,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			val trip=withContext(Dispatchers.Default) { FlightOfflinePreparation.simulation(plan) }
 			if (!journalOperations.isCurrent(operation) || FlightOfflinePreparation.simulationInput(uiState.plan) != FlightOfflinePreparation.simulationInput(plan) ||
 				uiState.sessionMode != FlightSessionMode.PREPARE) return@launch
-			replayEngine=FlightReplayEngine(trip)
+			replayEngine=FlightReplayEngine(trip, recordedSampleCount = 0)
 			uiState=uiState.copy(trip=trip,profile=FlightProfilePlanner.fromTrip(trip),previewingPlan=true,simulationLoading=false,simulationError=null,
 				snapshot=replayEngine?.snapshotAt(uiState.replayProgress))
 			uiState.snapshot?.sample?.let(::requestTerrain)

@@ -6,7 +6,7 @@ package net.osmand.plus.plugins.flightmode
 internal class FlightLiveSimulation(plan: FlightPlan, source: FlightTrip?, startMillis: Long) {
     private val route =
         source?.takeIf { it.samples.size >= 2 } ?: FlightOfflinePreparation.simulation(plan)
-    private val replay = FlightReplayEngine(route)
+    private val replay = FlightReplayEngine(route, recordedSampleCount = if (route === source) route.samples.size else 0)
     private val lead = (plan.preparation ?: FlightPreparation()).startMinutesBefore * 60_000L
     private val flightDuration =
         if (route.hasUsableTimestamps)

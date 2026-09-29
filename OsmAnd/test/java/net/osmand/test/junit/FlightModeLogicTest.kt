@@ -224,7 +224,7 @@ class FlightModeLogicTest {
 	}
 
 	@Test
-	fun replayDoesNotInventAcrossLongGap() {
+	fun replayBridgesLongGapWithoutPresentingItAsRecordedData() {
 		val samples = listOf(
 			sample(0, 0L, 48.0, 2.0),
 			sample(1, 10_000L, 48.1, 2.1),
@@ -241,7 +241,11 @@ class FlightModeLogicTest {
 		val snapshot = FlightReplayEngine(trip).snapshotAt(0.5f)
 
 		assertTrue(snapshot.dataGap)
-		assertFalse(snapshot.interpolated)
+		assertTrue(snapshot.interpolated)
+		assertEquals(305_000L, snapshot.sample.timestampMillis)
+		assertEquals(48.5425, snapshot.sample.latitude, 0.0001)
+		assertEquals(2.5425, snapshot.sample.longitude, 0.0001)
+		assertTrue(snapshot.sample.horizontalAccuracyMeters == null)
 	}
 
 	@Test

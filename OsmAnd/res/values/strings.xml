@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_replay_estimated_position">Estimated position · GPS gap</string>
 	<string name="local_crash_report">Local crash report</string>
 	<string name="local_report_private">Nothing is sent. Copy or save the report yourself.</string>
 	<string name="local_report_save">Save .txt</string>

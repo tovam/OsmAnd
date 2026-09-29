@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_replay_estimated_position">Position estimée · trou GPS</string>
     <string name="local_crash_report">Rapport de crash local</string>
     <string name="local_report_private">Aucun envoi. Vous pouvez copier ou enregistrer le rapport.</string>
     <string name="local_report_save">Enregistrer .txt</string>

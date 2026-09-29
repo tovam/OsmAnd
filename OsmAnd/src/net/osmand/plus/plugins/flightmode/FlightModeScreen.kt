@@ -811,7 +811,7 @@ private fun MapScreen(
 			}
 			if (state.snapshot?.dataGap == true) {
 				Text(
-					stringResource(R.string.flight_mode_gap),
+					stringResource(R.string.flight_replay_estimated_position),
 					color = FlightWarning,
 					fontSize = 12.sp,
 					modifier = Modifier.fillMaxWidth().background(Color(0xE31A1510)).padding(9.dp),
