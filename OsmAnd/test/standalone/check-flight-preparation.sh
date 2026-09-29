@@ -25,6 +25,7 @@ javac -d "$test_output" \
 java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   -no-stdlib -no-reflect -jvm-target 1.8 -classpath "$classpath" -d "$test_output" \
   "$sources/FlightModels.kt" "$sources/FlightPreparation.kt" "$sources/FlightRecordingData.kt" "$sources/FlightCameraOptics.kt" \
+  "$sources/FlightDatePresentation.kt" \
   "$sources/FlightPhotoCalibration.kt" "$sources/FlightTerrainCoordinates.kt" \
   "$sources/FlightPhotoFitDiagnostics.kt" \
   "$sources/FlightPhotoDepth.kt" "$sources/FlightPhotoTreatmentJson.kt" \
@@ -88,6 +89,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightAltitudeProfileTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightGpsGapsTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightReplayGapTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightDatePresentationTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightGapTrajectoryTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightProfileSegmentsTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightLiveDisplayStateTest.kt" \
@@ -119,6 +121,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore
   net.osmand.test.junit.FlightOverviewTilesTest \
   net.osmand.test.junit.FlightGpsGapsTest \
   net.osmand.test.junit.FlightReplayGapTest \
+  net.osmand.test.junit.FlightDatePresentationTest \
   net.osmand.test.junit.FlightGapTrajectoryTest \
   net.osmand.test.junit.FlightConcurrentTransfersTest \
   net.osmand.test.junit.FlightRecordingMetadataPersistenceTest \

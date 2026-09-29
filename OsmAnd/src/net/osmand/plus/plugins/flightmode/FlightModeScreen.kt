@@ -357,7 +357,10 @@ fun FlightModeScreen(
 					verticalAlignment=Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
 					CompactAction(stringResource(R.string.flight_back_library), FlightMuted,
 						{ onPageChange(FlightWorkspaceNavigation.libraryPage(state.sessionMode)) })
-					Text(state.journeyName,Modifier.weight(1f),color=FlightText,fontSize=11.sp,maxLines=1, overflow=TextOverflow.Ellipsis)
+					Column(Modifier.weight(1f).padding(vertical = 2.dp)) {
+						Text(state.journeyName,color=FlightText,fontSize=11.sp,lineHeight=13.sp,maxLines=1, overflow=TextOverflow.Ellipsis)
+						FlightDateCaption(state)
+					}
 					if(state.page != FlightPage.DETAIL) CompactAction(stringResource(R.string.flight_detail_title), FlightMuted,
 						{ onPageChange(FlightPage.DETAIL) })
 				}

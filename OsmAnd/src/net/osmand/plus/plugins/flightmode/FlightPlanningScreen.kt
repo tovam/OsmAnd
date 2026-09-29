@@ -115,13 +115,15 @@ internal fun FlightPlanningScreen(
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth()) {
             PlanAction(stringResource(R.string.flight_workspace_future), onJournals)
-            Text(
-                state.journeyName.ifBlank { stringResource(R.string.flight_plan_title) },
-                color = Color.White,
-                fontSize = 14.sp,
-                modifier = Modifier.weight(1f).padding(8.dp),
-                maxLines = 2,
-            )
+            Column(Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                Text(
+                    state.journeyName.ifBlank { stringResource(R.string.flight_plan_title) },
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    maxLines = 2,
+                )
+                FlightDateCaption(state)
+            }
             PlanAction(stringResource(R.string.flight_detail_title), onDetails)
         }
         Row(Modifier.fillMaxWidth()) {

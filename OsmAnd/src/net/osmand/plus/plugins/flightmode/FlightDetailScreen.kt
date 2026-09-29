@@ -56,6 +56,7 @@ internal fun FlightDetailScreen(
                     singleLine = true,
                 )
             else Text(state.journeyName, color = Color.White, fontSize = 18.sp)
+            FlightDateCaption(state, compact = false)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 FlightLibraryGpsLabel(state.journeyId, state)
                 Spacer(Modifier.weight(1f))

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_dates_unknown">Dates unavailable</string>
+	<string name="flight_dates_planned">Planned</string>
+	<string name="flight_dates_simulated">Simulation</string>
+	<string name="flight_dates_ongoing">In progress</string>
+	<string name="flight_dates_start">Start · %1$s</string>
+	<string name="flight_dates_end">End · %1$s</string>
 	<string name="flight_tiles_finer_only">Fine tiles only in some areas · zoom in</string>
 	<string name="flight_files_verify">Verify / repair</string>
 	<string name="flight_files_verified_count">Pixels verified: %1$d / %2$d files</string>
