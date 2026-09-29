@@ -249,9 +249,16 @@ jobs:
         working-directory: android
         run: chmod +x gradlew
 
-      - name: Patch memory requirements
+      - name: Configure CI JVM memory budget
         working-directory: android
-        run: printf '\norg.gradle.jvmargs=-Xmx2048m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\n' >> gradle.properties
+        # AGP asset compression workers share the Gradle heap. Keep Kotlin's
+        # separate daemon at 2 GiB instead of inheriting the larger Gradle heap.
+        # Do not enable a multi-GB Gradle heap dump on the runner's limited disk.
+        run: |
+          set -euo pipefail
+          printf '\n%s\n' \
+            'org.gradle.jvmargs=-Xmx6144m -Dfile.encoding=UTF-8' \
+            'kotlin.daemon.jvmargs=-Xmx2048m' >> gradle.properties
 
       - name: Show available disk space
         run: df -h
@@ -263,7 +270,11 @@ jobs:
           export APK_NUMBER_VERSION=$((6000000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
           export APK_VERSION_SUFFIX="#smart${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           echo "Building update-compatible versionCode ${APK_NUMBER_VERSION}"
-          ./gradlew --build-cache -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug 2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
+          # Bound simultaneous compression allocations and release the Gradle
+          # JVM before the standalone test suite starts. Build caches stay enabled.
+          ./gradlew --no-daemon --max-workers=2 --no-parallel --build-cache \
+            -PusePatchedOsmAndCoreNative=true assembleAndroidFullOpenglArm64Debug \
+            2>&1 | tee "${RUNNER_TEMP}/gradle-build.log"
 
       - name: Test flight logic, cloud archives and server
         working-directory: android
