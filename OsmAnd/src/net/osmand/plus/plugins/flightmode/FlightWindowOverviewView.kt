@@ -14,15 +14,25 @@ import android.view.MotionEvent
 import android.view.View
 import java.io.File
 import java.util.concurrent.Executors
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import net.osmand.plus.OsmandApplication
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * Lightweight, north-up overview for the window view. It uses only satellite
- * tiles already cached by the flight feature: opening it never starts a network
- * request. The square stays centered on the aircraft. Its initial physical side
+ * Lightweight, north-up overview for the window view. A persistent z4 backdrop
+ * is loaded before detailed cached imagery. Missing coarse tiles may be fetched
+ * while visible and online; offline rehearsal always uses only local files.
+ * The square stays centered on the aircraft. Its initial physical side
  * equals the complete loaded track distance; vertical drags change only this overview's scale.
  */
 class FlightWindowOverviewView @JvmOverloads constructor(
@@ -45,17 +55,25 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	private val refreshTask = Runnable { refreshQueued = false; if (!scanRunning) launchTileScan() }
 	private var workVisible = false
 	private var workGeneration = 0L
+	private val coarseScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+	private var coarseLoad: Job? = null
+	private var coarseTiles: List<TerrainTileId> = emptyList()
+	private var coarseRequest: List<TerrainTileId>? = null
 	private val workLifecycle = FlightViewVisibility(this) { visible ->
 		workVisible = visible
 		workGeneration++
+		FlightPhotoTileCache.setVisible(this, visible)
 		if (visible) {
 			if (worker.isShutdown) worker = Executors.newSingleThreadExecutor()
 			if (scanner.isShutdown) scanner = Executors.newSingleThreadExecutor()
 			reloadTiles()
+			updateCoarseBackground()
 			invalidate()
 		} else {
 			worker.shutdownNow()
 			scanner.shutdownNow()
+			coarseScope.coroutineContext.cancelChildren()
+			coarseRequest = null
 			removeCallbacks(refreshTask)
 			refreshQueued = false
 			queued.clear()
@@ -144,6 +162,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 						val base = baseSideMeters()
 						overviewZoom = (overviewZoom * exp(-2.0 * deltaY / height.coerceAtLeast(1)))
 							.coerceIn(base / MAXIMUM_VISIBLE_SIDE_METERS, base / MINIMUM_VISIBLE_SIDE_METERS)
+						updateCoarseBackground()
 						invalidate()
 					}
 				}
@@ -186,13 +205,46 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		this.viewConeDegrees = viewConeDegrees.coerceIn(0.25f, 170f)
 		this.quality = quality
 		this.baseZoom = baseZoom
+		updateCoarseBackground()
 		// Gaze feedback must not wait for a disk scan or a bitmap decode.
 		postInvalidateOnAnimation()
 		if (this.cacheKey != cacheKey) {
 			this.cacheKey = cacheKey
+			// Newly downloaded files may satisfy a previous offline miss.
+			if (coarseLoad?.isActive != true) { coarseRequest = null; updateCoarseBackground() }
 			reloadTiles()
 		} else {
 			invalidate()
+		}
+	}
+
+	private fun updateCoarseBackground() {
+		val current = sample ?: return
+		val needed = flightOverviewTiles(current.latitude, current.longitude,
+			(baseSideMeters() / overviewZoom).coerceIn(MINIMUM_VISIBLE_SIDE_METERS, MAXIMUM_VISIBLE_SIDE_METERS))
+		coarseTiles = needed
+		if (!workVisible || detached || needed == coarseRequest) return
+		coarseRequest = needed
+		coarseLoad?.cancel()
+		coarseLoad = coarseScope.launch {
+			val app = context.applicationContext as OsmandApplication
+			// A single bounded coarse queue cannot be starved by the detailed-cache scan.
+			for (tile in needed) {
+				try {
+					if (coarseBitmaps.get(tile) == null) {
+						val loaded = FlightPhotoTileCache.load(app, true, tile)
+						val small = withContext(Dispatchers.Default) {
+							Bitmap.createScaledBitmap(loaded, MAXIMUM_TILE_DECODE_PIXELS, MAXIMUM_TILE_DECODE_PIXELS, true)
+						}
+						coarseBitmaps.put(tile, small)
+					}
+					postInvalidateOnAnimation()
+				} catch (cancelled: CancellationException) {
+					throw cancelled
+				} catch (_: java.io.IOException) {
+					// Unavailable offline data remains absent, never silently replaced with fake tiles.
+				}
+			}
 		}
 	}
 
@@ -279,11 +331,14 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 
 	override fun onDraw(canvas: Canvas) {
 		super.onDraw(canvas)
+		val saved = canvas.save()
+		canvas.clipRect(0, 0, width, height)
 		canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
 		val current = sample
 		val currentTrip = trip
 		if (current == null || width <= 0 || height <= 0) {
 			canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
+			canvas.restoreToCount(saved)
 			return
 		}
 		val sideMeters = (baseSideMeters() / overviewZoom)
@@ -291,22 +346,27 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		val pixelsPerMeter = minOf(width, height).toDouble() / sideMeters
 		val centerX = width / 2f
 		val centerY = height / 2f
+		fun destination(zoom: Int, x: Int, y: Int): RectF {
+			val west = FlightTerrainTilePlanner.tileXToLongitude(x.toDouble(), zoom)
+			val east = FlightTerrainTilePlanner.tileXToLongitude(x + 1.0, zoom)
+			val middle = eastMeters(current.longitude, (west + east) / 2, current.latitude)
+			val span = Math.toRadians(east - west) * EARTH_RADIUS_METERS * cos(Math.toRadians(current.latitude))
+			val north = FlightTerrainTilePlanner.tileYToLatitude(y.toDouble(), zoom)
+			val south = FlightTerrainTilePlanner.tileYToLatitude(y + 1.0, zoom)
+			return RectF((centerX + (middle - span / 2) * pixelsPerMeter).toFloat() - TILE_OVERLAP_PIXELS,
+				(centerY - northMeters(current.latitude, north) * pixelsPerMeter).toFloat() - TILE_OVERLAP_PIXELS,
+				(centerX + (middle + span / 2) * pixelsPerMeter).toFloat() + TILE_OVERLAP_PIXELS,
+				(centerY - northMeters(current.latitude, south) * pixelsPerMeter).toFloat() + TILE_OVERLAP_PIXELS)
+		}
+		// Always draw coarse first, not only during loading. Uncovered detail keeps a backdrop.
+		coarseTiles.forEach { tile ->
+			coarseBitmaps.get(tile)?.let { bitmap ->
+				canvas.drawBitmap(bitmap, null, destination(tile.zoom, tile.x, tile.y), satellitePaint)
+			}
+		}
 
 		tiles.forEach { tile ->
-			val west = FlightTerrainTilePlanner.tileXToLongitude(tile.x.toDouble(), tile.zoom)
-			val east = FlightTerrainTilePlanner.tileXToLongitude(tile.x + 1.0, tile.zoom)
-			val north = FlightTerrainTilePlanner.tileYToLatitude(tile.y.toDouble(), tile.zoom)
-			val south = FlightTerrainTilePlanner.tileYToLatitude(tile.y + 1.0, tile.zoom)
-			val left = centerX + eastMeters(current.longitude, west, current.latitude) * pixelsPerMeter
-			val right = centerX + eastMeters(current.longitude, east, current.latitude) * pixelsPerMeter
-			val top = centerY - northMeters(current.latitude, north) * pixelsPerMeter
-			val bottom = centerY - northMeters(current.latitude, south) * pixelsPerMeter
-			val destination = RectF(
-				left.toFloat() - TILE_OVERLAP_PIXELS,
-				top.toFloat() - TILE_OVERLAP_PIXELS,
-				right.toFloat() + TILE_OVERLAP_PIXELS,
-				bottom.toFloat() + TILE_OVERLAP_PIXELS
-			)
+			val destination = destination(tile.zoom, tile.x, tile.y)
 			if (!RectF.intersects(destination, RectF(0f, 0f, width.toFloat(), height.toFloat()))) return@forEach
 			val bitmap = bitmaps.get(tile.file.absolutePath)
 				?: tile.fallbackFile?.let { bitmaps.get(it.absolutePath) }
@@ -338,6 +398,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		drawAircraft(canvas, centerX, centerY, current.bearingDegrees ?: 0f)
 		canvas.drawText(formatDistance(sideMeters), density(4f), height - density(5f), labelPaint)
 		canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
+		canvas.restoreToCount(saved)
 	}
 
 	private fun drawGaze(canvas: Canvas, centerX: Float, centerY: Float, length: Float) {
@@ -444,6 +505,11 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 	}
 
 	companion object {
+		// All 256 z4 tiles fit in this small process cache, independent of detailed imagery.
+		// Do not recycle on eviction: the UI may still be submitting a Canvas frame.
+		private val coarseBitmaps = object : LruCache<TerrainTileId, Bitmap>(4 * 1024 * 1024) {
+			override fun sizeOf(key: TerrainTileId, value: Bitmap): Int = value.allocationByteCount
+		}
 		private const val NO_POINTER = -1
 		private const val EARTH_RADIUS_METERS = 6_371_008.8
 		private const val MINIMUM_SIDE_METERS = 10_000.0

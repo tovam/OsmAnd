@@ -75,10 +75,17 @@ object FlightOfflinePreparation {
                 ?.let { FlightTerrainTilePlanner.trackCorridorPlan(it, plan.terrainCorridorKm) }
                 ?: FlightTerrainTilePlanner.corridorPlan(plan.stops, plan.terrainCorridorKm)
         requireNotNull(tiles) { "No route available for offline coverage" }
+        val requests = tiles.tiles.flatMap {
+            listOf(FlightOfflineRequest(it, false, 0), FlightOfflineRequest(it, true, 0))
+        }.toMutableList()
+        // Legacy/imported-track corridors also need the persistent minimap backdrop.
+        // Count it in the quote, readiness checks and shared on-disk download store.
+        requests += tiles.tiles.map { tile ->
+            val shift = (tile.zoom - 4).coerceAtLeast(0)
+            FlightOfflineRequest(TerrainTileId(minOf(tile.zoom, 4), tile.x shr shift, tile.y shr shift), true, -1)
+        }
         return FlightOfflineQuote(
-            tiles.tiles.flatMap {
-                listOf(FlightOfflineRequest(it, false, 0), FlightOfflineRequest(it, true, 0))
-            },
+            requests.distinctBy { it.satellite to it.tile }.sortedBy { it.tile.zoom },
             plan.stops.mapNotNull { stop ->
                 stop.latitude?.let { lat -> stop.longitude?.let { lat to it } }
             },
