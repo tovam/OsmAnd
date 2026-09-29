@@ -287,60 +287,12 @@ internal fun FlightOfflineSizeSummary(state: FlightUiState, compact: Boolean = f
         fontSize = 14.sp,
         fontWeight = FontWeight.Bold,
     )
-    Row(Modifier.fillMaxWidth()) {
-        Spacer(Modifier.weight(0.8f))
-        Text(
-            stringResource(R.string.flight_offline_size_present),
-            color = Color.LightGray,
-            fontSize = 11.sp,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            stringResource(R.string.flight_offline_size_remaining),
-            color = Color.LightGray,
-            fontSize = 11.sp,
-            modifier = Modifier.weight(1.2f),
-        )
-    }
-    for (satellite in listOf(true, false)) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-            Text(
-                stringResource(
-                    if (satellite) R.string.flight_offline_size_satellite
-                    else R.string.flight_offline_size_terrain
-                ),
-                color = Color.White,
-                fontSize = 12.sp,
-                modifier = Modifier.weight(0.8f),
-            )
-            Text(
-                if (coverage != null)
-                    (if (inventoried) "" else "≥ ") + flightOfflineGb(
-                        if (satellite) coverage.satelliteStoredBytes
-                        else coverage.terrainStoredBytes
-                    )
-                else "—",
-                color = Color.White,
-                fontSize = 12.sp,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                flightOfflineGb(
-                    if (coverage != null) {
-                        if (satellite) coverage.satelliteRemainingBytes
-                        else coverage.terrainRemainingBytes
-                    } else {
-                        // Until inventory finishes this is an upper estimate, including possibly
-                        // cached files.
-                        if (satellite) quote.satelliteEstimatedBytes
-                        else quote.terrainEstimatedBytes
-                    }
-                ),
-                color = Color(0xFFFFCC66),
-                fontSize = 12.sp,
-                modifier = Modifier.weight(1.2f),
-            )
-        }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(stringResource(R.string.flight_tiles_used_short,
+            flightOfflineGb(coverage?.storedBytes ?: 0L)), color = Color.LightGray, fontSize = 11.sp)
+        Text(stringResource(R.string.flight_tiles_remaining_short,
+            flightOfflineGb(coverage?.estimatedRemainingBytes ?: quote.estimatedBytes)),
+            color = Color(0xFFFFCC66), fontSize = 11.sp)
     }
     if (compact) return
     Text(
@@ -354,14 +306,6 @@ internal fun FlightOfflineSizeSummary(state: FlightUiState, compact: Boolean = f
             ),
         color = Color.LightGray,
         fontSize = 11.sp,
-    )
-    Text(
-        stringResource(
-            if (inventoried) R.string.flight_offline_size_note
-            else R.string.flight_offline_size_pending
-        ),
-        color = Color.LightGray,
-        fontSize = 10.sp,
     )
     if (state.offlineCoverageError != null)
         Text(

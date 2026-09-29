@@ -221,7 +221,9 @@ class FlightMonitoringTest {
             source
                 .substringAfter("suspend fun observeOfflineCoverage")
                 .substringBefore("\n\tprivate ")
-        assertTrue(inventory.contains("hasReadableTileHeader(file)"))
+        assertTrue(inventory.contains("store.ensureIndexed()"))
+        assertTrue(inventory.contains("store.catalog.get(key)"))
+        assertFalse(inventory.contains("file.isFile"))
         assertFalse(inventory.contains("isDecodableImage(file)"))
         val header =
             source.substringAfter("private fun hasReadableTileHeader").substringBefore("\n\t}")

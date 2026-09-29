@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -497,7 +498,7 @@ fun FlightModeScreen(
 					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onPreparePhotoCalibration = onPreparePhotoCalibration
 				)
-				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange)
+				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload)
 			}
 
 			}
@@ -1215,32 +1216,35 @@ private fun SatelliteScreen(
     onPausePreload: () -> Unit
 ) {
     var tileView by remember { mutableStateOf<FlightSatelliteCacheView?>(null) }
-    var images by rememberSaveable { mutableStateOf(true) }
+    var tileLayer by rememberSaveable { mutableIntStateOf(0) }
+    var showFiles by rememberSaveable { mutableStateOf(false) }
+    var selectedCell by remember { mutableStateOf<FlightTileMapCell?>(null) }
+    var visibleGrid by remember { mutableIntStateOf(8) }
     var showTileHelp by rememberSaveable { mutableStateOf(false) }
     var showTileLevels by remember { mutableStateOf(false) }
-    var zoomIndex by rememberSaveable(state.journeyId) { mutableIntStateOf(-1) }
-    val zooms = state.offlineQuote?.zoomLevels.orEmpty()
-    val selectedZoom = zooms.getOrNull(zoomIndex) ?: state.offlineQuote?.defaultPreviewZoom
-    val coverage = state.offlineCoverage
+    var gridZoom by rememberSaveable(state.journeyId) { mutableIntStateOf(-1) }
+    val zooms = ((3..14).toList() + state.offlineCoverage?.sharedLevels.orEmpty().map { it.zoom }).distinct().sorted()
+    val selectedZoom = gridZoom.takeIf { it >= 0 } ?: state.offlineQuote?.defaultPreviewZoom ?: 8
     val status = state.offlinePreloadStatus
-    val refreshKey = "${coverage?.stored}:${coverage?.storedBytes}:${status.availableTiles}:${status.satelliteTiles}"
     Column(Modifier.fillMaxSize().background(FlightBackground)) {
         FlightBackTopBar(stringResource(R.string.flight_mode_cached_tiles)) { onPageChange(FlightPage.MAP) }
         FlightTileDashboard(state)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(FlightPanelStrong),
             verticalAlignment = Alignment.CenterVertically) {
-            CompactAction(stringResource(R.string.flight_tiles_images), if (images) FlightBlue else FlightMuted,
-                { images = true })
-            CompactAction(stringResource(R.string.flight_tiles_overview), if (!images) FlightBlue else FlightMuted,
-                { images = false })
+            CompactAction(stringResource(R.string.flight_offline_size_satellite), if (tileLayer == 0) FlightBlue else FlightMuted,
+                { tileLayer = 0 })
+            CompactAction(stringResource(R.string.flight_offline_size_terrain), if (tileLayer == 1) FlightBlue else FlightMuted,
+                { tileLayer = 1 })
+            CompactAction(stringResource(R.string.flight_tiles_overview), if (tileLayer == 2) FlightBlue else FlightMuted,
+                { tileLayer = 2 })
             CompactAction(stringResource(R.string.flight_tiles_fit), FlightText, { tileView?.fitContent() })
-            if (selectedZoom != null) Box {
+            Box {
                 CompactAction(stringResource(R.string.flight_tiles_zoom, selectedZoom), FlightText,
                     { showTileLevels = true })
                 DropdownMenu(expanded = showTileLevels, onDismissRequest = { showTileLevels = false },
                     modifier = Modifier.heightIn(max = 280.dp)) {
-                    zooms.forEachIndexed { index, zoom ->
-                        TextButton(onClick = { zoomIndex = index; showTileLevels = false },
+                    zooms.forEach { zoom ->
+                        TextButton(onClick = { gridZoom = zoom; showTileLevels = false },
                             modifier = Modifier.fillMaxWidth().height(36.dp)) {
                             Text(stringResource(R.string.flight_tiles_zoom, zoom),
                                 color = if (zoom == selectedZoom) FlightOrange else FlightText,
@@ -1252,25 +1256,50 @@ private fun SatelliteScreen(
             CompactAction(stringResource(R.string.flight_tiles_help), FlightMuted, { showTileHelp = true })
             if (status.phase == FlightTerrainPhase.DOWNLOADING || status.phase == FlightTerrainPhase.PLANNING) {
                 CompactAction(stringResource(R.string.flight_plan_pause), FlightOrange, onPausePreload)
-            } else if (state.offlineQuote != null && !state.offlineSimulation) {
-                CompactAction(stringResource(R.string.flight_plan_download), FlightGreen, { onPreload(state.offlineQuote) })
             }
+        }
+        Row(Modifier.fillMaxWidth().background(FlightPanelStrong), verticalAlignment = Alignment.CenterVertically) {
+            CompactAction(stringResource(R.string.flight_files_title), FlightGreen, { showFiles = true })
+            Text(stringResource(if (visibleGrid == selectedZoom) R.string.flight_tiles_grid_hint else R.string.flight_tiles_grid_grouped,
+                visibleGrid), color = FlightMuted, fontSize = 10.sp, modifier = Modifier.weight(1f).padding(4.dp))
         }
         AndroidView(
             modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds(),
-            factory = { context -> FlightSatelliteCacheView(context).also { tileView = it } },
+            factory = { context -> FlightSatelliteCacheView(context).also { view ->
+                tileView = view
+                view.onCellSelected = { selectedCell = it }
+                view.onGridChanged = { visibleGrid = it }
+            } },
             update = { view ->
                 view.setQuote(state.offlineQuote)
                 view.setZoom(selectedZoom)
-                view.setShowImages(images)
-                view.setRefreshKey(refreshKey)
+                view.setLayer(tileLayer)
             }
         )
-        if (!images) Text(stringResource(R.string.flight_tiles_legend_short), color = FlightMuted, fontSize = 10.sp,
+        if (tileLayer == 2) Text(stringResource(R.string.flight_tiles_legend_short), color = FlightMuted, fontSize = 10.sp,
             modifier = Modifier.fillMaxWidth().background(FlightPanelStrong).padding(4.dp))
         Text(stringResource(R.string.flight_mode_satellite_attribution_short), color = FlightMuted, fontSize = 8.sp,
             modifier = Modifier.padding(horizontal = 4.dp))
         FlightBottomNavigation(state, onPageChange, minimalChrome = true)
+    }
+    if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload)
+    selectedCell?.let { cell ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { selectedCell = null },
+            title = { Text(stringResource(R.string.flight_tiles_cell_title, cell.id.zoom, cell.id.x, cell.id.y)) },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+                for (satellite in listOf(true, false)) {
+                    Text(stringResource(if (satellite) R.string.flight_offline_size_satellite else R.string.flight_offline_size_terrain),
+                        fontWeight = FontWeight.Bold)
+                    val stored = if (satellite) cell.satellite else cell.terrain
+                    val requested = if (satellite) cell.requestedSatellite else cell.requestedTerrain
+                    Text(stringResource(R.string.flight_tiles_cell_stored, stored.joinToString(" · ") { it.compact() }.ifEmpty { "—" }), fontSize = 12.sp)
+                    Text(stringResource(R.string.flight_tiles_cell_requested, requested.joinToString(" · ") { it.compact() }.ifEmpty { "—" }), fontSize = 12.sp)
+                }
+                Text(stringResource(R.string.flight_tiles_cell_fraction), fontSize = 11.sp)
+            } },
+            confirmButton = { TextButton(onClick = { selectedCell = null }) { Text(stringResource(R.string.shared_string_close)) } }
+        )
     }
     if (showTileHelp) androidx.compose.material3.AlertDialog(
         onDismissRequest = { showTileHelp = false },
@@ -1995,10 +2024,16 @@ internal fun decodePhotoPreview(file: File, maximumPixels: Int = MAXIMUM_PHOTO_P
 }
 
 @Composable
-private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage) -> Unit) {
+private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage) -> Unit,
+    onPreload: (FlightOfflineQuote) -> Unit, onPausePreload: () -> Unit) {
+    var showFiles by remember { mutableStateOf(false) }
+    if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload)
     Column(Modifier.fillMaxSize().background(FlightBackground)) {
         TextButton(onClick = { onPageChange(FlightPage.DETAIL) }) {
             Text(stringResource(R.string.flight_detail_title), fontSize = 12.sp)
+        }
+        TextButton(onClick = { showFiles = true }) {
+            Text(stringResource(R.string.flight_files_title), fontSize = 12.sp)
         }
         LazyColumn(Modifier.weight(1f)) {
             item {

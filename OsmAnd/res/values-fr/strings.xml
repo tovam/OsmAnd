@@ -1,5 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+	<string name="flight_tiles_finer_only">Certaines zones ont seulement des tuiles fines · zoomer</string>
+	<string name="flight_files_verify">Vérifier / réparer</string>
+	<string name="flight_files_verified_count">Pixels vérifiés : %1$d / %2$d fichiers</string>
+	<string name="flight_files_title">Fichiers</string>
+	<string name="flight_files_this_flight">Ce vol</string>
+	<string name="flight_files_shared">Tous les vols</string>
+	<string name="flight_files_level">Zoom</string>
+	<string name="flight_files_required">Requis</string>
+	<string name="flight_files_present">Présents</string>
+	<string name="flight_files_missing">Manquent</string>
+	<string name="flight_files_stored">Stockés\nGB</string>
+	<string name="flight_files_download_estimate">À prendre\n≈ GB</string>
+	<string name="flight_files_shared_total">Stock partagé sur ce téléphone : %1$d fichiers · %2$s</string>
+	<string name="flight_files_unchecked">? = %1$d fichiers pas encore vérifiés</string>
+	<string name="flight_files_indexing">Indexation du stock partagé…</string>
+	<string name="flight_files_complete">Tous les fichiers requis sont présents</string>
+	<string name="flight_files_offline_test">Test hors ligne · aucun téléchargement</string>
+	<string name="flight_files_download_count">Télécharger %1$d fichiers · ≈ %2$s</string>
+	<string name="flight_files_help">Ce vol : fichiers uniques requis pour son corridor, niveaux grossiers inclus.\nTous les vols : le stock partagé de ce téléphone, sans doublons.\nPrésent = en-tête d’image lisible. Vérifier / réparer contrôle les pixels et retélécharge les fichiers abîmés.\nLes GB restants sont estimés par source et niveau, puis affinés avec les tailles mesurées. ? = pas encore vérifié.</string>
+	<string name="flight_tiles_grid_hint">Grille z%1$d · S satellite / R relief · ✓ stock / → requis</string>
+	<string name="flight_tiles_grid_grouped">Regroupé en z%1$d · zoomer pour lire la grille choisie</string>
+	<string name="flight_tiles_cell_title">Carré z%1$d / %2$d / %3$d</string>
+	<string name="flight_tiles_cell_stored">En stock : %1$s</string>
+	<string name="flight_tiles_cell_requested">Requis : %1$s</string>
+	<string name="flight_tiles_cell_fraction">z10(3/4) = trois sous-tuiles sur quatre. Toucher un carré affiche tous ses niveaux.</string>
     <string name="flight_map_heading_short">Cap</string>
     <string name="flight_map_heading_lock">Verrouiller le cap et la position de l’avion</string>
     <string name="flight_map_heading_unlock">Libérer le verrouillage du cap</string>
@@ -18,24 +43,24 @@
     <string name="local_report_previous_crash">Le dernier lancement a planté. Son rapport reste sur ce téléphone.</string>
     <string name="local_report_render_failed">Le moteur graphique a échoué. Un rapport local est disponible.</string>
     <string name="local_report_logcat">Voir le journal</string>
-    <string name="flight_tiles_zoom">Niveau %1$d</string>
+    <string name="flight_tiles_zoom">Grille z%1$d</string>
     <string name="flight_tiles_help">Aide</string>
     <string name="flight_tiles_help_title">Carte des tuiles</string>
-    <string name="flight_tiles_help_text">Images : satellite et relief enregistrés.\nCouverture : vert = les deux, bleu = satellite, orange = relief, gris = manquant.\nNiveau : plus grand = plus fin. Ne télécharge rien.\nPincer pour zoomer. Cadrer trajet montre tout le trajet.</string>
+    <string name="flight_tiles_help_text">Satellite / Relief : images enregistrées séparées, affinées avec le zoom de la vue. Aucun téléchargement.\nDisponibilité : vert = requis présents ; orange = manques ; bleu = stock hors demande ; gris = vide ou en vérification.\nGrille zN change les carrés inspectés, pas le cadrage ni les images. Un niveau de plus divise un carré en quatre.\n✓ = niveaux en stock, → = niveaux requis. Les fractions indiquent une couverture partielle. Toucher un carré donne le détail.\nTout le trajet cadre la trace réelle. Fichiers donne les comptes et les GB avant téléchargement.</string>
     <string name="flight_controls_hide">Masquer les commandes</string>
     <string name="flight_controls_show">Afficher les commandes</string>
     <string name="flight_map_heading_up">Cap en haut</string>
     <string name="flight_map_blend">Satellite %1$d%%</string>
     <string name="flight_map_time_scale">%1$s à la vitesse actuelle</string>
-    <string name="flight_tiles_overview">Couverture</string>
+    <string name="flight_tiles_overview">Disponibilité</string>
     <string name="flight_tiles_images">Images</string>
-    <string name="flight_tiles_fit">Cadrer trajet</string>
-    <string name="flight_tiles_progress_short">%1$d / %2$d tuiles</string>
+    <string name="flight_tiles_fit">Tout le trajet</string>
+    <string name="flight_tiles_progress_short">%1$d / %2$d fichiers</string>
     <string name="flight_tiles_used_short">Stocké %1$s</string>
     <string name="flight_tiles_remaining_short">Reste ≈ %1$s</string>
     <string name="flight_tiles_unknown_short">Vérification %1$d / %2$d</string>
     <string name="flight_tiles_rate_short">%1$.1f Mo/s</string>
-    <string name="flight_tiles_legend_short">Vert : les deux · bleu : satellite · orange : relief · gris : manquant</string>
+    <string name="flight_tiles_legend_short">Vert : complet · orange : manques · bleu : hors demande · gris : vide/vérification</string>
     <string name="routing_attr_motor_type_name">Énergie utilisée par le moteur</string>
     <string name="routing_attr_motor_type_description">Sélectionner le carburant utilisé par le moteur de votre véhicule pour calculer les émissions de CO₂.</string>
     <string name="routing_attr_motor_type_diesel_name">Gazole</string>

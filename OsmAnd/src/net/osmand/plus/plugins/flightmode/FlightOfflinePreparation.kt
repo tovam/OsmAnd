@@ -12,11 +12,16 @@ class FlightOfflineQuote(
     val route: List<Pair<Double, Double>>,
     val bands: List<FlightOfflineBand>,
 ) {
+    val mapRoute = flightTileMapRoute(route)
     val satelliteCount = requests.count { it.satellite }
     val terrainCount = requests.size - satelliteCount
     val requestsByZoom = requests.groupBy { it.tile.zoom }
     val zoomLevels = requestsByZoom.keys.sorted()
     val defaultPreviewZoom = requestsByZoom.maxByOrNull { it.value.size }?.key
+    val levelRequirements = requests.groupingBy { it.satellite to it.tile.zoom }.eachCount()
+        .map { (key, count) -> FlightOfflineLevelCoverage(key.first, key.second, count, 0, 0, 0L,
+            count * FlightOfflineSizeEstimate.bytesPerTile(key.first)) }
+        .sortedWith(compareByDescending<FlightOfflineLevelCoverage> { it.satellite }.thenBy { it.zoom })
     val satelliteEstimatedBytes = FlightOfflineSizeEstimate.bytes(satelliteCount, 0)
     val terrainEstimatedBytes = FlightOfflineSizeEstimate.bytes(0, terrainCount)
     val estimatedBytes = satelliteEstimatedBytes + terrainEstimatedBytes
@@ -78,17 +83,21 @@ object FlightOfflinePreparation {
         val requests = tiles.tiles.flatMap {
             listOf(FlightOfflineRequest(it, false, 0), FlightOfflineRequest(it, true, 0))
         }.toMutableList()
-        // Legacy/imported-track corridors also need the persistent minimap backdrop.
-        // Count it in the quote, readiness checks and shared on-disk download store.
-        requests += tiles.tiles.map { tile ->
-            val shift = (tile.zoom - 4).coerceAtLeast(0)
-            FlightOfflineRequest(TerrainTileId(minOf(tile.zoom, 4), tile.x shr shift, tile.y shr shift), true, -1)
+        // Imported tracks need the same cheap backdrop as prepared corridors, for both
+        // sources. Include every coarse level in the manifest, counts and download queue.
+        requests += tiles.tiles.flatMap { tile ->
+            (3 until tile.zoom).flatMap { zoom ->
+                val shift = tile.zoom - zoom
+                val parent = TerrainTileId(zoom, tile.x shr shift, tile.y shr shift)
+                listOf(FlightOfflineRequest(parent, true, -1), FlightOfflineRequest(parent, false, -1))
+            }
         }
         return FlightOfflineQuote(
             requests.distinctBy { it.satellite to it.tile }.sortedBy { it.tile.zoom },
-            plan.stops.mapNotNull { stop ->
-                stop.latitude?.let { lat -> stop.longitude?.let { lat to it } }
-            },
+            trip?.samples?.takeIf { it.size >= 2 }?.map { it.latitude to it.longitude }
+                ?: plan.stops.mapNotNull { stop ->
+                    stop.latitude?.let { lat -> stop.longitude?.let { lat to it } }
+                },
             emptyList(),
         )
     }

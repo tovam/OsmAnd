@@ -19,7 +19,15 @@ class FlightOverviewTilesTest {
         assertEquals(quote.requests.size, quote.requests.map { it.satellite to it.tile }.distinct().size)
         assertEquals(quote.requests.count { it.satellite }, quote.satelliteCount)
         assertTrue(quote.bandEstimatedBytes.getValue(-1) > 0L)
-        assertEquals(4, quote.requests.first().tile.zoom)
+        assertEquals(3, quote.requests.first().tile.zoom)
+        for (satellite in listOf(true, false)) {
+            val details = quote.requests.filter { it.band == 0 && it.satellite == satellite }
+            for (tile in details) for (zoom in 3 until tile.tile.zoom) {
+                val shift = tile.tile.zoom - zoom
+                assertTrue(quote.requests.any { it.satellite == satellite && it.tile ==
+                    TerrainTileId(zoom, tile.tile.x shr shift, tile.tile.y shr shift) })
+            }
+        }
         quote.requests.filter { it.tile.zoom > 4 && it.satellite }.forEach {
             val shift = it.tile.zoom - 4
             assertTrue(coarse.any { c -> c.tile == TerrainTileId(4, it.tile.x shr shift, it.tile.y shr shift) })

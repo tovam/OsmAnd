@@ -991,7 +991,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				(lastFailure?.let { "\n$it" } ?: ""))
 		var completedCount = 0
 		onStatus(status(FlightTerrainPhase.DOWNLOADING))
-		flightConcurrentTransfers(quote.requests, 3, transfer = { request ->
+		// Fetch actual gaps first. Previously a mostly cached flight spent minutes decoding
+		// all its present files before starting the first missing high-resolution download.
+		val catalog = FlightSharedTileStore.get(app).catalog
+		val ordered = withContext(Dispatchers.Default) {
+			if (catalog.summary().complete) flightMissingTilesFirst(quote.requests) { catalog.get(it) != null }
+			else quote.requests
+		}
+		flightConcurrentTransfers(ordered, 3, transfer = { request ->
 				runInterruptible(Dispatchers.IO) {
 				if (app.filesDir.usableSpace < 256L * 1024 * 1024 &&
 					!(if (request.satellite) satelliteFile(request.tile) else tileFile(request.tile)).isFile)
@@ -1396,33 +1403,40 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		return try { bitmap.width==256 && bitmap.height==256 } finally { bitmap.recycle() }
 	}
 
-	/** Lifecycle-owned, read-only inventory. It never starts a download or scans unrelated files. */
+	/** Lifecycle-owned counters over the shared catalog. Never starts a download. */
 	suspend fun observeOfflineCoverage(quote: FlightOfflineQuote,
 		onProgress: suspend (FlightOfflineCoverage) -> Unit): Unit = withContext(Dispatchers.IO) {
+		val store = FlightSharedTileStore.get(app)
 		val inventory = synchronized(this@FlightTerrainRepository) {
 			if (inventoryQuote !== quote || retainedInventory == null) {
 				stopInventory?.invoke()
 				retainedInventory = FlightOfflineInventory(quote.requests)
 				inventoryQuote = quote
-				stopInventory = FlightOfflineTileChanges.observe(retainedInventory!!::changed)
+				val target = retainedInventory!!
+				stopInventory = store.catalog.observe { key, bytes -> if (key != null) target.changed(key, bytes) }
 			}
 			retainedInventory!!
 		}
 		run {
 			coroutineScope {
 				launch {
-					for (request in quote.requests) {
-						currentCoroutineContext().ensureActive()
-						val key = FlightOfflineTileKey(request.tile, request.satellite)
-						val revision = inventory.revision(key) ?: continue
-						val file = if (request.satellite) satelliteFile(request.tile) else tileFile(request.tile)
-						val bytes = if (file.isFile && file.length() > 0 && hasReadableTileHeader(file)) file.length() else 0L
-						inventory.inspected(key, revision, bytes)
+					// Reopening a flight only does hash lookups, not 250,000 filesystem probes.
+					for (pass in 0..1) {
+						val complete = store.catalog.summary().complete
+						for (request in quote.requests) {
+							currentCoroutineContext().ensureActive()
+							val key = FlightOfflineTileKey(request.tile, request.satellite)
+							val revision = inventory.revision(key) ?: continue
+							val file = store.catalog.get(key)
+							if (file != null || complete) inventory.inspected(key, revision, file?.bytes ?: 0L)
+						}
+						if (pass == 0) store.ensureIndexed()
 					}
 				}
 				var previous: FlightOfflineCoverage? = null
 				while (true) {
-					val progress = inventory.snapshot()
+					val shared = store.catalog.summary()
+					val progress = inventory.snapshot(shared.levels, shared.complete)
 					if (progress != previous) { onProgress(progress); previous = progress }
 					delay(500)
 				}

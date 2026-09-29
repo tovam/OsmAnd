@@ -343,6 +343,7 @@ class FlightJourneyStore(private val context: Context) {
 									MAXIMUM_ARCHIVE_BYTES - totalBytes
 								)
 								importedTerrainTiles += terrainTile
+								publishImportedTile(terrainTile, false, terrainFile(terrainTile))
 							}
 							satelliteTile != null -> {
 								totalBytes += importOfflineTile(
@@ -351,6 +352,7 @@ class FlightJourneyStore(private val context: Context) {
 									MAXIMUM_ARCHIVE_BYTES - totalBytes
 								)
 								importedSatelliteTiles += satelliteTile
+								publishImportedTile(satelliteTile, true, standardSatelliteFile(satelliteTile))
 							}
 						}
 						zip.closeEntry()
@@ -1092,6 +1094,13 @@ class FlightJourneyStore(private val context: Context) {
 		zip.putNextEntry(ZipEntry(entryName))
 		file.inputStream().buffered().use { input -> input.copyTo(zip) }
 		zip.closeEntry()
+	}
+
+	private fun publishImportedTile(tile: TerrainTileId, satellite: Boolean, file: File) {
+		val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+		android.graphics.BitmapFactory.decodeFile(file.path, options)
+		FlightOfflineTileChanges.publish(tile, satellite,
+			if (options.outWidth == 256 && options.outHeight == 256) file.length() else 0L)
 	}
 
 	private fun importOfflineTile(input: ZipInputStream, destination: File, remainingArchiveBytes: Long): Long {

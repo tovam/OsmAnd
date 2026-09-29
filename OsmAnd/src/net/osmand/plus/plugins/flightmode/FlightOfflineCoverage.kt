@@ -4,6 +4,40 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 internal data class FlightOfflineTileKey(val tile: TerrainTileId, val satellite: Boolean)
 
+/** Preserve coarse-first order within each lane; do not postpone gaps behind cached decodes. */
+internal fun flightMissingTilesFirst(
+    requests: List<FlightOfflineRequest>,
+    present: (FlightOfflineTileKey) -> Boolean,
+): List<FlightOfflineRequest> {
+    val (missing, stored) =
+        requests.partition { !present(FlightOfflineTileKey(it.tile, it.satellite)) }
+    return missing + stored
+}
+
+/** A level is a source-file resolution, not the camera zoom or a GPU texture. */
+data class FlightOfflineLevelCoverage(
+    val satellite: Boolean,
+    val zoom: Int,
+    val required: Int,
+    val inspected: Int,
+    val present: Int,
+    val storedBytes: Long,
+    val estimatedRemainingBytes: Long,
+) {
+    val unknown: Int
+        get() = required - inspected
+
+    val missing: Int
+        get() = inspected - present
+}
+
+data class FlightStoredTileLevel(
+    val satellite: Boolean,
+    val zoom: Int,
+    val files: Int,
+    val bytes: Long,
+)
+
 /** Small, immutable UI snapshot. Counts refer to source files, never GPU meshes or composites. */
 data class FlightOfflineCoverage(
     val terrainTotal: Int,
@@ -17,6 +51,9 @@ data class FlightOfflineCoverage(
     val terrainStoredBytes: Long = 0,
     val satelliteRemainingBytes: Long = 0,
     val terrainRemainingBytes: Long = 0,
+    val levels: List<FlightOfflineLevelCoverage> = emptyList(),
+    val sharedLevels: List<FlightStoredTileLevel> = emptyList(),
+    val sharedInventoryComplete: Boolean = false,
 ) {
     val total: Int
         get() = terrainTotal + satelliteTotal
@@ -29,6 +66,15 @@ data class FlightOfflineCoverage(
 
     val missing: Int
         get() = total - stored
+
+    val confirmedMissing: Int
+        get() = inspected - stored
+
+    val unknown: Int
+        get() = total - inspected
+
+    val canDownloadMissing: Boolean
+        get() = inventoried && missing > 0
 
     val fraction: Float
         get() = if (total == 0) 0f else stored.toFloat() / total
@@ -81,7 +127,12 @@ internal class FlightOfflineInventory(requests: List<FlightOfflineRequest>) {
     private var satelliteBytes = 0L
     private var terrainBytes = 0L
 
-    private class SizeGroup(val total: Int, var stored: Int = 0, var bytes: Long = 0)
+    private class SizeGroup(
+        val total: Int,
+        var inspected: Int = 0,
+        var stored: Int = 0,
+        var bytes: Long = 0,
+    )
 
     // A small overview/ocean tile must not set the price of every detailed tile.
     private val sizes =
@@ -112,6 +163,7 @@ internal class FlightOfflineInventory(requests: List<FlightOfflineRequest>) {
         val next = bytes.coerceAtLeast(0)
         val delta = (if (next > 0) 1 else 0) - (if (entry.bytes > 0) 1 else 0)
         sizes.getValue(key.satellite to key.tile.zoom).let {
+            if (!entry.inspected) it.inspected++
             it.stored += delta
             it.bytes += next - entry.bytes
         }
@@ -130,20 +182,41 @@ internal class FlightOfflineInventory(requests: List<FlightOfflineRequest>) {
     }
 
     @Synchronized
-    fun snapshot(): FlightOfflineCoverage {
+    fun snapshot(
+        sharedLevels: List<FlightStoredTileLevel> = emptyList(),
+        sharedInventoryComplete: Boolean = false,
+    ): FlightOfflineCoverage {
         // Use actual compression sizes once enough examples exist; the remainder is still an
         // estimate.
-        fun remaining(satellite: Boolean): Long =
-            sizes.entries
-                .filter { it.key.first == satellite }
-                .sumOf { (_, group) ->
+        val levels =
+            sizes
+                .map { (key, group) ->
+                    val shared =
+                        sharedLevels.firstOrNull {
+                            it.satellite == key.first && it.zoom == key.second
+                        }
                     val average =
-                        if (group.stored >= 8) group.bytes / group.stored
-                        else FlightOfflineSizeEstimate.bytesPerTile(satellite)
-                    (group.total - group.stored) * average
+                        when {
+                            group.stored >= 8 -> group.bytes / group.stored
+                            shared != null && shared.files >= 8 -> shared.bytes / shared.files
+                            else -> FlightOfflineSizeEstimate.bytesPerTile(key.first)
+                        }
+                    FlightOfflineLevelCoverage(
+                        key.first,
+                        key.second,
+                        group.total,
+                        group.inspected,
+                        group.stored,
+                        group.bytes,
+                        (group.total - group.stored) * average,
+                    )
                 }
-        val remainingSatellite = remaining(true)
-        val remainingTerrain = remaining(false)
+                .sortedWith(
+                    compareByDescending<FlightOfflineLevelCoverage> { it.satellite }
+                        .thenBy { it.zoom }
+                )
+        val remainingSatellite = levels.filter { it.satellite }.sumOf { it.estimatedRemainingBytes }
+        val remainingTerrain = levels.filter { !it.satellite }.sumOf { it.estimatedRemainingBytes }
         return FlightOfflineCoverage(
             terrainTotal,
             satelliteTotal,
@@ -156,6 +229,9 @@ internal class FlightOfflineInventory(requests: List<FlightOfflineRequest>) {
             terrainBytes,
             remainingSatellite,
             remainingTerrain,
+            levels,
+            sharedLevels,
+            sharedInventoryComplete,
         )
     }
 }

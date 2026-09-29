@@ -57,6 +57,7 @@ internal fun FlightPlanningScreen(
     var mapEditor by remember { mutableStateOf(false) }
     var section by remember { mutableStateOf(initialSection.coerceIn(0, 2)) }
     var showSaveError by remember { mutableStateOf(false) }
+    var showTileFiles by remember { mutableStateOf(false) }
     val canSimulate = FlightOfflinePreparation.canSimulate(state.plan)
     var confirmStart by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(0) }
@@ -110,6 +111,7 @@ internal fun FlightPlanningScreen(
         dispatcher?.addCallback(callback)
         onDispose { callback.remove() }
     }
+    if (showTileFiles) FlightTileFilesDialog(state, { showTileFiles = false }, onPreload, onCancelPreload)
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth()) {
             PlanAction(stringResource(R.string.flight_workspace_future), onJournals)
@@ -541,7 +543,7 @@ internal fun FlightPlanningScreen(
                         )
                         if (quoting) LinearProgressIndicator(Modifier.fillMaxWidth())
                         error?.let { Text(it, color = Color(0xFFFFBD39), fontSize = 11.sp) }
-                        quote?.let { q ->
+                        quote?.let {
                             FlightOfflineProgressPanel(state, includeSizes = false)
                             Text(
                                 stringResource(R.string.flight_plan_free_space, freeBytes / 1e9),
@@ -549,14 +551,8 @@ internal fun FlightPlanningScreen(
                                 fontSize = 11.sp,
                             )
                             PlanAction(
-                                stringResource(R.string.flight_plan_download),
-                                {
-                                    onUpdate(state.plan.copy(preparation = prep))
-                                    onPreload(q)
-                                },
-                                enabled =
-                                    state.offlinePreloadStatus.phase !=
-                                        FlightTerrainPhase.DOWNLOADING,
+                                stringResource(R.string.flight_files_title),
+                                { showTileFiles = true },
                             )
                         }
                         val offline = state.offlinePreloadStatus

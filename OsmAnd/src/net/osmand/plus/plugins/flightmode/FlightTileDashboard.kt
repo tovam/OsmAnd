@@ -50,17 +50,6 @@ internal fun FlightTileDashboard(state: FlightUiState) {
                 progress = c.fraction,
                 modifier = Modifier.fillMaxWidth().height(3.dp),
             )
-            Text(
-                stringResource(
-                    R.string.flight_offline_by_source,
-                    c.satelliteStored,
-                    c.satelliteTotal,
-                    c.terrainStored,
-                    c.terrainTotal,
-                ),
-                color = Color.LightGray,
-                fontSize = 11.sp,
-            )
             if (!c.inventoried)
                 Text(
                     stringResource(R.string.flight_tiles_unknown_short, c.inspected, c.total),
@@ -71,7 +60,7 @@ internal fun FlightTileDashboard(state: FlightUiState) {
                 Text(
                     stringResource(
                         if (c.verifiedBy(s)) R.string.flight_offline_verified
-                        else R.string.flight_offline_present_unverified
+                        else R.string.flight_files_complete
                     ),
                     color = Color(0xFF88DEBF),
                     fontSize = 11.sp,
