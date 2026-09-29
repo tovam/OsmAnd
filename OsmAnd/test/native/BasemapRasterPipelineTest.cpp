@@ -66,14 +66,25 @@ struct QueryController { bool aborted = false; bool isAborted() const { return a
 struct IMapDataProvider {
     struct RetainableCacheMetadata { virtual ~RetainableCacheMetadata() = default; };
     struct Request {
+        std::shared_ptr<QueryController> queryController;
+        static void copy(Request& dst, const Request& src);
+    };
+    struct Data { virtual ~Data() = default; };
+};
+struct IMapTiledDataProvider : IMapDataProvider {
+    struct Request : IMapDataProvider::Request {
         TileId tileId;
         ZoomLevel zoom = 0, detailedZoom = 0;
         AreaI visibleArea31;
         std::int64_t areaTime = 0;
-        std::shared_ptr<QueryController> queryController = std::make_shared<QueryController>();
-        static void copy(Request& dst, const Request& src) { dst = src; }
+        bool cacheOnly = false;
+        static void copy(Request& dst, const IMapDataProvider::Request& src);
     };
-    struct Data { virtual ~Data() = default; };
+};
+struct MapDataProviderHelpers {
+    template<class T> static const T& castRequest(const IMapDataProvider::Request& request) {
+        return static_cast<const T&>(request);
+    }
 };
 struct Metric {
     float elapsedTime = 0;
@@ -112,13 +123,17 @@ struct MapPrimitivesProvider {
     std::set<int> missingZooms, surfaceOnlyZooms, symbolsOnlyZooms;
     int failedZoom = -1, cancelledZoom = -1;
     std::vector<int> requestedParents;
+    std::vector<std::shared_ptr<QueryController>> parentControllers;
     int fineZoom = 14;
     bool parentAvailable = true;
     int parentRequests = 0;
-    bool obtainTiledPrimitives(const IMapDataProvider::Request& req, std::shared_ptr<Data>& data, MapPrimitivesProvider_Metrics::Metric_obtainData*) {
+    bool obtainTiledPrimitives(const IMapTiledDataProvider::Request& req, std::shared_ptr<Data>& data, MapPrimitivesProvider_Metrics::Metric_obtainData*) {
+        // Match the production provider's first operation, including its non-null contract.
+        if (req.queryController->isAborted()) return false;
         if (req.zoom < fineZoom) {
             ++parentRequests;
             requestedParents.push_back(req.zoom);
+            parentControllers.push_back(req.queryController);
             if (req.zoom == failedZoom) return false;
             if (req.zoom == cancelledZoom) req.queryController->aborted = true;
             assert(req.detailedZoom == req.zoom);
@@ -142,7 +157,7 @@ struct MapPrimitivesProvider {
 enum class AlphaChannelPresence { NotPresent };
 class MapRasterLayerProvider {
 public:
-    using Request = IMapDataProvider::Request;
+    using Request = IMapTiledDataProvider::Request;
     struct Data {
         TileId tileId;
         ZoomLevel zoom;
@@ -163,6 +178,7 @@ bool isPerformanceMetricsEnabled() { return false; }
 struct Performance { void rasterStart(TileId) {} void rasterFinish(TileId, ZoomLevel) {} };
 Performance& getPerformanceMetrics() { static Performance perf; return perf; }
 }
+#include "BasemapRequestCopyMethods.h"
 #include "BasemapRasterHeader.h"
 #include "BasemapRasterMethods.h"
 namespace OsmAnd {
@@ -200,6 +216,7 @@ int main() {
     MapRasterLayerProvider provider;
     Renderer renderer(&provider);
     MapRasterLayerProvider::Request request;
+    request.queryController = std::make_shared<QueryController>();
     request.zoom = request.detailedZoom = 14;
     request.tileId = TileId::fromXY(123 * 8 + 3, 456 * 8 + 6);
     std::shared_ptr<MapRasterLayerProvider::Data> output;
@@ -260,6 +277,22 @@ int main() {
         try { run(); std::cout << "PASS: " << name << '\n'; }
         catch (const std::exception& e) { ++failures; std::cerr << "FAIL: " << name << ": " << e.what() << '\n'; }
     };
+    regression("upstream tiled copy does not copy the base query controller", [&] {
+        MapRasterLayerProvider::Request parent;
+        MapRasterLayerProvider::Request::copy(parent, request);
+        check(!parent.queryController, "fixture must preserve the real partial-copy contract");
+        IMapDataProvider::Request::copy(parent, request);
+        check(parent.queryController == request.queryController, "base request copy lost the controller");
+    });
+    regression("every coarse request retains the original cancellation controller", [&] {
+        MapRasterLayerProvider p;
+        Renderer r(&p);
+        for (int z = 8; z <= 11; ++z) p.primitivesProvider->missingZooms.insert(z);
+        check(r.obtainRasterizedTile(request, output, nullptr) && output, "no coarse fallback");
+        check(p.primitivesProvider->parentControllers.size() == 5, "expected z11 through z7");
+        for (const auto& controller : p.primitivesProvider->parentControllers)
+            check(controller == request.queryController, "ancestor used a missing or independent controller");
+    });
     regression("neighboring regional data cannot block the coarse map", [&] {
         MapRasterLayerProvider p;
         Renderer r(&p);

@@ -121,6 +121,23 @@ z31, exact crops, cancellation/retry, regional precedence and bounded caching.
 The native patch was checked against core `3a5be42e57c3245d31078b9217bfb5569f469d75`.
 These checks do not replace an Android rendering check with the installed maps.
 
+### Missing-country fallback crash
+
+The ancestor request must copy both `IMapDataProvider::Request` and the tiled
+request fields. Upstream's static `IMapTiledDataProvider::Request::copy` copies
+only its own tile fields, leaving a default request's `queryController` null.
+The primitives provider immediately dereferences that controller. Consequently,
+the first uncached basemap ancestor lookup could crash while ordinary regional
+tiles continued to render.
+
+The pipeline test now compiles both upstream request-copy methods verbatim.
+Its earlier assignment-based adapter accidentally copied the base controller,
+masking this crash. With the faithful copy methods, the old fallback fails under
+UBSan on a null controller; copying the base request first makes the same test
+pass. Controller identity is checked through multiple ancestor levels, alongside
+the existing cancellation/retry tests. Verified against core
+`66c7449df08f22a8fbaa72b761a880b10f3db7d3` with synthetic map data.
+
 ## Local check without compiling an APK
 
 From the Android repository root, with a temporary output directory inside it:

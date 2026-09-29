@@ -141,7 +141,7 @@ index 1931fd8..3e8d4bf 100644
 
      if (metric)
          metric->elapsedTime += totalStopwatch.elapsed();
-@@ -109,6 +183,96 @@ bool OsmAnd::MapRasterLayerProvider_P::obtainRasterizedTile(
+@@ -109,6 +183,99 @@ bool OsmAnd::MapRasterLayerProvider_P::obtainRasterizedTile(
      return true;
  }
 
@@ -183,6 +183,9 @@ index 1931fd8..3e8d4bf 100644
 +            sourceZoom = static_cast<ZoomLevel>(z);
 +            const auto delta = static_cast<unsigned>(request.zoom - sourceZoom);
 +            MapRasterLayerProvider::Request parentRequest;
++            // Tiled Request::copy omits the base fields, including queryController.
++            // The primitives provider dereferences that controller immediately.
++            IMapDataProvider::Request::copy(parentRequest, request);
 +            MapRasterLayerProvider::Request::copy(parentRequest, request);
 +            parentRequest.zoom = sourceZoom;
 +            parentRequest.detailedZoom = sourceZoom;
