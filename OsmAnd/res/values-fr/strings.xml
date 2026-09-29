@@ -13,7 +13,7 @@
 	<string name="flight_files_stored">Stockés\nGB</string>
 	<string name="flight_files_download_estimate">À prendre\n≈ GB</string>
 	<string name="flight_files_shared_total">Stock partagé sur ce téléphone : %1$d fichiers · %2$s</string>
-	<string name="flight_files_unchecked">? = %1$d fichiers pas encore vérifiés</string>
+	<string name="flight_files_unchecked">\? = %1$d fichiers pas encore vérifiés</string>
 	<string name="flight_files_indexing">Indexation du stock partagé…</string>
 	<string name="flight_files_complete">Tous les fichiers requis sont présents</string>
 	<string name="flight_files_offline_test">Test hors ligne · aucun téléchargement</string>

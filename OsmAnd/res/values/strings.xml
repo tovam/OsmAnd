@@ -13,7 +13,7 @@
 	<string name="flight_files_stored">Stored\nGB</string>
 	<string name="flight_files_download_estimate">Remaining\n≈ GB</string>
 	<string name="flight_files_shared_total">Shared on phone: %1$d files · %2$s</string>
-	<string name="flight_files_unchecked">? = %1$d files not checked yet</string>
+	<string name="flight_files_unchecked">\? = %1$d files not checked yet</string>
 	<string name="flight_files_indexing">Indexing shared files…</string>
 	<string name="flight_files_complete">All requested files present</string>
 	<string name="flight_files_offline_test">Offline test · no downloads</string>

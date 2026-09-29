@@ -25,6 +25,9 @@ jobs:
         with:
           path: android
 
+      - name: Check flight string resource literals
+        run: python3 android/OsmAnd/test/standalone/test_flight_string_resources.py
+
       - name: Checkout OsmAnd resources
         uses: actions/checkout@v7
         with:
