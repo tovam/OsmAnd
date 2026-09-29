@@ -1,4 +1,5 @@
 diff --git a/src/Map/MapRasterLayerProvider_P.h b/src/Map/MapRasterLayerProvider_P.h
+index 4f04dce..aae926f 100644
 --- a/src/Map/MapRasterLayerProvider_P.h
 +++ b/src/Map/MapRasterLayerProvider_P.h
 @@ -4,6 +4,7 @@
@@ -9,26 +10,30 @@ diff --git a/src/Map/MapRasterLayerProvider_P.h b/src/Map/MapRasterLayerProvider
 
  #include "QtExtensions.h"
  #include <QMutex>
-@@ -24,6 +25,15 @@
+@@ -24,6 +25,18 @@ namespace OsmAnd
      {
          Q_DISABLE_COPY_AND_MOVE(MapRasterLayerProvider_P);
      private:
 +        struct BasemapRaster
 +        {
++            TileId tileId;
++            ZoomLevel zoom;
++            ZoomLevel sourceZoom;
 +            std::shared_ptr<const MapPrimitivesProvider::Data> primitives;
 +            sk_sp<SkImage> image;
 +        };
 +        QMutex _basemapRasterMutex;
 +        std::list<BasemapRaster> _basemapRasters;
 +
-+        sk_sp<SkImage> rasterizeBasemapParent(const MapRasterLayerProvider::Request& request);
++        bool rasterizeBasemapParent(const MapRasterLayerProvider::Request& request, sk_sp<SkImage>& image);
      protected:
          MapRasterLayerProvider_P(MapRasterLayerProvider* const owner);
 
 diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvider_P.cpp
+index 1931fd8..3e8d4bf 100644
 --- a/src/Map/MapRasterLayerProvider_P.cpp
 +++ b/src/Map/MapRasterLayerProvider_P.cpp
-@@ -8,7 +8,33 @@
+@@ -8,6 +8,65 @@
  #include "MapRasterizer.h"
  #include "Stopwatch.h"
  #include "MapRendererPerformanceMetrics.h"
@@ -36,7 +41,8 @@ diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvid
 +#include "BinaryMapObject.h"
 +#include "ObfMapSectionInfo.h"
 +#include "Utilities.h"
-
++#include <algorithm>
++
 +#include "ignore_warnings_on_external_includes.h"
 +#include <SkBitmap.h>
 +#include <SkPixmap.h>
@@ -44,25 +50,56 @@ diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvid
 +
 +namespace
 +{
-+    bool hasRegionalCartography(const std::shared_ptr<OsmAnd::MapPrimitivesProvider::Data>& tile)
++    bool hasRegionalCartography(const std::shared_ptr<OsmAnd::MapPrimitivesProvider::Data>& tile,
++        const OsmAnd::MapRasterLayerProvider::Request& request)
 +    {
-+        if (!tile || !tile->mapObjectsData)
++        if (!tile || !tile->primitivisedObjects)
 +            return false;
-+        for (const auto& object : tile->mapObjectsData->mapObjects)
++        const auto area = OsmAnd::Utilities::tileBoundingBox31(request.tileId, request.zoom);
++        const auto& rendered = *tile->primitivisedObjects;
++        // The OBF reader deliberately enlarges its read area. Raw objects can be
++        // outside this tile, or removed by the style. Neither proves coverage here.
++        for (const auto* collection : {&rendered.polygons, &rendered.polylines, &rendered.points})
 +        {
-+            const auto binary = std::dynamic_pointer_cast<const OsmAnd::BinaryMapObject>(object);
-+            // World coastlines, routing-only and contour overlays do not replace a country map.
-+            if (binary && !binary->section->isBasemap && !binary->section->isContourLines && !binary->isCoastline)
-+                return true;
++            for (const auto& primitive : *collection)
++            {
++                const auto binary = std::dynamic_pointer_cast<const OsmAnd::BinaryMapObject>(primitive->sourceObject);
++                // World coastlines, routing-only and contours are not a country map.
++                if (binary && !binary->section->isBasemap && !binary->section->isContourLines
++                    && !binary->isCoastline
++                    && binary->intersectedOrContainedBy(area, area, request.areaTime))
++                    return true;
++            }
++        }
++        return false;
++    }
++
++    bool hasRasterCartography(const std::shared_ptr<OsmAnd::MapPrimitivesProvider::Data>& tile,
++        const OsmAnd::MapRasterLayerProvider::Request& request)
++    {
++        if (!tile || !tile->primitivisedObjects)
++            return false;
++        const auto area = OsmAnd::Utilities::tileBoundingBox31(request.tileId, request.zoom);
++        const auto& rendered = *tile->primitivisedObjects;
++        // isEmpty() also counts symbol-only groups and the automatically generated
++        // land background. They can produce a completely blank raster: keep looking.
++        for (const auto* collection : {&rendered.polygons, &rendered.polylines})
++        {
++            for (const auto& primitive : *collection)
++            {
++                const auto& object = primitive->sourceObject;
++                if (object && !std::dynamic_pointer_cast<const OsmAnd::MapPrimitiviser::SurfaceMapObject>(object)
++                    && object->intersectedOrContainedBy(area, area, request.areaTime))
++                    return true;
++            }
 +        }
 +        return false;
 +    }
 +}
-+
+
  OsmAnd::MapRasterLayerProvider_P::MapRasterLayerProvider_P(MapRasterLayerProvider* const owner_)
      : owner(owner_)
- {
-@@ -63,7 +89,17 @@
+@@ -63,7 +122,21 @@ bool OsmAnd::MapRasterLayerProvider_P::obtainRasterizedTile(
      if (queryController->isAborted())
          return false;
 
@@ -70,9 +107,13 @@ diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvid
 +    // Do this before the empty-primitives exit: that is precisely the case where
 +    // high-zoom rendering used to return nothing despite an installed world map.
 +    sk_sp<SkImage> image;
-+    if (owner->fillBackground && BasemapOverzoom::needsFallback(
-+            request.zoom, MapPrimitiviser::LastZoomToUseBasemap, hasRegionalCartography(primitivesTile)))
-+        image = rasterizeBasemapParent(request);
++    if (owner->fillBackground && request.zoom > MinZoomLevel
++        && !hasRegionalCartography(primitivesTile, request)
++        && (request.zoom > MapPrimitiviser::LastZoomToUseBasemap || !hasRasterCartography(primitivesTile, request)))
++    {
++        if (!rasterizeBasemapParent(request, image))
++            return false; // Do not publish/cache a blank child after a transient parent failure.
++    }
 +
 +    if (queryController->isAborted())
 +        return false;
@@ -81,7 +122,7 @@ diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvid
      {
          outData.reset();
 
-@@ -77,7 +113,8 @@
+@@ -77,7 +150,8 @@ bool OsmAnd::MapRasterLayerProvider_P::obtainRasterizedTile(
          OsmAnd::getPerformanceMetrics().rasterStart(request.tileId);
 
      // Perform actual rasterization
@@ -91,7 +132,7 @@ diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvid
 
      if (queryController->isAborted())
          return false;
-@@ -98,7 +135,7 @@
+@@ -98,7 +172,7 @@ bool OsmAnd::MapRasterLayerProvider_P::obtainRasterizedTile(
          owner->getTileDensityFactor(),
          image,
          primitivesTile,
@@ -100,55 +141,81 @@ diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvid
 
      if (metric)
          metric->elapsedTime += totalStopwatch.elapsed();
-@@ -109,6 +146,68 @@
+@@ -109,6 +183,96 @@ bool OsmAnd::MapRasterLayerProvider_P::obtainRasterizedTile(
      return true;
  }
 
-+sk_sp<SkImage> OsmAnd::MapRasterLayerProvider_P::rasterizeBasemapParent(
-+    const MapRasterLayerProvider::Request& request)
++bool OsmAnd::MapRasterLayerProvider_P::rasterizeBasemapParent(
++    const MapRasterLayerProvider::Request& request, sk_sp<SkImage>& image)
 +{
-+    const auto parentZoom = static_cast<ZoomLevel>(MapPrimitiviser::LastZoomToUseBasemap);
-+    const auto delta = static_cast<unsigned>(request.zoom - parentZoom);
-+    MapRasterLayerProvider::Request parentRequest;
-+    MapRasterLayerProvider::Request::copy(parentRequest, request);
-+    parentRequest.zoom = parentZoom;
-+    parentRequest.detailedZoom = parentZoom;
-+    parentRequest.tileId = TileId::fromXY(request.tileId.x >> delta, request.tileId.y >> delta);
-+    // Parent geometry must not be simplified/clipped to the tiny child's viewport.
-+    parentRequest.visibleArea31 = Utilities::tileBoundingBox31(parentRequest.tileId, parentZoom);
++    image.reset();
++    const auto firstZoom = static_cast<ZoomLevel>(std::min(
++        static_cast<int>(request.zoom) - 1, static_cast<int>(MapPrimitiviser::LastZoomToUseBasemap)));
++    const auto firstDelta = static_cast<unsigned>(request.zoom - firstZoom);
++    const auto firstTile = TileId::fromXY(request.tileId.x >> firstDelta, request.tileId.y >> firstDelta);
 +
-+    std::shared_ptr<MapPrimitivesProvider::Data> parentPrimitives;
-+    if (!owner->primitivesProvider->obtainTiledPrimitives(parentRequest, parentPrimitives, nullptr)
-+        || request.queryController->isAborted() || !parentPrimitives
-+        || parentPrimitives->primitivisedObjects->isEmpty())
-+        return nullptr;
-+
++    auto sourceZoom = firstZoom;
 +    sk_sp<SkImage> parentImage;
++    bool cached = false;
 +    {
 +        QMutexLocker locker(&_basemapRasterMutex);
 +        for (auto it = _basemapRasters.begin(); it != _basemapRasters.end(); ++it)
 +        {
-+            if (it->primitives == parentPrimitives)
++            if (it->zoom == firstZoom && it->tileId.x == firstTile.x && it->tileId.y == firstTile.y)
 +            {
++                cached = true;
++                sourceZoom = it->sourceZoom;
 +                parentImage = it->image;
 +                _basemapRasters.splice(_basemapRasters.begin(), _basemapRasters, it);
 +                break;
 +            }
 +        }
 +    }
-+    if (!parentImage)
++    if (!cached)
 +    {
-+        parentImage = rasterize(parentRequest, parentPrimitives, nullptr);
-+        if (!parentImage || request.queryController->isAborted())
-+            return nullptr;
++        std::shared_ptr<MapPrimitivesProvider::Data> parentPrimitives;
++        // A world file/style need not supply usable cartography at z11. Walk the
++        // actual parents, rather than enlarging z11's generated blank background.
++        for (int z = firstZoom; z >= MinZoomLevel; --z)
++        {
++            if (request.queryController->isAborted())
++                return false;
++            sourceZoom = static_cast<ZoomLevel>(z);
++            const auto delta = static_cast<unsigned>(request.zoom - sourceZoom);
++            MapRasterLayerProvider::Request parentRequest;
++            MapRasterLayerProvider::Request::copy(parentRequest, request);
++            parentRequest.zoom = sourceZoom;
++            parentRequest.detailedZoom = sourceZoom;
++            parentRequest.tileId = TileId::fromXY(request.tileId.x >> delta, request.tileId.y >> delta);
++            parentRequest.visibleArea31 = Utilities::tileBoundingBox31(parentRequest.tileId, sourceZoom);
++            parentPrimitives.reset();
++            if (!owner->primitivesProvider->obtainTiledPrimitives(parentRequest, parentPrimitives, nullptr)
++                || request.queryController->isAborted())
++                return false; // Do not cache a cancelled/failed lookup as missing data.
++            if (!hasRasterCartography(parentPrimitives, parentRequest))
++                continue;
++            parentImage = rasterize(parentRequest, parentPrimitives, nullptr);
++            if (!parentImage || request.queryController->isAborted())
++                return false;
++            break;
++        }
++        if (!parentImage)
++            parentPrimitives.reset();
 +        QMutexLocker locker(&_basemapRasterMutex);
-+        // Multiple render workers may request siblings concurrently. Do not retain
-+        // duplicate entries or hold the mutex during I/O or rasterization.
-+        _basemapRasters.remove_if([&](const BasemapRaster& entry) { return entry.primitives == parentPrimitives; });
-+        _basemapRasters.push_front({parentPrimitives, parentImage});
++        // Cache the selected source level (including a completely missing map),
++        // so sibling children do not re-scan every unavailable zoom. Provider
++        // recreation on map/style changes also invalidates this bounded cache.
++        _basemapRasters.remove_if([&](const BasemapRaster& entry) {
++            return entry.zoom == firstZoom && entry.tileId.x == firstTile.x && entry.tileId.y == firstTile.y;
++        });
++        _basemapRasters.push_front({firstTile, firstZoom, sourceZoom, parentPrimitives, parentImage});
 +        while (_basemapRasters.size() > 4)
 +            _basemapRasters.pop_back();
 +    }
++    if (request.queryController->isAborted())
++        return false;
++    if (!parentImage)
++        return true;
 +
 +    const auto size = owner->getTileSize();
 +    SkPixmap source;
@@ -156,14 +223,16 @@ diff --git a/src/Map/MapRasterLayerProvider_P.cpp b/src/Map/MapRasterLayerProvid
 +    if (!parentImage->peekPixels(&source) || source.colorType() != kN32_SkColorType
 +        || source.width() != static_cast<int>(size) || source.height() != static_cast<int>(size)
 +        || !target.tryAllocPixels(SkImageInfo::MakeN32Premul(size, size)))
-+        return nullptr;
++        return false;
++    const auto delta = static_cast<unsigned>(request.zoom - sourceZoom);
 +    if (!BasemapOverzoom::magnifyParent(request.tileId.x, request.tileId.y, delta, size,
 +        [&](unsigned x, unsigned y) { return *source.addr32(x, y); },
 +        [&](unsigned x, unsigned y, std::uint32_t color) { *target.getAddr32(x, y) = color; },
 +        [&]() { return request.queryController->isAborted(); }))
-+        return nullptr;
++        return false;
 +    target.setImmutable();
-+    return target.asImage();
++    image = target.asImage();
++    return image != nullptr;
 +}
 +
  void OsmAnd::MapRasterLayerProvider_P::initialize()

@@ -4,7 +4,8 @@ The Smart build applies `model3d-marker-elevation.patch` first, followed by
 `flight-volumetric-geometry.patch`. Both were checked against OsmAnd-core
 `c3cd29673dcb7118af8e5371aff33a4c421a246e`.
 
-`basemap-overzoom-fallback.patch` is applied last. The complete stack was also
+`basemap-overzoom-fallback.patch` is followed by `basemap-raster-overzoom.patch`
+and the flight projection patch. The complete stack was also
 checked against `ee8cbbc6d952f6a625e89c7e0e0467fb6adbd015`. The workflow follows
 upstream rather than pinning either revision, so it checks every patch before
 applying it and publishes failures as check annotations.
@@ -89,6 +90,36 @@ call sites in the patched core, including the two readers and label evaluation.
 This requires a world basemap on the phone. It does not invent streets or fetch
 country maps automatically, and cannot provide geography if no basemap exists.
 These source/policy tests are not a device rendering test.
+
+### Raster fallback and white tiles
+
+`basemap-raster-overzoom.patch` acts in the shared native raster provider, used
+by both the ordinary map and flight map. The previous implementation had two
+independent holes:
+
+- Raw regional objects could suppress the fallback even when they came from an
+  enlarged read area outside the requested tile, or the style did not render them.
+- Only z11 was tried. Missing data at that level, a generated land background or
+  symbol-only groups were not sufficient to recover the actual lower-resolution map.
+
+Regional precedence now checks rendered objects intersecting the requested tile.
+The fallback searches parents from `min(requestedZoom - 1, 11)` down to z0,
+ignoring generated surface-only and symbol-only rasters. A valid coarse tile
+already being displayed is not downgraded. The selected ancestor's exact crop is
+magnified with integer nearest-neighbour sampling, including deep overzoom where
+the crop is smaller than one source pixel. No network access is involved.
+
+An LRU holds at most four selected ancestors, including their source zoom. It
+also caches completed missing-data searches; cancellation and failures are not
+cached. The provider is recreated when maps or rendering settings change, so a
+newly available country map is not permanently masked by an old coarse result.
+
+`run_basemap_raster_pipeline_test.py` compiles the patched core methods with
+synthetic OBF/Skia adapters. Six new failure cases fail with the former patch and
+pass with the replacement. Additional checks cover z0, every deep zoom through
+z31, exact crops, cancellation/retry, regional precedence and bounded caching.
+The native patch was checked against core `3a5be42e57c3245d31078b9217bfb5569f469d75`.
+These checks do not replace an Android rendering check with the installed maps.
 
 ## Local check without compiling an APK
 

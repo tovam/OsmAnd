@@ -32,7 +32,8 @@ def main():
         binary = work / "test"
         subprocess.run([
             os.environ.get("CXX", "c++"), "-std=c++11", "-Wall", "-Wextra", "-Werror",
-            "-fsanitize=address,undefined", "-I", str(work), str(test), "-o", str(binary),
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-I", str(work), str(test), "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True, timeout=30)
 
