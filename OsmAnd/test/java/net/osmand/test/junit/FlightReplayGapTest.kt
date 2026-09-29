@@ -4,6 +4,7 @@ import net.osmand.plus.plugins.flightmode.FlightReplayEngine
 import net.osmand.plus.plugins.flightmode.FlightSample
 import net.osmand.plus.plugins.flightmode.FlightSampleInterpolator
 import net.osmand.plus.plugins.flightmode.FlightTrip
+import net.osmand.plus.plugins.flightmode.FlightGapTrajectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -17,6 +18,7 @@ class FlightReplayGapTest {
 	fun replayInterpolatesPositionAcrossLongRedGapAtQuarterMidpointAndThreeQuarter() {
 		val trip = longGapTrip()
 		val engine = FlightReplayEngine(trip)
+		val trajectory = FlightGapTrajectory.buildAll(trip.samples).getValue(1)
 		val start = trip.samples.first().timestampMillis
 		val end = trip.samples.last().timestampMillis
 		val gapStart = trip.samples[1].timestampMillis
@@ -31,8 +33,9 @@ class FlightReplayGapTest {
 			assertTrue("Expected a recorded GPS gap at fraction $fraction", snapshot.dataGap)
 			assertTrue(snapshot.interpolated)
 			assertTrue(kotlin.math.abs(snapshot.sample.timestampMillis - expectedTime) <= 1L)
-			assertEquals(48.1 + (49.1 - 48.1) * actualFraction, snapshot.sample.latitude, 0.00001)
-			assertEquals(2.1 + (3.1 - 2.1) * actualFraction, snapshot.sample.longitude, 0.00001)
+			val expected = trajectory.sampleAt(actualFraction)
+			assertEquals(expected.latitude, snapshot.sample.latitude, 0.00001)
+			assertEquals(expected.longitude, snapshot.sample.longitude, 0.00001)
 			assertEquals(1_000.0 + (9_000.0 - 1_000.0) * actualFraction,
 				snapshot.sample.altitudeMeters!!, 0.01)
 		}
@@ -165,8 +168,9 @@ class FlightReplayGapTest {
 		val middle = FlightReplayEngine(untimed).snapshotAt(0.5f)
 		assertTrue(middle.dataGap)
 		assertTrue(middle.interpolated)
-		assertEquals(15.0, middle.sample.latitude, 0.00001)
-		assertEquals(30.0, middle.sample.longitude, 0.00001)
+		val expected = FlightGapTrajectory.buildAll(untimed.samples).getValue(0).sampleAt(0.5)
+		assertEquals(expected.latitude, middle.sample.latitude, 0.00001)
+		assertEquals(expected.longitude, middle.sample.longitude, 0.00001)
 		assertSame(a, FlightReplayEngine(untimed).snapshotAt(0f).sample)
 		assertSame(b, FlightReplayEngine(untimed).snapshotAt(1f).sample)
 	}

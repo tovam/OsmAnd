@@ -48,7 +48,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		val showPoints: Boolean = false,
 		val photos: List<FlightPhotoAttachment> = emptyList(),
 		val recorded: Boolean = true,
-		val routeSegments: List<FlightRouteSegment> = emptyList(),
+		val routePaths: List<FlightRoutePath> = emptyList(),
 	)
 
 	@Volatile
@@ -157,12 +157,12 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		if (previous.trip === trip && previous.sample == sample && previous.showPoints == showPoints &&
 			previous.photos == photos && previous.recorded == recorded
 		) return
-		val routeSegments = if (previous.trip === trip && previous.recorded == recorded) {
-			previous.routeSegments
+		val routePaths = if (previous.trip === trip && previous.recorded == recorded) {
+			previous.routePaths
 		} else {
-			flightRouteSegments(trip?.samples.orEmpty(), recorded = recorded)
+			flightRoutePaths(trip?.samples.orEmpty(), recorded = recorded)
 		}
-		state = LayerState(trip, sample, showPoints, photos, recorded, routeSegments)
+		state = LayerState(trip, sample, showPoints, photos, recorded, routePaths)
 		if (previous.trip !== trip || previous.recorded != recorded) {
 			routeGeometryDirty = true
 			pointGeometryDirty = true
@@ -222,7 +222,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			aircraftDirty = true
 			mapRendererChanged = false
 		}
-		if (routeGeometryDirty) rebuildRoute(current.trip, current.routeSegments)
+		if (routeGeometryDirty) rebuildRoute(current.trip, current.routePaths)
 		if (hypothesisDirty) rebuildHypothesis()
 		if (pointGeometryDirty) rebuildRecordedPoints(current.trip, current.showPoints)
 		if (photoGeometryDirty) rebuildPhotoMarkers(current.trip, current.photos)
@@ -259,12 +259,11 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		fallbackRoutePaint.strokeWidth = (TUBE_CORE_WIDTH_DP * density).toFloat()
 		fallbackGapSleevePaint.strokeWidth = (TUBE_SLEEVE_WIDTH_DP * density).toFloat()
 		fallbackGapPaint.strokeWidth = (TUBE_CORE_WIDTH_DP * density).toFloat()
-		current.routeSegments.forEach { segment ->
-			val range = segment.range
-			if (range.last <= range.first) return@forEach
+		current.routePaths.forEach { segment ->
+			if (segment.vertices.size < 2) return@forEach
 			val path = Path()
-			sampledIndices(range, MAXIMUM_ROUTE_POINTS).forEachIndexed { pathIndex, sampleIndex ->
-				val sample = samples[sampleIndex]
+			segment.vertices.forEachIndexed { pathIndex, vertex ->
+				val sample = vertex.sample
 				val x = tileBox.getPixXFromLatLon(sample.latitude, sample.longitude)
 				val y = tileBox.getPixYFromLatLon(sample.latitude, sample.longitude)
 				if (pathIndex == 0) path.moveTo(x, y) else path.lineTo(x, y)
@@ -310,7 +309,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		canvas.restore()
 	}
 
-	private fun rebuildRoute(trip: FlightTrip?, routeSegments: List<FlightRouteSegment>) {
+	private fun rebuildRoute(trip: FlightTrip?, routePaths: List<FlightRoutePath>) {
 		nativeTrip = trip
 		nativeHeights = trip?.samples?.let(::resolveVisualHeights) ?: FloatArray(0)
 		val samples = trip?.samples.orEmpty()
@@ -330,18 +329,20 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 			routeLinesCollection = it
 		}
 		val lineScale = GeometryWayDrawer.getVectorLineScale(application).toDouble()
-		val segments = routeSegments.filter { it.range.last - it.range.first >= 1 }
+		val segments = routePaths.filter { it.vertices.size >= 2 }
 		val usedStrokes = mutableSetOf<RouteStroke>()
 		val colorIndexes = mutableMapOf<Int, Int>()
 		val strokesByColor = routeStrokes.groupBy { it.color }
 		for (segment in segments) {
-			val range = segment.range
 			val color = if (segment.isGap) GPS_GAP_COLOR else TUBE_CORE_COLOR
 			val points = QVectorPointI()
 			val heights = QListFloat()
-			for (index in sampledIndices(range, MAXIMUM_ROUTE_POINTS)) {
-				points.add(point31(samples[index]))
-				heights.add(nativeHeights[index])
+			for (vertex in segment.vertices) {
+				points.add(point31(vertex.sample))
+				val lower = vertex.sourcePosition.toInt().coerceIn(0, nativeHeights.lastIndex)
+				val upper = (lower + 1).coerceAtMost(nativeHeights.lastIndex)
+				val fraction = (vertex.sourcePosition - lower).toFloat()
+				heights.add(nativeHeights[lower] + (nativeHeights[upper] - nativeHeights[lower]) * fraction)
 			}
 
 			val colorIndex = colorIndexes.getOrDefault(color, 0)
@@ -436,20 +437,6 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		line.setHeights(heights)
 		line.setElevationScaleFactor(1f)
 		line.setIsHidden(false)
-	}
-
-	private fun sampledIndices(range: IntRange, maximumCount: Int): List<Int> {
-		val count = range.last - range.first + 1
-		if (count <= maximumCount) return range.toList()
-		val step = ceil((count - 1) / (maximumCount - 1).toDouble()).toInt().coerceAtLeast(1)
-		return buildList {
-			var index = range.first
-			while (index <= range.last) {
-				add(index)
-				index += step
-			}
-			if (lastOrNull() != range.last) add(range.last)
-		}
 	}
 
 	private fun rebuildRecordedPoints(trip: FlightTrip?, showPoints: Boolean) {
@@ -843,7 +830,6 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 
 	companion object {
 		private const val MAXIMUM_NATIVE_POINTS = 1_200
-		private const val MAXIMUM_ROUTE_POINTS = 4_000
 		private const val TUBE_SLEEVE_WIDTH_DP = 9.6
 		private const val TUBE_CORE_WIDTH_DP = 9.6
 		private const val POINT_BITMAP_DP = 10f

@@ -11,7 +11,7 @@ class FlightReplayEngine(private val trip: FlightTrip, recordedSampleCount: Int 
 
 	private val recordedCount = recordedSampleCount.coerceIn(0, trip.samples.size)
 	// Compute the same red-edge policy as the route/profile once, not on every scrub frame.
-	private val gapEdges = flightGpsGaps(trip.samples, recordedCount).map { it.fromIndex }.toSet()
+	private val gapTrajectories = FlightGapTrajectory.buildAll(trip.samples, recordedSampleCount = recordedCount)
 
 	fun snapshotAt(requestedProgress: Float): FlightSnapshot {
 		val progress = (requestedProgress.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f)
@@ -71,10 +71,11 @@ class FlightReplayEngine(private val trip: FlightTrip, recordedSampleCount: Int 
 		lowerIndex: Int, lower: FlightSample, upper: FlightSample, fraction: Float, progress: Float
 	): FlightSnapshot {
 		val dataGap = lowerIndex + 1 < recordedCount && (
-			lowerIndex in gapEdges || lower.legIndex != upper.legIndex ||
+			lowerIndex in gapTrajectories || lower.legIndex != upper.legIndex ||
 			upper.timestampMillis - lower.timestampMillis > MAX_INTERPOLATION_GAP_MILLIS
 		)
-		val sample = FlightSampleInterpolator.interpolateSamples(lower, upper, fraction)
+		val sample = gapTrajectories[lowerIndex]?.sampleAt(fraction.toDouble())
+			?: FlightSampleInterpolator.interpolateSamples(lower, upper, fraction)
 		return FlightSnapshot(
 			// Position, altitude, speed and heading are display estimates. Accuracy, GPS counts
 			// and other sensor measurements are unknown between the real endpoints of a gap.
