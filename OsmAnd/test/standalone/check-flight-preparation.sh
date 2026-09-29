@@ -49,6 +49,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightCameraKeyPolicy.kt" \
   "$sources/FlightCalibrationTerrain.kt" \
   "$sources/FlightAltitudeProfile.kt" \
+  "$sources/FlightGpsGaps.kt" "$sources/FlightOverviewTiles.kt" "$sources/FlightVisibilityLease.kt" \
   "$sources/FlightProfileSegments.kt" \
   "$sources/FlightLiveDisplayState.kt" \
   "$sources/FlightRecordingDecision.kt" \
@@ -70,6 +71,8 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightLibraryPresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMonitoringTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMapPresentationTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightVisibilityLeaseTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightOverviewTilesTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightConcurrentTransfersTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightNativeTrackUpdatePlanTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCameraKeyPolicyTest.kt" \
@@ -78,6 +81,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCloudMultiPhoneTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCalibrationTerrainTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightAltitudeProfileTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightGpsGapsTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightProfileSegmentsTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightLiveDisplayStateTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightRecordingDecisionTest.kt" \
@@ -102,6 +106,9 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightRecordingMetadataPersistenceTest.kt"
 java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightMapPresentationTest \
+  net.osmand.test.junit.FlightVisibilityLeaseTest \
+  net.osmand.test.junit.FlightOverviewTilesTest \
+  net.osmand.test.junit.FlightGpsGapsTest \
   net.osmand.test.junit.FlightConcurrentTransfersTest \
   net.osmand.test.junit.FlightRecordingMetadataPersistenceTest \
   net.osmand.test.junit.FlightNativeTrackUpdatePlanTest \
