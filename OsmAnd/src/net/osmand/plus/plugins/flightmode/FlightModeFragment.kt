@@ -51,6 +51,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private var previous3DMapsEnabled: Boolean? = null
 	private var flightMapViewInitialized = false
 	private var flightRendererSetupRequested = false
+	private var flightProjectionEnabled = false
 	private val locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
 		if (granted[Manifest.permission.ACCESS_FINE_LOCATION]==true) viewModel.startLive()
 	}
@@ -338,6 +339,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		if (bounds == null) {
 			cancelNativeMapGesture()
 			splitMapViewport?.restore()
+			setFlightProjection(false)
 			return
 		}
 		if (!isResumed || viewModel.uiState.page !in listOf(FlightPage.MAP, FlightPage.MIXED)) return
@@ -345,6 +347,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		val viewport = splitMapViewport ?: FlightSplitMapViewport(activity,
 			activity.findViewById(R.id.map_view_with_layers), activity.mapPositionManager).also { splitMapViewport = it }
 		viewport.updateBounds(bounds)
+		setFlightProjection(true)
 	}
 
 	private fun showReplayStateOnMap(
@@ -402,9 +405,14 @@ class FlightModeFragment : BaseFullScreenFragment() {
 
 	private fun setFlightProjection(enabled: Boolean) {
 		val map = app.osmandMap.mapView
-		try { FlightVectorLineBridge.setFlightProjection(enabled) } catch (_: LinkageError) { return }
+		val active = enabled && isResumed &&
+			viewModel.uiState.page in listOf(FlightPage.MAP, FlightPage.MIXED) &&
+			NativeCoreContext.isInit() && map.hasMapRenderer()
+		if (flightProjectionEnabled == active) return
+		try { FlightVectorLineBridge.setFlightProjection(active) } catch (_: LinkageError) { return }
+		flightProjectionEnabled = active
 		// Flight top-down uses a plane. Restore the normal map's globe preference on exit.
-		map.mapRenderer?.setFlatEarth(enabled || !app.settings.SPHERICAL_MAP.get())
+		map.mapRenderer?.setFlatEarth(active || !app.settings.SPHERICAL_MAP.get())
 		// Invalidate the native cached camera even if the geographic target is unchanged.
 		map.mapRenderer?.let { renderer ->
 			renderer.setElevationAngle(map.elevationAngle - 0.001f)
@@ -521,11 +529,16 @@ class FlightModeFragment : BaseFullScreenFragment() {
 
 		flightRendererSetupRequested = true
 		app.settings.USE_OPENGL_RENDER.set(true)
-		val attachRenderer = {
+		val requestingView = view
+		val attachRenderer = attach@{
+			flightRendererSetupRequested = false
+			// Native initialization may finish after leaving this screen. Never recreate
+			// the shared GL surface for a stale or paused fragment, or after init failed.
+			if (!isAdded || !isResumed || view !== requestingView || !NativeCoreContext.isInit()) return@attach
 			app.osmandMap.setupRenderingView()
 			app.osmandMap.mapView.mapActivity?.refreshMapComplete()
-			flightRendererSetupRequested = false
-			if (isResumed) { setFlightProjection(true); updateSatelliteOverlay() }
+			setFlightProjection(true)
+			updateSatelliteOverlay()
 		}
 		if (NativeCoreContext.isInit()) {
 			attachRenderer()

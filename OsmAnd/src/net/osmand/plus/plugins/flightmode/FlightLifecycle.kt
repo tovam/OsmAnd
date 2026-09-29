@@ -17,20 +17,17 @@ internal fun FlightVisibilityEffect(vararg keys: Any?, changed: (Boolean) -> Uni
     val action by rememberUpdatedState(changed)
     DisposableEffect(view, *keys) {
         val lifecycle = checkNotNull(view.findViewTreeLifecycleOwner()).lifecycle
-        var active: Boolean? = null
+        val lease = FlightVisibilityLease()
         fun update() {
             val next = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-            if (next != active) {
-                active = next
-                action(next)
-            }
+            lease.update(next, action)
         }
         val observer = LifecycleEventObserver { _, _ -> update() }
         lifecycle.addObserver(observer)
         update()
         onDispose {
             lifecycle.removeObserver(observer)
-            if (active == true) action(false)
+            lease.dispose()
         }
     }
 }
