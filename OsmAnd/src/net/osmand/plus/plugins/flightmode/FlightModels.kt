@@ -904,6 +904,7 @@ data class FlightUiState(
 	val satelliteOpacity: Float = 0.92f,
 	val mapFollowing: Boolean = true,
 	val mapCenterLocked: Boolean = false,
+	val mapHeadingLocked: Boolean = false,
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),
 	val showTrackPoints: Boolean = false,
 	val flightSpans: List<FlightSpan> = emptyList(),

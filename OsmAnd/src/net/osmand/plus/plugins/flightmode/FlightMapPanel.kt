@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -30,7 +29,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.*
 import net.osmand.core.android.MapRendererView
-import net.osmand.data.LatLon
 import net.osmand.plus.R
 import net.osmand.plus.utils.NativeUtilities
 import net.osmand.plus.views.OsmandMapTileView
@@ -49,10 +47,12 @@ internal fun FlightMapPanel(
     onBounds: (Rect?) -> Unit,
     modifier: Modifier = Modifier,
     showCone: Boolean = false,
+    coneAspectRatio: Float = 1f,
     onFollow: (() -> Unit)? = null,
     controlsVisible: Boolean = true,
     onToggleControls: (() -> Unit)? = null,
     onLockCenter: (() -> Unit)? = null,
+    onSetHeadingLocked: (Boolean) -> Unit = {},
 ) {
     val host = LocalView.current
     val bounds by rememberUpdatedState(onBounds)
@@ -79,6 +79,17 @@ internal fun FlightMapPanel(
         if (visible) renderer?.addListener(listener) else renderer?.removeListener(listener)
     }
     DisposableEffect(Unit) { onDispose { bounds(null) } }
+    if (showCone && mapView != null) {
+        val coneLayer = remember(mapView) { FlightViewConeLayer(host.context) }
+        SideEffect {
+            coneLayer.update(flightMapViewCone(state.snapshot?.sample, state.windowPlacement, state.windowLook, coneAspectRatio))
+        }
+        FlightVisibilityEffect(mapView, coneLayer) { visible ->
+            if (visible) mapView.addLayer(coneLayer, FlightViewConeLayer.Z_ORDER)
+            else mapView.removeLayer(coneLayer)
+            mapView.refreshMap()
+        }
+    }
     val blend = LocalFlightMapBlend.current
     Box(
         modifier.clipToBounds().onGloballyPositioned { coordinates ->
@@ -97,49 +108,9 @@ internal fun FlightMapPanel(
                 update = {
                     it.update(mapView, onExplore)
                     it.lockedCenter = state.snapshot?.sample.takeIf { state.mapCenterLocked }
+                    it.lockedBearingDegrees = state.snapshot?.sample?.bearingDegrees.takeIf { state.mapHeadingLocked }
                 },
             )
-        if (showCone && mapView != null)
-            Canvas(Modifier.fillMaxSize()) {
-                @Suppress("UNUSED_VARIABLE") val frame = revision
-                val sample = state.snapshot?.sample ?: return@Canvas
-                val box = mapView.currentRotatedTileBox
-                fun screen(location: LatLon): Offset {
-                    val p = NativeUtilities.getPixelFromLatLon(mapView.mapRenderer, box, location)
-                    return Offset(p.x, p.y)
-                }
-                val origin = LatLon(sample.latitude, sample.longitude)
-                val azimuth =
-                    state.windowPlacement.viewAzimuthDegrees(
-                        sample.bearingDegrees ?: 0f,
-                        state.windowLook,
-                    )
-                val fov =
-                    state.windowPlacement.horizontalFieldOfViewDegrees(
-                        size.width / size.height.coerceAtLeast(1f)
-                    )
-                val distance =
-                    box.getDistance(box.pixWidth / 2, box.pixHeight / 2, box.pixWidth / 2, 0)
-                        .coerceIn(500.0, 100_000.0)
-                val center = screen(origin)
-                val cone =
-                    Path().apply {
-                        moveTo(center.x, center.y)
-                        for (i in 0..24) {
-                            val p =
-                                screen(
-                                    MapUtils.rhumbDestinationPoint(
-                                        origin,
-                                        distance,
-                                        (azimuth - fov / 2 + fov * i / 24).toDouble(),
-                                    )
-                                )
-                            lineTo(p.x, p.y)
-                        }
-                        close()
-                    }
-                drawPath(cone, Color(0x4059CCFF))
-            }
         Row(
             Modifier.align(Alignment.TopEnd).background(Color(0x9018252D)),
             verticalAlignment = Alignment.CenterVertically,
@@ -151,16 +122,19 @@ internal fun FlightMapPanel(
                 rotation = mapView?.rotate ?: 0f,
                 label = "%03d°".format(Math.floorMod((-(mapView?.rotate ?: 0f)).roundToInt(), 360)),
             ) {
+                onSetHeadingLocked(false)
                 mapView?.resetRotation()
             }
-            val bearing = state.snapshot?.sample?.bearingDegrees
+            val bearing = state.snapshot?.sample?.bearingDegrees?.takeIf { it.isFinite() }
             MapControl(
                 R.drawable.ic_action_direction_arrow,
-                stringResource(R.string.flight_map_heading_up),
-                enabled = bearing != null,
+                stringResource(if (state.mapHeadingLocked) R.string.flight_map_heading_unlock else R.string.flight_map_heading_lock),
+                label = stringResource(R.string.flight_map_heading_short),
+                enabled = bearing != null || state.mapHeadingLocked,
+                active = state.mapHeadingLocked,
             ) {
-                mapView?.setRotate(-(bearing ?: 0f), true)
-                mapView?.refreshMap()
+                if (!state.mapHeadingLocked) mapView?.animatedDraggingThread?.stopAnimatingSync()
+                onSetHeadingLocked(!state.mapHeadingLocked)
             }
             val topViewDescription = stringResource(R.string.flight_map_top_view)
             Box(
@@ -186,13 +160,17 @@ internal fun FlightMapPanel(
                         else R.string.flight_map_center_lock
                     ),
                     active = state.mapCenterLocked,
-                    onClick = lock,
+                    onClick = {
+                        if (!state.mapCenterLocked) mapView?.animatedDraggingThread?.stopAnimatingSync()
+                        lock()
+                    },
                 )
             }
             onFollow?.let { follow ->
                 MapControl(
-                    R.drawable.ic_action_center_on_track,
-                    stringResource(R.string.flight_mode_map_following),
+                    R.drawable.ic_action_get_my_location,
+                    stringResource(if (state.mapFollowing) R.string.flight_map_follow_off else R.string.flight_map_follow_on),
+                    label = stringResource(R.string.flight_map_follow_short),
                     active = state.mapFollowing,
                     onClick = follow,
                 )

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_map_heading_short">Cap</string>
+    <string name="flight_map_heading_lock">Verrouiller le cap et la position de l’avion</string>
+    <string name="flight_map_heading_unlock">Libérer le verrouillage du cap</string>
+    <string name="flight_map_follow_short">Suivi</string>
+    <string name="flight_map_follow_on">Suivre l’avion</string>
+    <string name="flight_map_follow_off">Arrêter le suivi de l’avion</string>
     <string name="flight_replay_estimated_position">Position estimée · trou GPS</string>
     <string name="local_crash_report">Rapport de crash local</string>
     <string name="local_report_private">Aucun envoi. Vous pouvez copier ou enregistrer le rapport.</string>

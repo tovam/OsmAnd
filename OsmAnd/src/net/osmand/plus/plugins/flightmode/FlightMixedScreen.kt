@@ -4,6 +4,7 @@ import android.graphics.Rect
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import net.osmand.plus.views.OsmandMapTileView
 
 /** Both halves share one flight snapshot. Each owns a disjoint pointer surface. */
@@ -22,7 +23,9 @@ internal fun FlightMixedScreen(
     onRenderStats: (FlightTerrainRenderStats) -> Unit,
     onFollow: () -> Unit,
     onLockCenter: () -> Unit,
+    onSetHeadingLocked: (Boolean) -> Unit,
 ) {
+    var sceneAspectRatio by remember { mutableFloatStateOf(1f) }
     Column(Modifier.fillMaxSize()) {
         FlightWindowScene(
             placement = state.windowPlacement, look = state.windowLook, trip = state.trip,
@@ -38,11 +41,14 @@ internal fun FlightMixedScreen(
             onInitializePhotoViewport = { _, _ -> }, onSetPhotoOpacity = {}, onSetGestureTarget = {},
             onResetPhotoTransform = {}, onRotatePhoto = { _, _ -> }, onClearPhoto = {}, onSetShadowsEnabled = {},
             onRetryTerrain = onRetry, onRendererError = onRendererError, onRenderStats = onRenderStats,
-            gesturesOnly = true, modifier = Modifier.weight(1f).fillMaxWidth(),
+            gesturesOnly = true, modifier = Modifier.weight(1f).fillMaxWidth().onSizeChanged {
+                sceneAspectRatio = it.width.toFloat() / it.height.coerceAtLeast(1)
+            },
         )
         FlightMapPanel(state, mapView, onMapExplore, onMapBounds,
             modifier = Modifier.weight(1f).fillMaxWidth(), showCone = true,
-            onFollow = onFollow, onLockCenter = onLockCenter)
+            coneAspectRatio = sceneAspectRatio,
+            onFollow = onFollow, onLockCenter = onLockCenter, onSetHeadingLocked = onSetHeadingLocked)
         FlightBottomNavigation(state, onPage, minimalChrome = true)
     }
 }

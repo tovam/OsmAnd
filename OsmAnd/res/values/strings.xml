@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_map_heading_short">Heading</string>
+	<string name="flight_map_heading_lock">Lock aircraft heading and position</string>
+	<string name="flight_map_heading_unlock">Release heading lock</string>
+	<string name="flight_map_follow_short">Follow</string>
+	<string name="flight_map_follow_on">Follow the aircraft</string>
+	<string name="flight_map_follow_off">Stop following the aircraft</string>
 	<string name="flight_replay_estimated_position">Estimated position · GPS gap</string>
 	<string name="local_crash_report">Local crash report</string>
 	<string name="local_report_private">Nothing is sent. Copy or save the report yourself.</string>

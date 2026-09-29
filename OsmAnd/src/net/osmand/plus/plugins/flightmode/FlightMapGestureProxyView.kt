@@ -23,6 +23,8 @@ class FlightMapGestureProxyView(
 ) : View(context) {
 	/** Lock only translation; native pinch, bearing and tilt are still forwarded. */
 	var lockedCenter: FlightSample? = null
+	/** Zoom and tilt remain available, but an active heading lock rejects manual rotation. */
+	var lockedBearingDegrees: Float? = null
 
 	private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 	private val touchSlopSquared = touchSlop * touchSlop
@@ -129,6 +131,11 @@ class FlightMapGestureProxyView(
 	}
 
 	private fun enforceCenter() {
+		lockedBearingDegrees?.takeIf { it.isFinite() }?.let { bearing ->
+			// Unlike setRotate(), this does not start an animation or ignore multi-touch.
+			if (abs(MapUtils.unifyRotationDiff(-bearing, target.rotate)) > 0.01f)
+				target.rotateToAnimate(-bearing)
+		}
 		// setLatLon stops the map animation thread, including the pinch's zoom settling.
 		// Re-anchor only the geographic target; leave all other camera degrees of freedom intact.
 		lockedCenter?.let { target.setTarget31(MapUtils.get31TileNumberX(it.longitude), MapUtils.get31TileNumberY(it.latitude)) }

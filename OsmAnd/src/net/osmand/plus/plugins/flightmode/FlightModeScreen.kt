@@ -194,6 +194,7 @@ fun FlightModeScreen(
 	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
 	onSetMapCenterLocked: (Boolean) -> Unit = {},
+	onSetMapHeadingLocked: (Boolean) -> Unit = {},
 	onReturnLive: () -> Unit = {},
 	onShowTrackPoints: (Boolean) -> Unit,
 	onMarkFlightStart: () -> Unit,
@@ -307,7 +308,8 @@ fun FlightModeScreen(
 			state.pendingPhotos,
 			state.page,
 			state.mapFollowing,
-			state.mapCenterLocked
+			state.mapCenterLocked,
+			state.mapHeadingLocked
 		) {
 			onMapState(
 				state.trip,
@@ -403,6 +405,7 @@ fun FlightModeScreen(
 					onToggleReplay = onToggleReplay,
 					onSetMapFollowing = onSetMapFollowing,
 					onSetMapCenterLocked = onSetMapCenterLocked,
+					onSetMapHeadingLocked = onSetMapHeadingLocked,
 					onShowTrackPoints = onShowTrackPoints,
 					onReturnLive = onReturnLive,
 					onMarkFlightStart = onMarkFlightStart,
@@ -451,7 +454,8 @@ fun FlightModeScreen(
 				FlightPage.MIXED -> FlightMixedScreen(state, mapView, onPageChange,
 					{ onSetMapFollowing(false) }, onSplitMapBounds, onMoveWindowLook, onChangeWindowZoom,
 					onRecenterWindowLook, onRetryTerrain, onTerrainRendererError, onTerrainRenderStats,
-					{ onSetMapFollowing(!state.mapFollowing) }, { onSetMapCenterLocked(!state.mapCenterLocked) })
+					{ onSetMapFollowing(!state.mapFollowing) }, { onSetMapCenterLocked(!state.mapCenterLocked) },
+					onSetMapHeadingLocked)
 				FlightPage.WINDOW_SETUP -> WindowSetupScreen(
 					state = state,
 					onBack = { onPageChange(FlightPage.WINDOW) },
@@ -782,6 +786,7 @@ private fun MapScreen(
 	onToggleReplay: () -> Unit,
 	onSetMapFollowing: (Boolean) -> Unit,
 	onSetMapCenterLocked: (Boolean) -> Unit,
+	onSetMapHeadingLocked: (Boolean) -> Unit,
 	onShowTrackPoints: (Boolean) -> Unit,
 	onReturnLive: () -> Unit,
 	onMarkFlightStart: () -> Unit,
@@ -798,6 +803,7 @@ private fun MapScreen(
 		FlightMapPanel(state, mapView, { onSetMapFollowing(false) }, onMapBounds,
 			modifier = Modifier.weight(1f).fillMaxWidth(), onFollow = { onSetMapFollowing(!state.mapFollowing) },
 			onLockCenter = { onSetMapCenterLocked(!state.mapCenterLocked) },
+			onSetHeadingLocked = onSetMapHeadingLocked,
 			controlsVisible = controlsVisible, onToggleControls = { controlsVisible = !controlsVisible })
 		if (controlsVisible) Column(Modifier.fillMaxWidth()) {
 			Row(Modifier.fillMaxWidth().background(FlightHudPanel)) {

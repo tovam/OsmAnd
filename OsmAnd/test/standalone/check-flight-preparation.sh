@@ -45,6 +45,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightLiveMonitoring.kt" "$sources/FlightOfflineCoverage.kt" \
   "$sources/FlightNativeTrackUpdatePlan.kt" \
   "$sources/FlightRouteDashes.kt" "$sources/FlightMapPresentation.kt" \
+  "$sources/FlightMapCamera.kt" \
   "$sources/FlightConcurrentTransfers.kt" \
   "$sources/FlightCameraKeyPolicy.kt" \
   "$sources/FlightCalibrationTerrain.kt" \
@@ -76,6 +77,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightConcurrentTransfersTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightNativeTrackUpdatePlanTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCameraKeyPolicyTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightMapCameraTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCameraWorkPolicyTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCloudIdentityTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCloudMultiPhoneTest.kt" \
@@ -107,6 +109,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightRecordingMetadataPersistenceTest.kt"
 java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightMapPresentationTest \
+  net.osmand.test.junit.FlightMapCameraTest \
   net.osmand.test.junit.FlightVisibilityLeaseTest \
   net.osmand.test.junit.FlightOverviewTilesTest \
   net.osmand.test.junit.FlightGpsGapsTest \
@@ -129,4 +132,10 @@ cd "$repo_root"
 java -Djava.io.tmpdir="$test_output" -cp "$test_output:$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightPreparationLogicTest net.osmand.test.junit.FlightRecordingLinesTest net.osmand.test.junit.FlightWorkspaceTest net.osmand.test.junit.FlightLocalNavigationTest net.osmand.test.junit.FlightPhotoCalibrationPersistenceTest net.osmand.test.junit.FlightPhotoDepthTest net.osmand.test.junit.FlightDownloadCancellationTest net.osmand.test.junit.FlightPhotoFitDiagnosticsTest net.osmand.test.junit.FlightCloudArchiveTest net.osmand.test.junit.FlightOfflineJourneyTest net.osmand.test.junit.FlightJournalSummaryMetadataTest net.osmand.test.junit.FlightLibraryPresentationTest
 java -Djava.io.tmpdir="$test_output" -cp "$test_output:$classpath" org.junit.runner.JUnitCore net.osmand.test.junit.FlightLiveSimulationTest net.osmand.test.junit.FlightCameraOpticsTest net.osmand.test.junit.FlightWorkPolicyTest net.osmand.test.junit.FlightAssetSchedulerTest net.osmand.test.junit.FlightStreamingVisibilityTest net.osmand.test.junit.FlightDisplaySafetyTest net.osmand.test.junit.FlightRecordingPolicyTest net.osmand.test.junit.FlightArchiveInventoryTest net.osmand.test.junit.FlightJournalOperationsTest net.osmand.test.junit.FlightPhotoOrientationTest net.osmand.test.junit.FlightTerrainResidencyTest net.osmand.test.junit.FlightMonitoringTest
+java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
+  -no-stdlib -no-reflect -jvm-target 1.8 -classpath "$classpath" -Xfriend-paths="$test_output" -d "$test_output" \
+  "$sources/FlightViewConeLayer.kt" \
+  "$repo_root"/OsmAnd/test/standalone/kotlin/map-cone/*.kt \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightViewConeLayerTest.kt"
+java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore net.osmand.test.junit.FlightViewConeLayerTest
 echo "Flight logic check classes: $test_output"

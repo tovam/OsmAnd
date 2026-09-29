@@ -1389,13 +1389,15 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun setMapFollowing(following: Boolean) {
-		if (uiState.mapFollowing != following) {
-			uiState = uiState.copy(mapFollowing = following, mapCenterLocked = uiState.mapCenterLocked && following)
-		}
+		uiState = uiState.withMapFollowing(following)
 	}
 
 	fun setMapCenterLocked(locked: Boolean) {
-		uiState = uiState.copy(mapCenterLocked=locked, mapFollowing=locked || uiState.mapFollowing)
+		uiState = uiState.withMapCenterLocked(locked)
+	}
+
+	fun setMapHeadingLocked(locked: Boolean) {
+		uiState = uiState.withMapHeadingLocked(locked)
 	}
 
 	fun setShowTrackPoints(show: Boolean) {

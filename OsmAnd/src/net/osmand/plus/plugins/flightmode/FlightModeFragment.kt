@@ -158,6 +158,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onTerrainRenderStats = viewModel::setTerrainRenderStats,
 					onSetMapFollowing = viewModel::setMapFollowing,
 					onSetMapCenterLocked = viewModel::setMapCenterLocked,
+					onSetMapHeadingLocked = viewModel::setMapHeadingLocked,
 					onReturnLive = viewModel::returnToLive,
 					onShowTrackPoints = viewModel::setShowTrackPoints,
 					onMarkFlightStart = viewModel::markFlightStart,
@@ -364,6 +365,9 @@ class FlightModeFragment : BaseFullScreenFragment() {
 			viewModel.uiState.liveState.latest)
 		if (sample == null || !viewModel.uiState.mapFollowing) return
 		val mapView = app.osmandMap.mapView
+		if (viewModel.uiState.mapHeadingLocked) {
+			sample.bearingDegrees?.takeIf { it.isFinite() }?.let { mapView.rotateToAnimate(-it) }
+		}
 		if (viewModel.uiState.mapCenterLocked) {
 			mapView.setTarget31(net.osmand.util.MapUtils.get31TileNumberX(sample.longitude),
 				net.osmand.util.MapUtils.get31TileNumberY(sample.latitude))
