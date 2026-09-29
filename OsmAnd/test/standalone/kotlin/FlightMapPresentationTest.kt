@@ -24,11 +24,34 @@ class FlightMapPresentationTest {
     fun timeScaleRepresentsCurrentSpeed() {
         for (speed in listOf(1.0, 50.0, 250.0)) {
             val visibleMeters = 6400.0
-            val seconds = flightScaleStep(visibleMeters / speed)
+            val seconds = flightTimeScaleStep(visibleMeters / speed)
             val fraction = seconds * speed / visibleMeters
             assertTrue(fraction > 0 && fraction <= 1)
             assertEquals(seconds, fraction * visibleMeters / speed, 1e-9)
         }
+    }
+
+    @Test
+    fun timeScaleUsesReadableIntervalsAndLabels() {
+        assertEquals(15.0, flightTimeScaleStep(17.0), 0.0)
+        assertEquals(30.0, flightTimeScaleStep(59.9), 0.0)
+        assertEquals(60.0, flightTimeScaleStep(60.0), 0.0)
+        assertEquals(120.0, flightTimeScaleStep(299.9), 0.0)
+        assertEquals(300.0, flightTimeScaleStep(300.0), 0.0)
+        assertEquals(300.0, flightTimeScaleStep(599.9), 0.0)
+        assertEquals(600.0, flightTimeScaleStep(600.0), 0.0)
+        assertEquals(900.0, flightTimeScaleStep(960.0), 0.0)
+        assertEquals(1800.0, flightTimeScaleStep(31 * 60.0), 0.0)
+        assertEquals(7200.0, flightTimeScaleStep(8000.0), 0.0)
+        assertEquals("30 s", flightTimeScaleLabel(30.0))
+        assertEquals("5 min", flightTimeScaleLabel(300.0))
+        assertEquals("10 min", flightTimeScaleLabel(600.0))
+        assertEquals("2 h", flightTimeScaleLabel(7200.0))
+        assertEquals(0.0, flightTimeScaleStep(0.5), 0.0)
+        assertEquals(
+            setOf(60.0, 120.0, 300.0, 600.0, 900.0, 1800.0),
+            (60 until 3600).map { flightTimeScaleStep(it.toDouble()) }.toSet(),
+        )
     }
 
     @Test

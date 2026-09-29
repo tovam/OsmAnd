@@ -794,7 +794,7 @@ private fun MapScreen(
 	var controlsVisible by rememberSaveable { mutableStateOf(true) }
 	Column(Modifier.fillMaxSize()) {
 		FlightTopBar(routeTitle(state), state.sessionMode, onClose, overlay = true)
-		if (controlsVisible) InstrumentStrip(sample, overlay = true)
+		if (controlsVisible) CompactInstrumentStrip(sample, showAccuracy = true)
 		FlightMapPanel(state, mapView, { onSetMapFollowing(false) }, onMapBounds,
 			modifier = Modifier.weight(1f).fillMaxWidth(), onFollow = { onSetMapFollowing(!state.mapFollowing) },
 			onLockCenter = { onSetMapCenterLocked(!state.mapCenterLocked) },
@@ -1129,23 +1129,27 @@ private fun WindowPanelSelector(panel: WindowPanel, onSelect: (WindowPanel) -> U
 }
 
 @Composable
-private fun CompactInstrumentStrip(sample: FlightSample?) {
+private fun CompactInstrumentStrip(sample: FlightSample?, showAccuracy: Boolean = false) {
 	Row(
-		Modifier.fillMaxWidth().height(48.dp).background(FlightPanelStrong).border(1.dp, FlightLine),
+		Modifier.fillMaxWidth().heightIn(min = 34.dp).background(FlightPanelStrong).border(1.dp, FlightLine),
 		verticalAlignment = Alignment.CenterVertically
 	) {
 		CompactMetric(stringResource(R.string.flight_mode_altitude_short).uppercase(), sample?.altitudeMeters?.let { "%.0f m".format(it) } ?: "—", Modifier.weight(1f))
 		CompactMetric(stringResource(R.string.flight_mode_speed_short).uppercase(), sample?.speedMetersPerSecond?.let { "%.0f km/h".format(it * 3.6f) } ?: "—", Modifier.weight(1f))
 		CompactMetric(stringResource(R.string.flight_mode_gps).uppercase(), sample?.satellitesUsed?.let { "$it/${sample.satellitesFound ?: 0}" } ?: "—", Modifier.weight(1f))
-		CompactMetric(stringResource(R.string.flight_mode_time_short).uppercase(), sample?.timestampMillis?.takeIf { it > 0L }?.let(::formatClock) ?: "—", Modifier.weight(1f))
+		if (showAccuracy) {
+			CompactMetric(stringResource(R.string.flight_mode_accuracy).uppercase(), sample?.horizontalAccuracyMeters?.let { "±%.0f m".format(it) } ?: "—", Modifier.weight(1f))
+		} else {
+			CompactMetric(stringResource(R.string.flight_mode_time_short).uppercase(), sample?.timestampMillis?.takeIf { it > 0L }?.let(::formatClock) ?: "—", Modifier.weight(1f))
+		}
 	}
 }
 
 @Composable
 private fun CompactMetric(label: String, value: String, modifier: Modifier) {
-	Column(modifier.padding(horizontal = 6.dp), verticalArrangement = Arrangement.Center) {
-		Text(label, color = FlightMuted, fontSize = 7.sp, maxLines = 1)
-		Text(value, color = FlightText, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+	Column(modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.Center) {
+		Text(label, color = FlightMuted, fontSize = 8.sp, maxLines = 1)
+		Text(value, color = FlightText, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
 	}
 }
 
@@ -2103,46 +2107,6 @@ private fun FlightTopBar(title: String, mode: FlightSessionMode, onClose: () -> 
 			modifier = Modifier.padding(horizontal = 13.dp)
 		)
 	}
-}
-
-@Composable
-private fun InstrumentStrip(sample: FlightSample?, overlay: Boolean = false) {
-	Row(
-		modifier = Modifier.fillMaxWidth().height(66.dp)
-			.background(if (overlay) FlightHudPanel else FlightPanel)
-			.border(1.dp, FlightLine),
-		verticalAlignment = Alignment.CenterVertically
-	) {
-		InstrumentCell(stringResource(R.string.flight_mode_altitude), sample?.altitudeMeters?.let { "%.0f".format(it) } ?: "—", "m", Modifier.weight(1f))
-		VerticalDivider()
-		InstrumentCell(stringResource(R.string.flight_mode_speed), sample?.speedMetersPerSecond?.let { "%.0f".format(it * 3.6f) } ?: "—", "km/h", Modifier.weight(1f))
-		VerticalDivider()
-		InstrumentCell(
-			stringResource(R.string.flight_mode_gps),
-			if (sample?.satellitesUsed != null) "${sample.satellitesUsed}/${sample.satellitesFound ?: 0}" else "—",
-			"sat",
-			Modifier.weight(1f)
-		)
-		VerticalDivider()
-		InstrumentCell(stringResource(R.string.flight_mode_accuracy), sample?.horizontalAccuracyMeters?.let { "%.0f".format(it) } ?: "—", "m", Modifier.weight(1f))
-	}
-}
-
-@Composable
-private fun InstrumentCell(label: String, value: String, unit: String, modifier: Modifier) {
-	Column(modifier.padding(horizontal = 9.dp), verticalArrangement = Arrangement.Center) {
-		Text(label.uppercase(), color = FlightMuted, fontSize = 9.sp, letterSpacing = 0.6.sp)
-		Row(verticalAlignment = Alignment.Bottom) {
-			Text(value, color = FlightText, fontSize = 23.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
-			Spacer(Modifier.width(3.dp))
-			Text(unit, color = FlightMuted, fontSize = 10.sp, modifier = Modifier.padding(bottom = 3.dp))
-		}
-	}
-}
-
-@Composable
-private fun VerticalDivider() {
-	Box(Modifier.width(1.dp).fillMaxHeight(0.68f).background(FlightLine))
 }
 
 @Composable

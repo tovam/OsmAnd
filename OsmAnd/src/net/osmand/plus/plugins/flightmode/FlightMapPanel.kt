@@ -141,7 +141,7 @@ internal fun FlightMapPanel(
                 drawPath(cone, Color(0x4059CCFF))
             }
         Row(
-            Modifier.align(Alignment.TopEnd).background(Color(0xD918252D)),
+            Modifier.align(Alignment.TopEnd).background(Color(0x9018252D)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             @Suppress("UNUSED_VARIABLE") val frame = revision
@@ -162,19 +162,21 @@ internal fun FlightMapPanel(
                 mapView?.setRotate(-(bearing ?: 0f), true)
                 mapView?.refreshMap()
             }
-            Text(
-                (if (renderer != null) "GL" else "V1") +
-                    "\n${(mapView?.elevationAngle ?: 90f).roundToInt()}°",
-                color = Color.White,
-                fontSize = 10.sp,
-                modifier =
-                    Modifier.size(36.dp)
-                        .clickable(onClickLabel = stringResource(R.string.flight_map_top_view)) {
-                            mapView?.setElevationAngle(90f)
-                            mapView?.refreshMap()
-                        }
-                        .wrapContentSize(),
-            )
+            val topViewDescription = stringResource(R.string.flight_map_top_view)
+            Box(
+                Modifier.size(36.dp)
+                    .semantics { contentDescription = topViewDescription }
+                    .clickable(onClickLabel = topViewDescription) {
+                        mapView?.setElevationAngle(90f)
+                        mapView?.refreshMap()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (renderer != null) "GL" else "V1", color = Color.White, fontSize = 9.sp)
+                    Text("${(mapView?.elevationAngle ?: 90f).roundToInt()}°", color = Color.White, fontSize = 8.sp)
+                }
+            }
             onLockCenter?.let { lock ->
                 MapControl(
                     if (state.mapCenterLocked) R.drawable.ic_action_lock
@@ -210,7 +212,7 @@ internal fun FlightMapPanel(
         Column(
             Modifier.align(Alignment.BottomStart)
                 .padding(6.dp)
-                .background(Color(0xDD18252D))
+                .background(Color(0x5018252D))
                 .padding(4.dp)
         ) {
             @Suppress("UNUSED_VARIABLE") val frame = revision
@@ -238,13 +240,14 @@ internal fun FlightMapPanel(
                 )
                 val speed = state.snapshot?.sample?.speedMetersPerSecond?.toDouble() ?: 0.0
                 if (speed > 0.5 && speed.isFinite()) {
-                    val seconds = flightScaleStep(meters / speed)
-                    val label =
-                        if (seconds >= 60) "%.1f min".format(seconds / 60)
-                        else "%.0f s".format(seconds)
-                    val description = stringResource(R.string.flight_map_time_scale, label)
-                    Column(Modifier.semantics { contentDescription = description }) {
-                        FlightCompactScale("◷ $label", (seconds * speed / meters).toFloat())
+                    val visibleSeconds = meters / speed
+                    val seconds = flightTimeScaleStep(visibleSeconds)
+                    if (seconds > 0.0) {
+                        val label = flightTimeScaleLabel(seconds)
+                        val description = stringResource(R.string.flight_map_time_scale, label)
+                        Column(Modifier.semantics { contentDescription = description }) {
+                            FlightCompactScale("◷ $label", (seconds / visibleSeconds).toFloat())
+                        }
                     }
                 }
             }
@@ -284,27 +287,21 @@ private fun MapControl(
 ) {
     val tint = if (!enabled) Color.Gray else if (active) Color(0xFF75DFAB) else Color.White
     Box(
-        Modifier.size(40.dp)
+        Modifier.size(36.dp)
             .semantics { contentDescription = description }
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            painterResource(icon),
-            contentDescription = null,
-            tint = tint,
-            modifier =
-                Modifier.size(if (label == null) 21.dp else 17.dp)
-                    .align(if (label == null) Alignment.Center else Alignment.TopCenter)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                painterResource(icon),
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(if (label == null) 21.dp else 17.dp)
                     .graphicsLayer { rotationZ = rotation },
-        )
-        if (label != null)
-            Text(
-                label,
-                color = tint,
-                fontSize = 8.sp,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp),
             )
+            if (label != null) Text(label, color = tint, fontSize = 8.sp, maxLines = 1)
+        }
     }
 }
 
