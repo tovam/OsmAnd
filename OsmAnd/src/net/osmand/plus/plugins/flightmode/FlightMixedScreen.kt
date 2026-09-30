@@ -31,6 +31,7 @@ internal fun FlightMixedScreen(
     var pointingEnabled by remember { mutableStateOf(false) }
     val pointing = remember(state.journeyId) { FlightPointingState() }
     val scope = rememberCoroutineScope()
+    val selection by pointing.selection.state.collectAsState()
     val picker =
         rememberTerrainPicker(
             pointing.frame?.scene.takeIf { pointingEnabled && state.terrainScene != null }
@@ -39,6 +40,16 @@ internal fun FlightMixedScreen(
         if (!pointingEnabled || state.terrainScene == null) pointing.resetFrame()
     }
     SideEffect { pointing.terrain = picker }
+    LaunchedEffect(pointingEnabled, picker, pointing.frame) {
+        if (pointingEnabled)
+            pointing.selection.update(
+                scope,
+                picker?.let { terrain ->
+                    pointing.frame?.let { FlightPointingContext(terrain, frame = it) }
+                },
+                preparing = pointing.frame?.scene?.meshes?.any { it.terrainAvailable } == true,
+            )
+    }
     DisposableEffect(pointing) { onDispose { pointing.resetFrame() } }
     Column(Modifier.fillMaxSize()) {
         Box(
@@ -85,12 +96,14 @@ internal fun FlightMixedScreen(
                 onTerrainTap =
                     if (pointingEnabled)
                         { at ->
-                            val frame = pointing.frame
-                            pointing.select(scope) {
-                                frame?.ray(at.x.toDouble(), at.y.toDouble())?.let {
-                                    picker?.pointAt(it)
-                                }
-                            }
+                            pointing.selection.select(
+                                scope,
+                                FlightPointingClick.Scene(
+                                    at.x.toDouble(),
+                                    at.y.toDouble(),
+                                    pointing.frame,
+                                ),
+                            )
                         }
                     else null,
             )
@@ -100,11 +113,7 @@ internal fun FlightMixedScreen(
                 Modifier.align(Alignment.TopEnd).padding(6.dp),
             )
             if (pointingEnabled)
-                FlightPointingStatus(
-                    pointing.missingTerrain,
-                    picker != null,
-                    Modifier.align(Alignment.BottomStart).padding(8.dp),
-                )
+                FlightPointingStatus(selection, Modifier.align(Alignment.BottomStart).padding(8.dp))
         }
         FlightMapPanel(
             state,
@@ -117,10 +126,12 @@ internal fun FlightMixedScreen(
             onFollow = onFollow,
             onLockCenter = onLockCenter,
             onSetHeadingLocked = onSetHeadingLocked,
-            pickedPoint = pointing.point.takeIf { pointingEnabled },
+            pickedPoint = selection.point.takeIf { pointingEnabled },
             onMapPoint =
                 if (pointingEnabled)
-                    { lat, lon -> pointing.select(scope) { picker?.groundAt(lat, lon) } }
+                    { lat, lon ->
+                        pointing.selection.select(scope, FlightPointingClick.Map(lat, lon))
+                    }
                 else null,
         )
         FlightBottomNavigation(state, onPage, minimalChrome = true)

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_pointing_preparing">Preparing pointing on the visible terrain…</string>
+	<string name="flight_pointing_ready">Pointing ready</string>
+	<string name="flight_pointing_selecting">Locating the point…</string>
+	<string name="flight_pointing_waiting_ground">Terrain at this point is not available yet. Last click retained.</string>
+	<string name="flight_pointing_click_queued">%1$s Last click retained.</string>
 	<string name="flight_library_test_short">Test</string>
 	<string name="flight_favorite_add">Add to favorites</string>
 	<string name="flight_favorite_remove">Remove from favorites</string>
@@ -57,8 +62,8 @@
 	<string name="flight_tiles_help_redesign">Satellite and Terrain show saved imagery. Exploring this map never starts a download.\n\nCoverage shows required files: green = present, amber = missing, blue = shared outside this route, purple = checking. Empty squares have no files.\n\nPinch or use + / − to zoom the map. Grid only changes the inspection squares; it does not change the imagery. Squares are grouped while zoomed out so they stay readable.\n\nTap a square for its source levels. The blue dot marks the flight position. Whole route restores the route framing.\n\nFiles shows known sizes and estimates. Download, Pause, Resume and Verify / repair apply to this flight.</string>
 	<string name="flight_tiles_files_help">This flight lists only its required route files. Shared files lists the local store used by every flight.\n\nChoose Satellite or Terrain, then inspect each source level. Missing means checked and absent; Not checked means inventory is still pending. Saved sizes are measured. Remaining sizes are estimates and use kB, MB or GB.\n\nPresent files have a readable image header. Verify / repair fully decodes them and downloads corrupt files again. Viewing the map or these lists never starts a transfer.</string>
 	<string name="flight_pointing_mode">Point between views</string>
-	<string name="flight_pointing_no_terrain">No terrain intersection here. Choose a point on the loaded ground.</string>
-	<string name="flight_pointing_loading">Loading terrain for pointing…</string>
+	<string name="flight_pointing_no_terrain">No ground at this point: sky or outside the loaded area.</string>
+	<string name="flight_pointing_loading">Loading terrain needed for pointing…</string>
 	<string name="flight_photo_pointing_tab">Photo / map</string>
 	<string name="flight_photo_pointing_needs_alignment">Align the photo with the terrain before selecting a point. Open Landmarks to set up its position and perspective.</string>
 	<string name="flight_photo_pointing_hint">Tap either view to move the point. Pinch, drag or rotate to explore the photo.</string>

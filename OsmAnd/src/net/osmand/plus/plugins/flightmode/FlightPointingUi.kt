@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.Text
@@ -21,27 +22,19 @@ import net.osmand.plus.R
 
 @Composable
 internal fun rememberTerrainPicker(scene: FlightTerrainScene?): FlightTerrainPicker? {
-    val geometry = scene?.meshes?.map { it.vertices to it.indices }
-    val result =
-        produceState<FlightTerrainPicker?>(
-                null,
-                scene?.geometryGeneration,
-                geometry,
-                scene?.coordinateOriginLatitude,
-                scene?.coordinateOriginLongitude,
-            ) {
-                value = null
-                if (scene != null)
-                    value = runInterruptible(Dispatchers.Default) { FlightTerrainPicker(scene) }
-            }
-            .value
-    // Never combine a newly published camera/origin with the previous asynchronous index.
-    return result?.takeIf {
-        scene != null &&
-            it.scene.geometryGeneration == scene.geometryGeneration &&
-            it.scene.coordinateOriginLatitude == scene.coordinateOriginLatitude &&
-            it.scene.coordinateOriginLongitude == scene.coordinateOriginLongitude &&
-            it.scene.meshes.map { mesh -> mesh.vertices to mesh.indices } == geometry
+    val geometry = scene?.let(::FlightPickingGeometryKey)
+    val result by
+        produceState<FlightTerrainPicker?>(null, geometry) {
+            val previous = value
+            value =
+                if (scene == null) null
+                else runInterruptible(Dispatchers.Default) { FlightTerrainPicker(scene, previous) }
+        }
+    // Texture changes reuse the index; a newly rendered shape must wait for its own index.
+    return remember(scene, result) {
+        result
+            ?.takeIf { it.geometryKey == geometry }
+            ?.let { if (it.scene === scene) it else FlightTerrainPicker(requireNotNull(scene), it) }
     }
 }
 
@@ -50,33 +43,16 @@ internal class FlightPointingState {
     var frame by mutableStateOf<FlightPickingFrame?>(null)
         private set
 
-    var point by mutableStateOf<FlightPickedPoint?>(null)
-        private set
-
-    var missingTerrain by mutableStateOf(false)
-        private set
-
-    private var request: Job? = null
+    val selection = FlightPointingSelection()
 
     fun acceptFrame(next: FlightPickingFrame) {
         if (frame?.sameView(next) != true) frame = next
     }
 
     fun resetFrame() {
-        request?.cancel()
         frame = null
         terrain = null
-        missingTerrain = false
-    }
-
-    fun select(scope: CoroutineScope, query: () -> FlightPickedPoint?) {
-        request?.cancel()
-        request =
-            scope.launch {
-                val selected = runInterruptible(Dispatchers.Default, block = query)
-                missingTerrain = selected == null
-                if (selected != null) point = selected
-            }
+        selection.reset()
     }
 }
 
@@ -107,21 +83,66 @@ internal fun FlightPointingButton(
 }
 
 @Composable
-internal fun FlightPointingStatus(missing: Boolean, ready: Boolean, modifier: Modifier = Modifier) {
-    if (missing || !ready)
-        Text(
-            stringResource(
-                if (missing) R.string.flight_pointing_no_terrain
-                else R.string.flight_pointing_loading
-            ),
-            color = Color.LightGray,
-            fontSize = 11.sp,
-            modifier =
-                modifier
-                    .widthIn(max = 240.dp)
-                    .background(Color(0xB018252D), RoundedCornerShape(8.dp))
-                    .padding(8.dp),
+internal fun FlightPointingStatus(
+    state: FlightPointingSelectionState,
+    modifier: Modifier = Modifier,
+) {
+    var showReady by remember { mutableStateOf(false) }
+    LaunchedEffect(state.phase) {
+        showReady = state.phase == FlightPointingPhase.READY
+        if (showReady) {
+            delay(2000)
+            showReady = false
+        }
+    }
+    if (state.phase == FlightPointingPhase.READY && !showReady) return
+    val working =
+        state.phase in
+            listOf(
+                FlightPointingPhase.LOADING,
+                FlightPointingPhase.PREPARING,
+                FlightPointingPhase.SELECTING,
+                FlightPointingPhase.WAITING_GROUND,
+            )
+    val text =
+        stringResource(
+            when (state.phase) {
+                FlightPointingPhase.LOADING -> R.string.flight_pointing_loading
+                FlightPointingPhase.PREPARING -> R.string.flight_pointing_preparing
+                FlightPointingPhase.READY -> R.string.flight_pointing_ready
+                FlightPointingPhase.SELECTING -> R.string.flight_pointing_selecting
+                FlightPointingPhase.WAITING_GROUND -> R.string.flight_pointing_waiting_ground
+                FlightPointingPhase.NO_INTERSECTION -> R.string.flight_pointing_no_terrain
+            }
         )
+    Row(
+        modifier
+            .widthIn(max = 260.dp)
+            .background(Color(0xB018252D), RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (working)
+            CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                strokeWidth = 1.5.dp,
+                color = Color(0xFF9AD9FF),
+            )
+        Text(
+            if (
+                state.pendingClick &&
+                    state.phase in
+                        listOf(FlightPointingPhase.LOADING, FlightPointingPhase.PREPARING)
+            )
+                stringResource(R.string.flight_pointing_click_queued, text)
+            else text,
+            color =
+                if (state.phase == FlightPointingPhase.READY) Color(0xFF9AD9FF)
+                else Color.LightGray,
+            fontSize = 11.sp,
+        )
+    }
 }
 
 @Composable
@@ -131,7 +152,8 @@ internal fun FlightTerrainPointingOverlay(
 ) {
     val frame = pointing.frame
     val picker = pointing.terrain
-    val point = pointing.point
+    val selection by pointing.selection.state.collectAsState()
+    val point = selection.point
     val visibility by
         produceState<Pair<FlightPickedPoint, Float>?>(null, frame, picker, point) {
             if (frame != null && picker != null && point != null)

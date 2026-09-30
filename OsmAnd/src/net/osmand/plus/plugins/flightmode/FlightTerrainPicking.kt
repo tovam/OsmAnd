@@ -21,33 +21,115 @@ internal data class FlightPickingRay(val eye: DoubleArray, val direction: Double
     }
 }
 
-/** Tile bounds reject most geometry; exact triangles are tested off the UI/GL threads. */
-internal class FlightTerrainPicker(val scene: FlightTerrainScene) {
+/** Array identity describes the actual rendered geometry, independent of texture generations. */
+internal class FlightPickingMeshKey(
+    val vertices: FloatArray,
+    val indices: ShortArray,
+    val available: Boolean,
+) {
+    override fun equals(other: Any?) =
+        other is FlightPickingMeshKey &&
+            vertices === other.vertices &&
+            indices === other.indices &&
+            available == other.available
+
+    // Streamed arrays are immutable. Never scan their contents on the UI thread for a cache key.
+    override fun hashCode() =
+        (31 * System.identityHashCode(vertices) + System.identityHashCode(indices)) * 31 +
+            available.hashCode()
+}
+
+internal data class FlightPickingGeometryKey(
+    val latitude: Double,
+    val longitude: Double,
+    val meshes: List<FlightPickingMeshKey>,
+) {
+    constructor(
+        scene: FlightTerrainScene
+    ) : this(
+        scene.coordinateOriginLatitude,
+        scene.coordinateOriginLongitude,
+        scene.meshes.map { FlightPickingMeshKey(it.vertices, it.indices, it.terrainAvailable) },
+    )
+}
+
+internal sealed interface FlightTerrainPickResult {
+    data class Hit(val point: FlightPickedPoint) : FlightTerrainPickResult
+
+    data object WaitingForGround : FlightTerrainPickResult
+
+    data object Miss : FlightTerrainPickResult
+}
+
+/** Reuse immutable bounds across streamed updates; small triangle blocks accelerate each click. */
+internal class FlightTerrainPicker(
+    val scene: FlightTerrainScene,
+    previous: FlightTerrainPicker? = null,
+) {
     val coordinates =
         FlightTerrainCoordinates(scene.coordinateOriginLatitude, scene.coordinateOriginLongitude)
+    val geometryKey = FlightPickingGeometryKey(scene)
+    val hasTerrain = scene.meshes.any { it.terrainAvailable && it.indices.isNotEmpty() }
+    var newlyIndexedMeshCount = 0
+        private set
+
+    private data class Bounds(val low: DoubleArray, val high: DoubleArray)
+
+    private data class TriangleBlock(val start: Int, val end: Int, val bounds: Bounds)
 
     private data class BoundedMesh(
         val mesh: FlightTerrainMesh,
-        val low: DoubleArray,
-        val high: DoubleArray,
+        val bounds: Bounds,
+        val blocks: List<TriangleBlock>,
     )
 
-    private val meshes =
-        scene.meshes
-            .filter { it.terrainAvailable }
-            .map { mesh ->
-                checkCancellation()
-                val low = DoubleArray(3) { Double.POSITIVE_INFINITY }
-                val high = DoubleArray(3) { Double.NEGATIVE_INFINITY }
-                for (offset in mesh.vertices.indices step 9) {
-                    for (axis in 0..2) {
-                        val value = mesh.vertices[offset + axis].toDouble()
-                        low[axis] = min(low[axis], value)
-                        high[axis] = max(high[axis], value)
-                    }
+    private val meshes: List<BoundedMesh> = run {
+        val reusable =
+            previous
+                ?.meshes
+                ?.associateBy {
+                    FlightPickingMeshKey(
+                        it.mesh.vertices,
+                        it.mesh.indices,
+                        it.mesh.terrainAvailable,
+                    )
                 }
-                BoundedMesh(mesh, low, high)
+                .orEmpty()
+        scene.meshes.map { mesh ->
+            checkCancellation()
+            reusable[FlightPickingMeshKey(mesh.vertices, mesh.indices, mesh.terrainAvailable)]
+                ?: run {
+                    newlyIndexedMeshCount++
+                    val blocks =
+                        (mesh.indices.indices step 192).map { start ->
+                            checkCancellation()
+                            val end = min(start + 192, mesh.indices.size)
+                            TriangleBlock(start, end, bounds(mesh, start, end))
+                        }
+                    val low =
+                        DoubleArray(3) { axis -> blocks.minOfOrNull { it.bounds.low[axis] } ?: 0.0 }
+                    val high =
+                        DoubleArray(3) { axis ->
+                            blocks.maxOfOrNull { it.bounds.high[axis] } ?: 0.0
+                        }
+                    BoundedMesh(mesh, Bounds(low, high), blocks)
+                }
+        }
+    }
+
+    private fun bounds(mesh: FlightTerrainMesh, start: Int, end: Int): Bounds {
+        val low = DoubleArray(3) { Double.POSITIVE_INFINITY }
+        val high = DoubleArray(3) { Double.NEGATIVE_INFINITY }
+        for (i in start until end) {
+            val offset = (mesh.indices[i].toInt() and 0xffff) * 9
+            for (axis in 0..2) {
+                val value = mesh.vertices[offset + axis].toDouble()
+                low[axis] = min(low[axis], value)
+                high[axis] = max(high[axis], value)
             }
+        }
+        return Bounds(low, high)
+    }
 
     fun local(point: FlightPickedPoint) =
         coordinates
@@ -62,7 +144,7 @@ internal class FlightTerrainPicker(val scene: FlightTerrainScene) {
             FlightPickedPoint(geo[0], geo[1], geo[2])
         }
 
-    fun groundAt(latitude: Double, longitude: Double): FlightPickedPoint? {
+    fun groundRay(latitude: Double, longitude: Double): FlightPickingRay? {
         val eye =
             coordinates
                 .toLocal(latitude, longitude, 100_000.0)
@@ -73,7 +155,36 @@ internal class FlightTerrainPicker(val scene: FlightTerrainScene) {
                 .toLocal(latitude, longitude, -15_000.0)
                 .map { it.toDouble() }
                 .toDoubleArray()
-        return FlightPickingRay.through(eye, below)?.let(::pointAt)
+        return FlightPickingRay.through(eye, below)
+    }
+
+    fun groundAt(latitude: Double, longitude: Double): FlightPickedPoint? =
+        groundRay(latitude, longitude)?.let(::pointAt)
+
+    fun pick(ray: FlightPickingRay): FlightTerrainPickResult {
+        val distance = hit(ray)
+        // Loading planes are visible, but their guessed altitude cannot locate a real point.
+        val pending = hitMeshes(ray, distance ?: Double.POSITIVE_INFINITY, available = false)
+        if (pending != null) return FlightTerrainPickResult.WaitingForGround
+        if (distance != null) {
+            val local = DoubleArray(3) { ray.eye[it] + ray.direction[it] * distance }
+            val geo = coordinates.toGeographic(local)
+            return FlightTerrainPickResult.Hit(FlightPickedPoint(geo[0], geo[1], geo[2]))
+        }
+        return if (scene.missingTiles > 0 && aimsInsideLoadingArea(ray))
+            FlightTerrainPickResult.WaitingForGround
+        else FlightTerrainPickResult.Miss
+    }
+
+    private fun aimsInsideLoadingArea(ray: FlightPickingRay): Boolean {
+        if (ray.direction[1] >= -1e-9) return false
+        val distance = -ray.eye[1] / ray.direction[1]
+        if (distance <= 0) return false
+        val center = coordinates.toLocal(scene.centerLatitude, scene.centerLongitude, 0.0)
+        val x = ray.eye[0] + ray.direction[0] * distance - center[0]
+        val z = ray.eye[2] + ray.direction[2] * distance - center[2]
+        // A downward click well outside this scene must not promise terrain that is not loading.
+        return hypot(x, z) <= scene.radiusKm * 1000.0
     }
 
     fun opacity(eye: DoubleArray, target: DoubleArray): Float {
@@ -84,22 +195,32 @@ internal class FlightTerrainPicker(val scene: FlightTerrainScene) {
         return if (hit(ray, distance - tolerance) != null) 0.5f else 1f
     }
 
-    fun hit(ray: FlightPickingRay, limit: Double = Double.POSITIVE_INFINITY): Double? {
+    fun hit(ray: FlightPickingRay, limit: Double = Double.POSITIVE_INFINITY): Double? =
+        hitMeshes(ray, limit, available = true)
+
+    private fun hitMeshes(ray: FlightPickingRay, limit: Double, available: Boolean): Double? {
         var nearest = limit
         var found = false
         for (bounded in meshes) {
             checkCancellation()
-            if (!intersectsBounds(ray, bounded.low, bounded.high, nearest)) continue
+            if (
+                bounded.mesh.terrainAvailable != available ||
+                    !intersectsBounds(ray, bounded.bounds.low, bounded.bounds.high, nearest)
+            )
+                continue
             val mesh = bounded.mesh
-            for (i in mesh.indices.indices step 3) {
-                if (i % 3072 == 0) checkCancellation()
-                val a = (mesh.indices[i].toInt() and 0xffff) * 9
-                val b = (mesh.indices[i + 1].toInt() and 0xffff) * 9
-                val c = (mesh.indices[i + 2].toInt() and 0xffff) * 9
-                val distance = triangle(ray, mesh.vertices, a, b, c) ?: continue
-                if (distance < nearest) {
-                    nearest = distance
-                    found = true
+            for (block in bounded.blocks) {
+                checkCancellation()
+                if (!intersectsBounds(ray, block.bounds.low, block.bounds.high, nearest)) continue
+                for (i in block.start until block.end step 3) {
+                    val a = (mesh.indices[i].toInt() and 0xffff) * 9
+                    val b = (mesh.indices[i + 1].toInt() and 0xffff) * 9
+                    val c = (mesh.indices[i + 2].toInt() and 0xffff) * 9
+                    val distance = triangle(ray, mesh.vertices, a, b, c) ?: continue
+                    if (distance < nearest) {
+                        nearest = distance
+                        found = true
+                    }
                 }
             }
         }
@@ -199,6 +320,31 @@ internal class FlightPickingFrame(
         return FlightPickingRay.through(eye, DoubleArray(3) { near[it] / near[3] })
     }
 
+    fun rayFor(picker: FlightTerrainPicker, x: Double, y: Double): FlightPickingRay? {
+        val original = ray(x, y) ?: return null
+        if (
+            scene.coordinateOriginLatitude == picker.scene.coordinateOriginLatitude &&
+                scene.coordinateOriginLongitude == picker.scene.coordinateOriginLongitude
+        )
+            return original
+        val source =
+            FlightTerrainCoordinates(
+                scene.coordinateOriginLatitude,
+                scene.coordinateOriginLongitude,
+            )
+        fun rebase(local: DoubleArray): DoubleArray {
+            val geo = source.toGeographic(local)
+            return picker.coordinates
+                .toLocal(geo[0], geo[1], geo[2])
+                .map { it.toDouble() }
+                .toDoubleArray()
+        }
+        return FlightPickingRay.through(
+            rebase(original.eye),
+            rebase(DoubleArray(3) { original.eye[it] + original.direction[it] * 1000.0 }),
+        )
+    }
+
     fun project(local: DoubleArray): Pair<Double, Double>? {
         val clip = transform(matrix, local[0], local[1], local[2])
         if (clip[3] <= 0 || !clip.all { it.isFinite() }) return null
@@ -228,11 +374,13 @@ internal class FlightPhotoPicker(
 
     private fun dot(a: DoubleArray, b: DoubleArray) = a.indices.sumOf { a[it] * b[it] }
 
-    fun pointAt(x: Double, y: Double): FlightPickedPoint? {
+    fun rayAt(x: Double, y: Double): FlightPickingRay? {
         if (x !in 0.0..1.0 || y !in 0.0..1.0) return null
         val target = DoubleArray(3) { corner[it] + x * right[it] + y * down[it] }
-        return FlightPickingRay.through(eye, target)?.let(terrain::pointAt)
+        return FlightPickingRay.through(eye, target)
     }
+
+    fun pointAt(x: Double, y: Double): FlightPickedPoint? = rayAt(x, y)?.let(terrain::pointAt)
 
     fun project(point: FlightPickedPoint): FlightPhotoPickedMarker {
         val local = terrain.local(point)

@@ -29,7 +29,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightPhotoCalibration.kt" "$sources/FlightTerrainCoordinates.kt" \
   "$sources/FlightPhotoFitDiagnostics.kt" \
   "$sources/FlightPhotoDepth.kt" "$sources/FlightPhotoTreatmentJson.kt" \
-  "$sources/FlightTerrainPicking.kt" \
+  "$sources/FlightTerrainPicking.kt" "$sources/FlightPointingSelection.kt" \
   "$sources/FlightDownloadCancellation.kt" \
   "$sources/FlightArchiveInventory.kt" \
   "$sources/FlightJournalOperations.kt" \
@@ -76,6 +76,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalSummaryMetadataTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightLibraryPresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightFavoritesTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightPointingSelectionTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMonitoringTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightTileFilesTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightTilePresentationTest.kt" \
@@ -120,6 +121,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightRecordingMetadataPersistenceTest.kt"
 java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightTerrainPickingTest \
+  net.osmand.test.junit.FlightPointingSelectionTest \
   net.osmand.test.junit.FlightTileFilesTest \
   net.osmand.test.junit.FlightTilePresentationTest \
   net.osmand.test.junit.FlightFavoritesTest \

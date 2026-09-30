@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+	<string name="flight_pointing_preparing">Préparation du pointage sur le relief visible…</string>
+	<string name="flight_pointing_ready">Pointage prêt</string>
+	<string name="flight_pointing_selecting">Localisation du point…</string>
+	<string name="flight_pointing_waiting_ground">Relief de ce point pas encore disponible. Dernier clic conservé.</string>
+	<string name="flight_pointing_click_queued">%1$s Dernier clic conservé.</string>
 	<string name="flight_library_test_short">Essai</string>
 	<string name="flight_favorite_add">Ajouter aux favoris</string>
 	<string name="flight_favorite_remove">Retirer des favoris</string>
@@ -57,8 +62,8 @@
 	<string name="flight_tiles_help_redesign">Satellite et Relief affichent les images enregistrées. Explorer cette carte ne déclenche jamais de téléchargement.\n\nCouverture affiche les fichiers requis : vert = présents, orange = manquants, bleu = partagés hors trajet, violet = à vérifier. Les cases vides ne contiennent aucun fichier.\n\nPincer ou utiliser + / − pour zoomer sur la carte. Grille change seulement les cases d’inspection, pas les images. Les cases sont regroupées quand la carte est dézoomée pour rester lisibles.\n\nToucher une case pour voir ses niveaux. Le point bleu indique la position du vol. Trajet complet rétablit le cadrage du trajet.\n\nFichiers affiche les tailles connues et les estimations. Télécharger, Pause, Reprendre et Vérifier / réparer concernent ce vol.</string>
 	<string name="flight_tiles_files_help">Ce vol liste seulement les fichiers requis par son trajet. Tous les vols affiche le stockage local partagé.\n\nChoisir Satellite ou Relief, puis consulter chaque niveau. Manquants signifie contrôlés et absents ; Non vérifiés signifie que l’inventaire est en cours. Les tailles enregistrées sont mesurées. Le reste est estimé en kB, MB ou GB.\n\nUn fichier présent possède un en-tête d’image lisible. Vérifier / réparer décode entièrement les fichiers et retélécharge ceux qui sont corrompus. Consulter la carte ou ces listes ne déclenche aucun transfert.</string>
 	<string name="flight_pointing_mode">Pointer entre les vues</string>
-	<string name="flight_pointing_no_terrain">Aucune intersection avec le relief ici. Choisir un point sur le terrain chargé.</string>
-	<string name="flight_pointing_loading">Chargement du relief pour le pointage…</string>
+	<string name="flight_pointing_no_terrain">Pas de sol à ce point : ciel ou hors de la zone chargée.</string>
+	<string name="flight_pointing_loading">Chargement du relief nécessaire au pointage…</string>
 	<string name="flight_photo_pointing_tab">Photo / carte</string>
 	<string name="flight_photo_pointing_needs_alignment">Calez la photo sur le relief avant de sélectionner un point. Ouvrez Repères pour régler sa position et sa perspective.</string>
 	<string name="flight_photo_pointing_hint">Toucher une vue pour déplacer le point. Pincer, déplacer ou tourner pour explorer la photo.</string>

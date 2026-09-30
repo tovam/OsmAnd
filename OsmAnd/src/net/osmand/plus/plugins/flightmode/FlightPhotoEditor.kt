@@ -227,7 +227,19 @@ internal fun FlightPhotoEditor(
                 FlightPhotoPicker(pointingProjection, pointingTerrain)
             else null
         }
-    val pointingPoints = listOfNotNull(pointing.point)
+    val selection by pointing.selection.state.collectAsState()
+    LaunchedEffect(tab, pointingTerrain, pointingProjection) {
+        if (tab != 6) pointing.selection.reset()
+        else
+            pointing.selection.update(
+                scope,
+                pointingTerrain?.let { terrain ->
+                    pointingProjection?.let { FlightPointingContext(terrain, photo = it) }
+                },
+                preparing = state.terrainScene?.meshes?.any { it.terrainAvailable } == true,
+            )
+    }
+    val pointingPoints = listOfNotNull(selection.point)
     val pointingMarkers by
         produceState<List<FlightPhotoPickedMarker>>(emptyList(), photoPicker, pointingPoints) {
             value = emptyList()
@@ -413,11 +425,7 @@ internal fun FlightPhotoEditor(
                         4 to R.string.flight_mode_photo_details,
                     )
                     .forEach { (i, res) ->
-                        EditorAction(
-                            stringResource(res),
-                            { changeTab(i) },
-                            tab == i,
-                        )
+                        EditorAction(stringResource(res), { changeTab(i) }, tab == i)
                     }
             }
             if (tab == 0) {
@@ -549,7 +557,10 @@ internal fun FlightPhotoEditor(
                                     else emptyList()
                                 v.onImagePoint = { x, y ->
                                     if (tab == 6)
-                                        pointing.select(scope) { photoPicker?.pointAt(x, y) }
+                                        pointing.selection.select(
+                                            scope,
+                                            FlightPointingClick.Photo(x, y, pointingProjection),
+                                        )
                                     else placePoint(0) { it.copy(x = x, y = y) }
                                 }
                                 v.onRotation = {
@@ -587,7 +598,9 @@ internal fun FlightPhotoEditor(
                                         .padding(8.dp)
                                 ) {
                                     Text(
-                                        stringResource(R.string.flight_photo_pointing_needs_alignment),
+                                        stringResource(
+                                            R.string.flight_photo_pointing_needs_alignment
+                                        ),
                                         color = Color.LightGray,
                                         fontSize = 11.sp,
                                     )
@@ -598,8 +611,7 @@ internal fun FlightPhotoEditor(
                                 }
                             } else {
                                 FlightPointingStatus(
-                                    pointing.missingTerrain,
-                                    photoPicker != null,
+                                    selection,
                                     Modifier.align(Alignment.BottomStart).padding(8.dp),
                                 )
                             }
@@ -633,9 +645,10 @@ internal fun FlightPhotoEditor(
                                 v.dragToPlace = false
                                 v.onMapPoint = { lat, lon ->
                                     if (tab == 6)
-                                        pointing.select(scope) {
-                                            pointingTerrain?.groundAt(lat, lon)
-                                        }
+                                        pointing.selection.select(
+                                            scope,
+                                            FlightPointingClick.Map(lat, lon),
+                                        )
                                     else
                                         placePoint(1) {
                                             it.copy(
