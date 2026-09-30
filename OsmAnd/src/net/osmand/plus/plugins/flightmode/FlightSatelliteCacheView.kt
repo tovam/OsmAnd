@@ -52,6 +52,9 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
     private var fitted = false
     private var selectedZoom = 8
     private var layer = 0 // 0 satellite, 1 terrain, 2 availability
+    private var gridVisible = false
+    private var selectedCellId: TerrainTileId? = null
+    private var position: Pair<Double, Double>? = null
     private var active = false
     private var generation = 0L
     private var scanRunning = false
@@ -71,13 +74,13 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
     private val gridPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 1f
+            strokeWidth = resources.displayMetrics.density
             color = Color.argb(160, 255, 255, 255)
         }
     private val textPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = 9f * resources.displayMetrics.scaledDensity
+            textSize = 12f * resources.displayMetrics.scaledDensity
         }
     private val outlinePaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -92,6 +95,7 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
             color = Color.WHITE
         }
     internal var onCellSelected: ((FlightTileMapCell) -> Unit)? = null
+    internal var onCellUpdated: ((FlightTileMapCell?) -> Unit)? = null
     var onGridChanged: ((Int) -> Unit)? = null
 
     private val refresh = Runnable {
@@ -178,7 +182,11 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
                     frame
                         ?.cells
                         ?.firstOrNull { tileRect(it.id, it.displayX).contains(event.x, event.y) }
-                        ?.let { onCellSelected?.invoke(it) }
+                        ?.let {
+                            selectedCellId = it.id
+                            invalidate()
+                            onCellSelected?.invoke(it)
+                        }
                     return true
                 }
             },
@@ -196,6 +204,8 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
         route = value?.mapRoute.orEmpty()
         // A radius/quality change is not a request to move the user's camera.
         if (!sameRoute) {
+            clearSelection()
+            onCellUpdated?.invoke(null)
             fitted = false
             fitContent()
         }
@@ -218,11 +228,54 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
         }
     }
 
-    fun fitContent() {
-        FlightTileMapCamera.fitProjected(route, width, height)?.let {
-            camera = it
-            fitted = true
+    fun setGridVisible(value: Boolean) {
+        if (gridVisible != value) {
+            gridVisible = value
+            invalidate()
         }
+    }
+
+    fun setPosition(sample: FlightSample?) {
+        val next = sample?.let { it.latitude to it.longitude }
+        if (position != next) {
+            position = next
+            invalidate()
+        }
+    }
+
+    fun clearSelection() {
+        selectedCellId = null
+        invalidate()
+    }
+
+    fun zoomBy(factor: Double) {
+        camera = camera.zoom(factor, width / 2.0, height / 2.0, width, height)
+        schedule(0)
+        invalidate()
+    }
+
+    fun release() {
+        lifecycle.detach()
+        onCellSelected = null
+        onCellUpdated = null
+        onGridChanged = null
+        generation++
+        removeCallbacks(refresh)
+        scanner.shutdownNow()
+        decoder.shutdownNow()
+        cache.evictAll()
+    }
+
+    fun fitContent() {
+        FlightTileMapCamera.fitProjected(
+                route,
+                width,
+                (height - 140 * resources.displayMetrics.density).toInt().coerceAtLeast(height / 2),
+            )
+            ?.let {
+                camera = it
+                fitted = true
+            }
         schedule(0)
         invalidate()
     }
@@ -247,8 +300,14 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
         val requested = quote
         val bounds =
             camera.bounds(width * 2, height * 2) // retain a screen of neighbours while dragging
-        val grid = selectedZoom
         val pixels = camera.worldPixels
+        val grid =
+            flightTileInspectionZoom(
+                selectedZoom,
+                bounds,
+                pixels,
+                56.0 * resources.displayMetrics.density,
+            )
         val satellite = layer != 1
         scanner.execute {
             val summary = store.catalog.summary()
@@ -315,8 +374,14 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
                 if (epoch != generation || !active) return@post
                 scanRunning = false
                 if (requested === quote) {
+                    val previousGrid = frame?.gridZoom
                     frame = result
-                    onGridChanged?.invoke(result.gridZoom)
+                    if (previousGrid != result.gridZoom) onGridChanged?.invoke(result.gridZoom)
+                    selectedCellId?.let { id ->
+                        val selected = result.cells.firstOrNull { it.id == id }
+                        if (selected == null) selectedCellId = null
+                        onCellUpdated?.invoke(selected)
+                    }
                     invalidate()
                 }
                 if (version != requestVersion) schedule(0)
@@ -335,7 +400,7 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
     private fun color(cell: FlightTileMapCell) =
         when (cell.state) {
             0 -> Color.rgb(34, 128, 91)
-            1 -> Color.rgb(85, 88, 100)
+            1 -> Color.rgb(91, 81, 120)
             2 -> Color.rgb(176, 103, 31)
             3 -> Color.rgb(41, 92, 141)
             else -> Color.rgb(33, 41, 49)
@@ -346,6 +411,7 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
         val saved = canvas.save()
         canvas.clipRect(0, 0, width, height)
         val current = frame
+        var displayedImage = false
         if (current != null) {
             if (layer != 2 && current.satellite == (layer == 0)) {
                 for (image in current.images) {
@@ -354,13 +420,7 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
                     val bitmap = cachedImage(image)
                     if (bitmap != null) {
                         canvas.drawBitmap(bitmap, null, rectangle, imagePaint)
-                        if (rectangle.width() >= textPaint.textSize * 6)
-                            drawOutlined(
-                                canvas,
-                                "z${image.key.tile.zoom}",
-                                maxOf(4f, rectangle.left + 4),
-                                maxOf(textPaint.textSize, rectangle.top + textPaint.textSize),
-                            )
+                        displayedImage = true
                     }
                     if (cache.get(image.cacheKey) == null) queueImage(image)
                 }
@@ -372,24 +432,153 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
                     fillPaint.color = color(cell)
                     canvas.drawRect(rect, fillPaint)
                 }
-                canvas.drawRect(rect, gridPaint)
-                drawCellText(canvas, cell, rect)
+                if (gridVisible || layer == 2) {
+                    canvas.drawRect(rect, gridPaint)
+                    if (layer == 2 && rect.width() > 48 * resources.displayMetrics.density) {
+                        val label =
+                            when (cell.state) {
+                                0 -> "✓"
+                                1 -> "…"
+                                2 -> "!"
+                                3 -> "·"
+                                else -> ""
+                            }
+                        drawOutlined(
+                            canvas,
+                            label,
+                            rect.centerX() - textPaint.measureText(label) / 2,
+                            rect.centerY() + textPaint.textSize / 3,
+                        )
+                    }
+                }
+                if (cell.id == selectedCellId) {
+                    val paint =
+                        Paint(gridPaint).apply {
+                            color = Color.rgb(154, 217, 255)
+                            strokeWidth = 3 * resources.displayMetrics.density
+                        }
+                    canvas.drawRect(rect, paint)
+                }
             }
         }
         drawRoute(canvas)
+        drawPosition(canvas)
+        drawScale(canvas)
         if (current == null || !current.ready) {
-            drawOutlined(
-                canvas,
-                context.getString(R.string.flight_files_indexing),
-                8f,
-                height - textPaint.textSize,
-            )
+            drawMapMessage(canvas, context.getString(R.string.flight_files_indexing))
+        } else if (layer != 2 && current.satellite != (layer == 0)) {
+            drawMapMessage(canvas, context.getString(R.string.flight_tiles_image_loading))
         } else if (layer != 2 && current.finerOnly) {
-            drawOutlined(
+            drawMapMessage(canvas, context.getString(R.string.flight_tiles_finer_only))
+        } else if (
+            layer != 2 &&
+                current.images.none {
+                    tileRect(it.key.tile, it.displayX)
+                        .intersects(0f, 0f, width.toFloat(), height.toFloat())
+                }
+        ) {
+            drawMapMessage(canvas, context.getString(R.string.flight_tiles_no_local_images))
+        } else if (layer != 2 && !displayedImage) {
+            val failed =
+                current.images
+                    .filter {
+                        tileRect(it.key.tile, it.displayX)
+                            .intersects(0f, 0f, width.toFloat(), height.toFloat())
+                    }
+                    .all { it.cacheKey in failedImages }
+            drawMapMessage(
                 canvas,
-                context.getString(R.string.flight_tiles_finer_only),
-                8f,
-                height - textPaint.textSize,
+                context.getString(
+                    if (failed) R.string.flight_tiles_image_error
+                    else R.string.flight_tiles_image_loading
+                ),
+            )
+        }
+        canvas.restoreToCount(saved)
+    }
+
+    private fun drawScale(canvas: Canvas) {
+        val density = resources.displayMetrics.density
+        val metersPerPixel = flightTileMetersPerPixel(camera)
+        val meters = flightScaleStep(min(width * .3, 100.0 * density) * metersPerPixel)
+        if (meters <= 0) return
+        val x = 16 * density
+        val y = 96 * density
+        val end = x + (meters / metersPerPixel).toFloat()
+        val label =
+            if (meters >= 1000) context.getString(R.string.flight_tiles_scale_km, meters / 1000)
+            else context.getString(R.string.flight_tiles_scale_m, meters.toInt())
+        drawOutlined(canvas, label, x, y - 8 * density)
+        for ((color, stroke) in listOf(Color.BLACK to 4f, Color.WHITE to 2f)) {
+            val paint =
+                Paint(gridPaint).apply {
+                    this.color = color
+                    strokeWidth = stroke * density
+                }
+            canvas.drawLine(x, y, end, y, paint)
+            canvas.drawLine(x, y - 4 * density, x, y + 2 * density, paint)
+            canvas.drawLine(end, y - 4 * density, end, y + 2 * density, paint)
+        }
+    }
+
+    private fun drawPosition(canvas: Canvas) {
+        val p = position ?: return
+        val rawX = FlightTerrainTilePlanner.longitudeToTileX(p.second, 0)
+        val x =
+            (width / 2.0 + (rawX + round(camera.x - rawX) - camera.x) * camera.worldPixels)
+                .toFloat()
+        val y =
+            (height / 2.0 +
+                    (FlightTerrainTilePlanner.latitudeToTileY(p.first, 0) - camera.y) *
+                        camera.worldPixels)
+                .toFloat()
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val radius = 6 * resources.displayMetrics.density
+        paint.color = Color.WHITE
+        canvas.drawCircle(x, y, radius + 2 * resources.displayMetrics.density, paint)
+        paint.color = Color.rgb(55, 143, 210)
+        canvas.drawCircle(x, y, radius, paint)
+    }
+
+    private fun drawMapMessage(canvas: Canvas, message: String) {
+        val saved = canvas.save()
+        val margin = 24 * resources.displayMetrics.density
+        val messagePaint =
+            Paint(textPaint).apply { textSize = 13 * resources.displayMetrics.scaledDensity }
+        val lines = arrayListOf<String>()
+        var remaining = message
+        while (remaining.isNotEmpty()) {
+            val count =
+                messagePaint
+                    .breakText(remaining, true, (width - 2 * margin).coerceAtLeast(1f), null)
+                    .coerceAtLeast(1)
+            val boundary =
+                if (count < remaining.length)
+                    remaining.lastIndexOf(' ', count - 1).takeIf { it > 0 } ?: count
+                else count
+            lines += remaining.take(boundary)
+            remaining = remaining.drop(boundary).trimStart()
+        }
+        val lineHeight = messagePaint.textSize * 1.4f
+        val background = Paint().apply { color = Color.argb(232, 21, 34, 45) }
+        val top = height / 2f - (lines.size * lineHeight) / 2
+        canvas.drawRoundRect(
+            RectF(
+                margin / 2,
+                top - margin / 2,
+                width - margin / 2,
+                top + lines.size * lineHeight + margin / 2,
+            ),
+            12f,
+            12f,
+            background,
+        )
+        lines.forEachIndexed { i, text ->
+            canvas.drawText(
+                text,
+                (width - messagePaint.measureText(text)) / 2,
+                top + (i + .8f) * lineHeight,
+                messagePaint,
             )
         }
         canvas.restoreToCount(saved)
@@ -410,33 +599,6 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
         routePaint.color = Color.WHITE
         routePaint.strokeWidth = 1.5f * resources.displayMetrics.density
         canvas.drawPath(path, routePaint)
-    }
-
-    private fun drawCellText(canvas: Canvas, cell: FlightTileMapCell, rect: RectF) {
-        val line = textPaint.textSize * 1.2f
-        if (rect.width() < textPaint.textSize * 6 || rect.height() < line * 4.5f) return
-        fun levels(values: List<FlightTileLevelPortion>) =
-            values.joinToString(" ") { it.compact() }.ifEmpty { "—" }
-        val rows =
-            listOf(
-                "S ✓ ${levels(cell.satellite)}",
-                "S → ${levels(cell.requestedSatellite)}",
-                "R ✓ ${levels(cell.terrain)}",
-                "R → ${levels(cell.requestedTerrain)}",
-            )
-        val saved = canvas.save()
-        canvas.clipRect(rect)
-        var y = maxOf(rect.top, 0f) + line
-        for (row in rows) {
-            var text = row
-            while (text.isNotEmpty() && y < rect.bottom) {
-                val count = textPaint.breakText(text, true, rect.width() - 8, null).coerceAtLeast(1)
-                drawOutlined(canvas, text.take(count), rect.left + 4, y)
-                text = text.drop(count)
-                y += line
-            }
-        }
-        canvas.restoreToCount(saved)
     }
 
     private fun drawOutlined(canvas: Canvas, text: String, x: Float, y: Float) {
@@ -500,14 +662,7 @@ constructor(context: Context, attributes: AttributeSet? = null) : View(context, 
         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
         for (i in pixels.indices) {
             val meters = TerrariumCodec.decodeArgb(pixels[i])
-            pixels[i] =
-                when {
-                    meters < 0 -> Color.rgb(28, 80, 132)
-                    meters < 400 -> Color.rgb(70, 115, 65)
-                    meters < 1500 -> Color.rgb(136, 120, 70)
-                    meters < 2700 -> Color.rgb(142, 139, 128)
-                    else -> Color.rgb(225, 227, 230)
-                }
+            pixels[i] = flightTileTerrainColor(meters)
         }
         return Bitmap.createBitmap(pixels, bitmap.width, bitmap.height, Bitmap.Config.RGB_565)
             .also { bitmap.recycle() }

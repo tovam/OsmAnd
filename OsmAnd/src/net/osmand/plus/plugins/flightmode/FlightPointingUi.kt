@@ -1,16 +1,18 @@
 package net.osmand.plus.plugins.flightmode
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Switch
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,7 +50,7 @@ internal class FlightPointingState {
     var frame by mutableStateOf<FlightPickingFrame?>(null)
         private set
 
-    var points by mutableStateOf(emptyList<FlightPickedPoint>())
+    var point by mutableStateOf<FlightPickedPoint?>(null)
         private set
 
     var missingTerrain by mutableStateOf(false)
@@ -64,48 +66,48 @@ internal class FlightPointingState {
         request?.cancel()
         frame = null
         terrain = null
+        missingTerrain = false
     }
 
     fun select(scope: CoroutineScope, query: () -> FlightPickedPoint?) {
         request?.cancel()
         request =
             scope.launch {
-                val point = runInterruptible(Dispatchers.Default, block = query)
-                missingTerrain = point == null
-                if (point != null) points = points + point
+                val selected = runInterruptible(Dispatchers.Default, block = query)
+                missingTerrain = selected == null
+                if (selected != null) point = selected
             }
     }
-
-    fun clear() {
-        request?.cancel()
-        points = emptyList()
-        missingTerrain = false
-    }
 }
 
 @Composable
-internal fun FlightPointingControls(
+internal fun FlightPointingButton(
     enabled: Boolean,
     onEnabled: (Boolean) -> Unit,
-    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    IconToggleButton(
+        checked = enabled,
+        onCheckedChange = onEnabled,
+        modifier = modifier.size(40.dp),
     ) {
-        Text(
-            stringResource(R.string.flight_pointing_mode),
-            color = Color.White,
-            fontSize = 12.sp,
-            modifier = Modifier.weight(1f),
+        Icon(
+            painterResource(R.drawable.ic_action_get_my_location),
+            contentDescription = stringResource(R.string.flight_pointing_mode),
+            tint = if (enabled) Color(0xFF9AD9FF) else Color(0xFFB1C2CF),
+            modifier =
+                Modifier.size(32.dp)
+                    .background(
+                        if (enabled) Color(0xD0284D65) else Color(0x8018252D),
+                        RoundedCornerShape(8.dp),
+                    )
+                    .padding(7.dp),
         )
-        Switch(enabled, onEnabled)
-        TextButton(onClick = onClear) { Text(stringResource(R.string.flight_pointing_clear)) }
     }
 }
 
 @Composable
-internal fun FlightPointingStatus(missing: Boolean, ready: Boolean) {
+internal fun FlightPointingStatus(missing: Boolean, ready: Boolean, modifier: Modifier = Modifier) {
     if (missing || !ready)
         Text(
             stringResource(
@@ -114,7 +116,11 @@ internal fun FlightPointingStatus(missing: Boolean, ready: Boolean) {
             ),
             color = Color.LightGray,
             fontSize = 11.sp,
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier =
+                modifier
+                    .widthIn(max = 240.dp)
+                    .background(Color(0xB018252D), RoundedCornerShape(8.dp))
+                    .padding(8.dp),
         )
 }
 
@@ -125,30 +131,34 @@ internal fun FlightTerrainPointingOverlay(
 ) {
     val frame = pointing.frame
     val picker = pointing.terrain
-    val points = pointing.points
-    val opacities by
-        produceState<Map<FlightPickedPoint, Float>>(emptyMap(), frame, picker, pointing.points) {
-            if (frame != null && picker != null)
+    val point = pointing.point
+    val visibility by
+        produceState<Pair<FlightPickedPoint, Float>?>(null, frame, picker, point) {
+            if (frame != null && picker != null && point != null)
                 value =
                     runInterruptible(Dispatchers.Default) {
-                        points.associateWith { point ->
-                            val local = picker.local(point)
-                            picker.opacity(frame.eye, local)
-                        }
+                        point to picker.opacity(frame.eye, picker.local(point))
                     }
-            else value = emptyMap()
+            else value = null
         }
     Canvas(modifier) {
-        if (frame != null && picker != null)
-            for (point in points) {
-                frame.project(picker.local(point))?.let { (x, y) ->
-                    drawFlightPickedMarker(
-                        Offset((x * size.width).toFloat(), (y * size.height).toFloat()),
-                        opacities[point] ?: 1f,
-                    )
-                }
+        if (frame != null && picker != null && point != null) {
+            frame.project(picker.local(point))?.let { (x, y) ->
+                drawFlightPickedMarker(
+                    Offset((x * size.width).toFloat(), (y * size.height).toFloat()),
+                    visibility?.takeIf { it.first == point }?.second ?: 1f,
+                )
             }
+        }
     }
+}
+
+/** A hollow screen-space ring keeps the selected feature visible in every pointing view. */
+internal object FlightPickedMarkerStyle {
+    const val RADIUS_DP = 3.5f
+    const val OUTLINE_DP = 2.75f
+    const val STROKE_DP = 1.25f
+    const val COLOR_ARGB = 0xFFE3F5FF
 }
 
 internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFlightPickedMarker(
@@ -159,20 +169,18 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFlightPickedMa
         androidx.compose.ui.geometry.Rect(Offset.Zero, size),
         androidx.compose.ui.graphics.Paint().apply { alpha = opacity },
     )
-    val radius = 8.dp.toPx()
-    drawCircle(Color.Black, radius + 2.dp.toPx(), at, style = Stroke(3.dp.toPx()))
-    drawCircle(Color.Yellow, radius, at, style = Stroke(2.dp.toPx()))
-    drawLine(
-        Color.Yellow,
-        at - Offset(radius + 4.dp.toPx(), 0f),
-        at + Offset(radius + 4.dp.toPx(), 0f),
-        2.dp.toPx(),
+    val radius = FlightPickedMarkerStyle.RADIUS_DP.dp.toPx()
+    drawCircle(
+        Color.Black,
+        radius,
+        at,
+        style = Stroke(FlightPickedMarkerStyle.OUTLINE_DP.dp.toPx()),
     )
-    drawLine(
-        Color.Yellow,
-        at - Offset(0f, radius + 4.dp.toPx()),
-        at + Offset(0f, radius + 4.dp.toPx()),
-        2.dp.toPx(),
+    drawCircle(
+        Color(FlightPickedMarkerStyle.COLOR_ARGB),
+        radius,
+        at,
+        style = Stroke(FlightPickedMarkerStyle.STROKE_DP.dp.toPx()),
     )
     drawContext.canvas.restore()
 }

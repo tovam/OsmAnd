@@ -38,6 +38,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightTerrainLodPolicy.kt" "$sources/FlightTerrainResidency.kt" \
   "$sources/FlightNetworkAccess.kt" "$sources/FlightRasterDownloadAccess.kt" "$sources/FlightJournalSummaries.kt" "$sources/FlightPreparationSave.kt" \
   "$sources/FlightCloudArchive.kt" "$sources/FlightCloudClient.kt" "$sources/FlightJourneyNaming.kt" "$sources/FlightCloudVersions.kt" "$sources/FlightLibraryPresentation.kt" \
+  "$sources/FlightFavorites.kt" \
   "$sources/FlightOfflinePreparation.kt" "$sources/FlightLivePredictor.kt" "$sources/FlightLiveSimulation.kt" \
   "$sources/FlightWorkPolicy.kt" "$sources/FlightAssetScheduler.kt" "$sources/FlightDisplaySafety.kt" \
   "$sources/FlightSceneStreamingEngine.kt" \
@@ -45,7 +46,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightTerrainModels.kt" "$sources/FlightProfilePlanner.kt" "$sources/FlightTrackMath.kt" \
   "$sources/FlightRecordingLines.kt" \
   "$sources/FlightLiveMonitoring.kt" "$sources/FlightOfflineCoverage.kt" \
-  "$sources/FlightTileCatalog.kt" "$sources/FlightTileMapModel.kt" \
+  "$sources/FlightTileCatalog.kt" "$sources/FlightTileMapModel.kt" "$sources/FlightTilePresentation.kt" \
   "$sources/FlightNativeTrackUpdatePlan.kt" \
   "$sources/FlightRouteDashes.kt" "$sources/FlightMapPresentation.kt" \
   "$sources/FlightMapCamera.kt" \
@@ -74,8 +75,10 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightStreamingVisibilityTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalSummaryMetadataTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightLibraryPresentationTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightFavoritesTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMonitoringTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightTileFilesTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightTilePresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMapPresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightVisibilityLeaseTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightOverviewTilesTest.kt" \
@@ -118,6 +121,8 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
 java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore \
   net.osmand.test.junit.FlightTerrainPickingTest \
   net.osmand.test.junit.FlightTileFilesTest \
+  net.osmand.test.junit.FlightTilePresentationTest \
+  net.osmand.test.junit.FlightFavoritesTest \
   net.osmand.test.junit.FlightMapPresentationTest \
   net.osmand.test.junit.FlightMapCameraTest \
   net.osmand.test.junit.FlightVisibilityLeaseTest \

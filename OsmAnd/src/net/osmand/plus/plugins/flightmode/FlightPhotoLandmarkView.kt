@@ -66,6 +66,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     private var satellite = true
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val pointingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     var imageAdjustments: FlightPhotoImageAdjustments = FlightPhotoImageAdjustments()
         set(value) {
             val safe = value.clamped()
@@ -472,7 +473,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                     )
                 }
             }
-            pointingMarkers.forEachIndexed { i, marker ->
+            pointingMarkers.forEach { marker ->
                 val x = marker.x
                 val y = marker.y
                 if (x != null && y != null && x in 0.0..1.0 && y in 0.0..1.0) {
@@ -492,7 +493,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                             height.toFloat(),
                             Paint().apply { alpha = (255 * marker.opacity).roundToInt() },
                         )
-                    mark(canvas, at[0].toFloat(), at[1].toFloat(), i + 1, Color.YELLOW)
+                    drawPointingMarker(canvas, at[0].toFloat(), at[1].toFloat())
                     canvas.restoreToCount(layer)
                 }
             }
@@ -586,9 +587,9 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                 mark(canvas, at.x, at.y, i + 1, if (i == selected) Color.YELLOW else Color.CYAN)
             }
         }
-        pointingMarkers.forEachIndexed { i, marker ->
+        pointingMarkers.forEach { marker ->
             val at = projectOnScreen(marker.point.latitude, marker.point.longitude)
-            mark(canvas, at.x, at.y, i + 1, Color.YELLOW)
+            drawPointingMarker(canvas, at.x, at.y)
         }
         if (mode == 2)
             reference?.let {
@@ -636,6 +637,17 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                 mapRotation,
             )
         return PointF(rotated[0].toFloat(), rotated[1].toFloat())
+    }
+
+    private fun drawPointingMarker(canvas: Canvas, x: Float, y: Float) {
+        val density = resources.displayMetrics.density
+        val radius = FlightPickedMarkerStyle.RADIUS_DP * density
+        pointingPaint.color = Color.BLACK
+        pointingPaint.strokeWidth = FlightPickedMarkerStyle.OUTLINE_DP * density
+        canvas.drawCircle(x, y, radius, pointingPaint)
+        pointingPaint.color = FlightPickedMarkerStyle.COLOR_ARGB.toInt()
+        pointingPaint.strokeWidth = FlightPickedMarkerStyle.STROKE_DP * density
+        canvas.drawCircle(x, y, radius, pointingPaint)
     }
 
     private fun mark(canvas: Canvas, x: Float, y: Float, label: Int, color: Int) {

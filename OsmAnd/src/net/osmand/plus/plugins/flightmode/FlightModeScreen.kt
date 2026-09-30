@@ -255,6 +255,7 @@ fun FlightModeScreen(
 	onSplitMapBounds: (android.graphics.Rect?) -> Unit = {},
 	onMapSatelliteBlend: (Float) -> Unit = {}
 ) {
+	val favorites = rememberFlightFavorites()
 	val cloudContext = LocalContext.current.applicationContext
 	val cloudScope = rememberCoroutineScope()
 	val cloud = remember(cloudContext) { FlightCloudController(cloudContext, cloudScope) }
@@ -272,7 +273,7 @@ fun FlightModeScreen(
 	FlightResumedEffect(state.page, state.offlineSimulation) {
 		if (!state.offlineSimulation && state.page in listOf(FlightPage.HOME, FlightPage.PLANS, FlightPage.JOURNEYS)) cloud.refreshIfStale()
 	}
-	CompositionLocalProvider(LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney),
+	CompositionLocalProvider(LocalFlightFavorites provides favorites, LocalFlightCloudUi provides FlightCloudUi(cloud, openCloud, onSaveJourney),
 		LocalFlightOfflineAction provides onOfflineSimulation,
 		LocalFlightCameraAction provides onPhotoAction,
 		LocalFlightMapBlend provides FlightMapBlend(satelliteBlend) { satelliteBlend = it }) {
@@ -467,9 +468,8 @@ fun FlightModeScreen(
 					onSaveWindowPlacement = onSaveWindowPlacement,
 					onSetSide = onSetWindowSide
 				)
-				FlightPage.SATELLITE -> SatelliteScreen(
+				FlightPage.SATELLITE -> FlightTilesScreen(
 					state = state,
-					onClose = onClose,
 					onPageChange = onPageChange,
 					onPreload = onPreloadPreparation,
 					onPausePreload = onCancelPreparationDownload
@@ -1211,112 +1211,6 @@ private fun WindowSetupScreen(
 }
 
 @Composable
-private fun SatelliteScreen(
-    state: FlightUiState,
-    onClose: () -> Unit,
-    onPageChange: (FlightPage) -> Unit,
-    onPreload: (FlightOfflineQuote) -> Unit,
-    onPausePreload: () -> Unit
-) {
-    var tileView by remember { mutableStateOf<FlightSatelliteCacheView?>(null) }
-    var tileLayer by rememberSaveable { mutableIntStateOf(0) }
-    var showFiles by rememberSaveable { mutableStateOf(false) }
-    var selectedCell by remember { mutableStateOf<FlightTileMapCell?>(null) }
-    var visibleGrid by remember { mutableIntStateOf(8) }
-    var showTileHelp by rememberSaveable { mutableStateOf(false) }
-    var showTileLevels by remember { mutableStateOf(false) }
-    var gridZoom by rememberSaveable(state.journeyId) { mutableIntStateOf(-1) }
-    val zooms = ((3..14).toList() + state.offlineCoverage?.sharedLevels.orEmpty().map { it.zoom }).distinct().sorted()
-    val selectedZoom = gridZoom.takeIf { it >= 0 } ?: state.offlineQuote?.defaultPreviewZoom ?: 8
-    val status = state.offlinePreloadStatus
-    Column(Modifier.fillMaxSize().background(FlightBackground)) {
-        FlightBackTopBar(stringResource(R.string.flight_mode_cached_tiles)) { onPageChange(FlightPage.MAP) }
-        FlightTileDashboard(state)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(FlightPanelStrong),
-            verticalAlignment = Alignment.CenterVertically) {
-            CompactAction(stringResource(R.string.flight_offline_size_satellite), if (tileLayer == 0) FlightBlue else FlightMuted,
-                { tileLayer = 0 })
-            CompactAction(stringResource(R.string.flight_offline_size_terrain), if (tileLayer == 1) FlightBlue else FlightMuted,
-                { tileLayer = 1 })
-            CompactAction(stringResource(R.string.flight_tiles_overview), if (tileLayer == 2) FlightBlue else FlightMuted,
-                { tileLayer = 2 })
-            CompactAction(stringResource(R.string.flight_tiles_fit), FlightText, { tileView?.fitContent() })
-            Box {
-                CompactAction(stringResource(R.string.flight_tiles_zoom, selectedZoom), FlightText,
-                    { showTileLevels = true })
-                DropdownMenu(expanded = showTileLevels, onDismissRequest = { showTileLevels = false },
-                    modifier = Modifier.heightIn(max = 280.dp)) {
-                    zooms.forEach { zoom ->
-                        TextButton(onClick = { gridZoom = zoom; showTileLevels = false },
-                            modifier = Modifier.fillMaxWidth().height(36.dp)) {
-                            Text(stringResource(R.string.flight_tiles_zoom, zoom),
-                                color = if (zoom == selectedZoom) FlightOrange else FlightText,
-                                fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-            CompactAction(stringResource(R.string.flight_tiles_help), FlightMuted, { showTileHelp = true })
-            if (status.phase == FlightTerrainPhase.DOWNLOADING || status.phase == FlightTerrainPhase.PLANNING) {
-                CompactAction(stringResource(R.string.flight_plan_pause), FlightOrange, onPausePreload)
-            }
-        }
-        Row(Modifier.fillMaxWidth().background(FlightPanelStrong), verticalAlignment = Alignment.CenterVertically) {
-            CompactAction(stringResource(R.string.flight_files_title), FlightGreen, { showFiles = true })
-            Text(stringResource(if (visibleGrid == selectedZoom) R.string.flight_tiles_grid_hint else R.string.flight_tiles_grid_grouped,
-                visibleGrid), color = FlightMuted, fontSize = 10.sp, modifier = Modifier.weight(1f).padding(4.dp))
-        }
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds(),
-            factory = { context -> FlightSatelliteCacheView(context).also { view ->
-                tileView = view
-                view.onCellSelected = { selectedCell = it }
-                view.onGridChanged = { visibleGrid = it }
-            } },
-            update = { view ->
-                view.setQuote(state.offlineQuote)
-                view.setZoom(selectedZoom)
-                view.setLayer(tileLayer)
-            }
-        )
-        if (tileLayer == 2) Text(stringResource(R.string.flight_tiles_legend_short), color = FlightMuted, fontSize = 10.sp,
-            modifier = Modifier.fillMaxWidth().background(FlightPanelStrong).padding(4.dp))
-        Text(stringResource(R.string.flight_mode_satellite_attribution_short), color = FlightMuted, fontSize = 8.sp,
-            modifier = Modifier.padding(horizontal = 4.dp))
-        FlightBottomNavigation(state, onPageChange, minimalChrome = true)
-    }
-    if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload)
-    selectedCell?.let { cell ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { selectedCell = null },
-            title = { Text(stringResource(R.string.flight_tiles_cell_title, cell.id.zoom, cell.id.x, cell.id.y)) },
-            text = { Column(Modifier.verticalScroll(rememberScrollState())) {
-                for (satellite in listOf(true, false)) {
-                    Text(stringResource(if (satellite) R.string.flight_offline_size_satellite else R.string.flight_offline_size_terrain),
-                        fontWeight = FontWeight.Bold)
-                    val stored = if (satellite) cell.satellite else cell.terrain
-                    val requested = if (satellite) cell.requestedSatellite else cell.requestedTerrain
-                    Text(stringResource(R.string.flight_tiles_cell_stored, stored.joinToString(" · ") { it.compact() }.ifEmpty { "—" }), fontSize = 12.sp)
-                    Text(stringResource(R.string.flight_tiles_cell_requested, requested.joinToString(" · ") { it.compact() }.ifEmpty { "—" }), fontSize = 12.sp)
-                }
-                Text(stringResource(R.string.flight_tiles_cell_fraction), fontSize = 11.sp)
-            } },
-            confirmButton = { TextButton(onClick = { selectedCell = null }) { Text(stringResource(R.string.shared_string_close)) } }
-        )
-    }
-    if (showTileHelp) androidx.compose.material3.AlertDialog(
-        onDismissRequest = { showTileHelp = false },
-        title = { Text(stringResource(R.string.flight_tiles_help_title)) },
-        text = { Text(stringResource(R.string.flight_tiles_help_text)) },
-        confirmButton = {
-            TextButton(onClick = { showTileHelp = false }) {
-                Text(stringResource(R.string.shared_string_ok))
-            }
-        }
-    )
-}
-
-@Composable
 internal fun SatelliteQualitySelector(
 	quality: FlightSatelliteQuality,
 	radiusKm: Int,
@@ -1716,7 +1610,10 @@ private fun PhotoScreen(
 	onPreparePhotoCalibration: (String) -> Unit
 ) {
 	var editorId by remember { mutableStateOf<String?>(null) }
+	var editorPointingMode by remember { mutableStateOf(false) }
 	var fullScreenPhotoId by remember { mutableStateOf<String?>(null) }
+	val favorites = LocalFlightFavorites.current
+	var favoritesOnly by rememberSaveable(state.journeyId) { mutableStateOf(false) }
 	val all = state.photos + state.pendingPhotos
 	val editorPhoto = all.firstOrNull { it.id == editorId }
 	LaunchedEffect(editorId, editorPhoto?.matchedSamplePosition) { editorId?.let(onPreparePhotoCalibration) }
@@ -1727,6 +1624,7 @@ private fun PhotoScreen(
 		Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
 			Text(stringResource(R.string.flight_mode_attached_photos, state.photos.size), color = FlightMuted,
 				fontSize = 11.sp, modifier = Modifier.weight(1f))
+			FlightFavoriteButton(favoritesOnly, favorites.ready, { favoritesOnly = !favoritesOnly }, filter = true)
 			if (state.sessionMode == FlightSessionMode.LIVE) {
 				CompactAction(stringResource(R.string.flight_mode_take_photo), FlightBlue, onPhotoAction)
 			}
@@ -1749,15 +1647,19 @@ private fun PhotoScreen(
 			if (state.pendingPhotos.isNotEmpty()) {
 				item { SectionTitle(stringResource(R.string.flight_mode_photos_to_confirm, state.pendingPhotos.size)) }
 				itemsIndexed(state.pendingPhotos.sortedWith(PHOTO_TIME_COMPARATOR), key = { _, p -> p.id }) { _, photo ->
-					PhotoLibraryEntry(photo, state.trip) { editorId = photo.id; onSelectPhoto(photo.id) }
+					PhotoLibraryEntry(photo, state.trip) { editorPointingMode = false; editorId = photo.id; onSelectPhoto(photo.id) }
 				}
 				item { Row(Modifier.fillMaxWidth()) {
 					CompactAction(stringResource(R.string.flight_mode_cancel), FlightMuted, onDiscardPhotos, Modifier.weight(1f))
 					CompactAction(stringResource(R.string.flight_mode_confirm_photos), FlightGreen, onValidatePhotos, Modifier.weight(1f))
 				} }
 			}
-			itemsIndexed(state.photos.sortedWith(PHOTO_TIME_COMPARATOR), key = { _, p -> p.id }) { _, photo ->
-				PhotoLibraryEntry(photo, state.trip) { editorId = photo.id; onSelectPhoto(photo.id) }
+			val visiblePhotos = state.photos.filter { !favoritesOnly || it.id in favorites.favorites.photos }.sortedWith(PHOTO_TIME_COMPARATOR)
+			if (favoritesOnly && favorites.ready && visiblePhotos.isEmpty()) item {
+				Text(stringResource(R.string.flight_favorites_empty), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(12.dp))
+			}
+			itemsIndexed(visiblePhotos, key = { _, p -> p.id }) { _, photo ->
+				PhotoLibraryEntry(photo, state.trip) { editorPointingMode = false; editorId = photo.id; onSelectPhoto(photo.id) }
 			}
 		}
 		FlightBottomNavigation(state, onPageChange)
@@ -1768,18 +1670,23 @@ private fun PhotoScreen(
 			{ onAssociatePhotoAutomatically(photo.id) }, { onAssociatePhotoAtCurrentReplay(photo.id) },
 			{ fullScreenPhotoId = photo.id }, { editorId = null; onOpenPhotoInWindow(photo.id) },
 			{ editorId = null; onOpenPhotoOnMap(photo.id) }, { onClearPhotoAssociation(photo.id) },
-			{ onSetPhotoImageAdjustments(photo.id, it) })
+			{ onSetPhotoImageAdjustments(photo.id, it) }, startInPointingMode = editorPointingMode)
 	}
 	fullScreenPhoto?.let { photo ->
 		androidx.compose.ui.window.Dialog(onDismissRequest = { fullScreenPhotoId = null },
 			properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-			FlightPhotoFullscreen(photo, { fullScreenPhotoId = null }, { onRotatePhoto(photo.id, it) })
+			FlightPhotoFullscreen(photo, { fullScreenPhotoId = null }, { onRotatePhoto(photo.id, it) }, {
+				editorId = photo.id
+				editorPointingMode = true
+				fullScreenPhotoId = null
+			})
 		}
 	}
 }
 
 @Composable
 private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, onOpen: () -> Unit) {
+	val favorites = LocalFlightFavorites.current
 	val bitmap by produceState<Bitmap?>(null, photo.localPath) {
 		value = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath), 192) }
 	}
@@ -1804,6 +1711,7 @@ private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, o
 				?: stringResource(R.string.flight_mode_photo_not_matched),
 				color = if (sample != null) FlightGreen else FlightWarning, fontSize = 9.sp)
 		}
+		FlightFavoriteButton(photo.id in favorites.favorites.photos, favorites.ready, { favorites.togglePhoto(photo.id) })
 		val pairCount = photo.calibration.points.count { it.x != null && it.latitude != null }
 		Text(stringResource(if (pairCount <= 1) R.string.flight_cal_single_pair else R.string.flight_cal_pairs, pairCount),
 			color = if (pairCount == 0) FlightMuted.copy(alpha = 0.5f) else FlightBlue, fontSize = 9.sp)
@@ -1815,7 +1723,8 @@ private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, o
 private fun FlightPhotoFullscreen(
 	photo: FlightPhotoAttachment,
 	onClose: () -> Unit,
-	onRotate: (Float) -> Unit
+	onRotate: (Float) -> Unit,
+	onOpenPointing: () -> Unit
 ) {
 	val preview by produceState(initialValue = PhotoPreviewState(), key1 = photo.localPath) {
 		val loaded = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath)) }
@@ -1854,6 +1763,7 @@ private fun FlightPhotoFullscreen(
 			verticalAlignment = Alignment.CenterVertically
 		) {
 			Text(photo.fileName, color = FlightText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+			CompactAction(stringResource(R.string.flight_photo_pointing_tab), FlightBlue, onOpenPointing)
 			CompactAction(stringResource(R.string.flight_mode_close).uppercase(), FlightText, onClose)
 		}
 		Row(
@@ -2110,11 +2020,16 @@ private fun formatStorageBytes(bytes: Long): String {
 
 @Composable
 private fun SavedJourneyRow(journey: FlightJourneySummary, onOpen: (String) -> Unit) {
+	val favorites = LocalFlightFavorites.current
+	val cloud = LocalFlightCloudUi.current?.controller
+	val binding = cloud?.bindings?.firstOrNull { it.localId == journey.id }
+	val row = FlightLibraryRow(journey, cloud?.remote?.firstOrNull { it.id == (binding?.remoteId ?: journey.id) }, binding)
 	Column(Modifier.fillMaxWidth().clickable { onOpen(journey.id) }) {
 		Row(
-			Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 12.dp),
+			Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 8.dp),
 			verticalAlignment = Alignment.CenterVertically
 		) {
+			FlightFavoriteButton(favorites.favorites.contains(row), favorites.ready, { favorites.toggleJourney(row) })
 			Column(Modifier.weight(1f)) {
 				Text(
 					journey.name,

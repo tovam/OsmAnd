@@ -53,7 +53,7 @@ internal fun FlightMapPanel(
     onToggleControls: (() -> Unit)? = null,
     onLockCenter: (() -> Unit)? = null,
     onSetHeadingLocked: (Boolean) -> Unit = {},
-    pickedPoints: List<FlightPickedPoint> = emptyList(),
+    pickedPoint: FlightPickedPoint? = null,
     onMapPoint: ((Double, Double) -> Unit)? = null,
 ) {
     val host = LocalView.current
@@ -152,7 +152,7 @@ internal fun FlightMapPanel(
                 val location = IntArray(2)
                 targetView.getLocationOnScreen(location)
                 val box = mapView.currentRotatedTileBox
-                pickedPoints.forEach { point ->
+                pickedPoint?.let { point ->
                     val pixel =
                         NativeUtilities.getElevatedPixelFromLatLon(
                             renderer,

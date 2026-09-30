@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,6 +34,8 @@ internal fun FlightWorkspaceHome(
     onCloud: (String?) -> Unit,
 ) {
     val cloud = LocalFlightCloudUi.current?.controller
+    val favorites = LocalFlightFavorites.current
+    var favoritesOnly by rememberSaveable { mutableStateOf(false) }
     var locationFilter by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var filterMenu by remember { mutableStateOf(false) }
@@ -45,6 +48,7 @@ internal fun FlightWorkspaceHome(
     val rows =
         flightLibraryRows(state.savedJourneys, cloud, planned).filter {
             it.matchesLocation(locationFilter) &&
+                (!favoritesOnly || favorites.favorites.contains(it)) &&
                 !(state.activeRecording.running && it.local?.id == state.activeRecording.journeyId)
         }
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
@@ -120,6 +124,12 @@ internal fun FlightWorkspaceHome(
                         )
                     }
                 }
+            FlightFavoriteButton(
+                favoritesOnly,
+                favorites.ready,
+                { favoritesOnly = !favoritesOnly },
+                filter = true,
+            )
             Box {
                 IconButton(onClick = { filterMenu = true }) {
                     Icon(
@@ -154,13 +164,18 @@ internal fun FlightWorkspaceHome(
             }
         }
         FlightLibraryServerNotice()
-        if (state.savedJourneysLoading || state.loadingTrip)
+        if (state.savedJourneysLoading || state.loadingTrip || !favorites.ready)
             LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f)) {
-            if (rows.isEmpty() && !state.savedJourneysLoading)
+            if (
+                rows.isEmpty() && !state.savedJourneysLoading && (!favoritesOnly || favorites.ready)
+            )
                 item {
                     Text(
-                        stringResource(R.string.flight_library_empty),
+                        stringResource(
+                            if (favoritesOnly) R.string.flight_favorites_empty
+                            else R.string.flight_library_empty
+                        ),
                         color = Color.LightGray,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(12.dp),
@@ -189,22 +204,39 @@ private fun FlightActiveRecordingStrip(
         state.savedJourneys.firstOrNull { it.id == id }?.name
             ?: live.trip?.name
             ?: stringResource(R.string.flight_workspace_current)
-    val cloud = LocalFlightCloudUi.current?.controller
+    val cloudUi = LocalFlightCloudUi.current
+    val cloud = cloudUi?.controller
     val binding = cloud?.bindings?.firstOrNull { it.localId == id }
     val onServer = cloud?.remote?.any { it.id == (binding?.remoteId ?: id) } == true
+    val favorites = LocalFlightFavorites.current
+    val summary =
+        state.savedJourneys.firstOrNull { it.id == id }
+            ?: FlightJourneySummary(id, name, 0L, live.trip?.samples?.size ?: 0, 0)
+    val row =
+        FlightLibraryRow(
+            summary,
+            cloud?.remote?.firstOrNull { it.id == (binding?.remoteId ?: id) },
+            binding,
+        )
     Row(
         Modifier.fillMaxWidth().background(Color(0xFF15302F)).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        FlightFavoriteButton(
+            favorites.favorites.contains(row),
+            favorites.ready,
+            { favorites.toggleJourney(row) },
+        )
         Column(Modifier.weight(1f).clickable { onOpen(id) }.padding(vertical = 6.dp)) {
             Text(
                 name,
                 color = Color.White,
                 fontSize = 13.sp,
+                lineHeight = 16.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            FlightLibraryGpsLabel(id, state)
+            FlightLibraryGpsLabel(id, state, compact = true)
             Text(
                 stringResource(
                     if (onServer && cloud?.serverVerified == true) R.string.flight_library_both
@@ -216,20 +248,16 @@ private fun FlightActiveRecordingStrip(
                         live.trip?.samples?.size ?: 0,
                     ),
                 fontSize = 10.sp,
+                lineHeight = 13.sp,
                 color = Color.LightGray,
             )
         }
-        TextButton(onClick = { onOpen(id) }, enabled = !state.loadingTrip) {
-            Text(
-                stringResource(
-                    if (live.running) R.string.flight_library_show_current
-                    else R.string.flight_cloud_open
-                ),
-                fontSize = 11.sp,
-            )
-        }
-        TextButton(onClick = { onDetails(id) }, enabled = !state.loadingTrip) {
-            Text(stringResource(R.string.flight_detail_title), fontSize = 11.sp)
-        }
+        FlightLibraryRowActions(
+            row,
+            state,
+            onOpen,
+            { key -> cloudUi?.open?.invoke(key) },
+            onDetails,
+        )
     }
 }

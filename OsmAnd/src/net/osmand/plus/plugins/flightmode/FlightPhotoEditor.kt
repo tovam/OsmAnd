@@ -57,6 +57,7 @@ internal fun FlightPhotoEditor(
     onOpenMap: () -> Unit,
     onClearAssociation: () -> Unit,
     onSetImageAdjustments: (FlightPhotoImageAdjustments) -> Unit,
+    startInPointingMode: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -70,10 +71,10 @@ internal fun FlightPhotoEditor(
     var action by remember(photo.id) { mutableStateOf(Action.EXPLORE) }
     var clearAllConfirmation by remember(photo.id) { mutableStateOf(false) }
     var associationAction by remember(photo.id) { mutableStateOf<PhotoAssociationAction?>(null) }
-    var tab by remember(photo.id) { mutableStateOf(0) }
+    var tab by remember(photo.id) { mutableStateOf(if (startInPointingMode) 6 else 0) }
     val pointing = remember(photo.id) { FlightPointingState() }
     var pointingRotation by remember(photo.id) { mutableFloatStateOf(0f) }
-    DisposableEffect(pointing) { onDispose { pointing.clear() } }
+    DisposableEffect(pointing) { onDispose { pointing.resetFrame() } }
     var status by remember(photo.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var solveJob by remember { mutableStateOf<Job?>(null) }
@@ -226,7 +227,7 @@ internal fun FlightPhotoEditor(
                 FlightPhotoPicker(pointingProjection, pointingTerrain)
             else null
         }
-    val pointingPoints = pointing.points
+    val pointingPoints = listOfNotNull(pointing.point)
     val pointingMarkers by
         produceState<List<FlightPhotoPickedMarker>>(emptyList(), photoPicker, pointingPoints) {
             value = emptyList()
@@ -395,6 +396,11 @@ internal fun FlightPhotoEditor(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                EditorAction(
+                    stringResource(R.string.flight_photo_pointing_tab),
+                    { changeTab(6) },
+                    selected = tab == 6,
+                )
                 EditorAction(stringResource(R.string.flight_mode_close), onClose)
             }
             if (tab == 4) FlightStorageStatusStrip(state, compact = true)
@@ -404,7 +410,6 @@ internal fun FlightPhotoEditor(
                         5 to R.string.flight_photo_adjust_tab,
                         2 to R.string.flight_cal_compare,
                         3 to R.string.flight_cal_window,
-                        6 to R.string.flight_photo_pointing_tab,
                         4 to R.string.flight_mode_photo_details,
                     )
                     .forEach { (i, res) ->
@@ -412,7 +417,6 @@ internal fun FlightPhotoEditor(
                             stringResource(res),
                             { changeTab(i) },
                             tab == i,
-                            enabled = i != 6 || pointingProjection != null,
                         )
                     }
             }
@@ -525,20 +529,6 @@ internal fun FlightPhotoEditor(
                         }
                 }
             }
-            if (tab == 6) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        stringResource(R.string.flight_photo_pointing_hint),
-                        color = Color.LightGray,
-                        fontSize = 11.sp,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                    )
-                    TextButton(onClick = pointing::clear) {
-                        Text(stringResource(R.string.flight_pointing_clear))
-                    }
-                }
-                FlightPointingStatus(pointing.missingTerrain, photoPicker != null)
-            }
             Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                 // Keep both panes mounted behind the other tabs to preserve framing and tile work.
                 Column(Modifier.fillMaxSize()) {
@@ -587,6 +577,33 @@ internal fun FlightPhotoEditor(
                                 )
                             },
                         )
+                        if (tab == 6) {
+                            if (pointingProjection == null) {
+                                Column(
+                                    Modifier.align(Alignment.BottomStart)
+                                        .padding(8.dp)
+                                        .widthIn(max = 260.dp)
+                                        .background(Color(0xD018252D))
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        stringResource(R.string.flight_photo_pointing_needs_alignment),
+                                        color = Color.LightGray,
+                                        fontSize = 11.sp,
+                                    )
+                                    EditorAction(
+                                        stringResource(R.string.flight_cal_landmarks),
+                                        { changeTab(0) },
+                                    )
+                                }
+                            } else {
+                                FlightPointingStatus(
+                                    pointing.missingTerrain,
+                                    photoPicker != null,
+                                    Modifier.align(Alignment.BottomStart).padding(8.dp),
+                                )
+                            }
+                        }
                         if (tab == 0 || tab == 6) {
                             LandmarkPaneBar(
                                 R.string.flight_cal_photo_pane,
