@@ -58,26 +58,46 @@ internal fun FlightMapPanel(
 ) {
     val host = LocalView.current
     val bounds by rememberUpdatedState(onBounds)
-    val density = LocalDensity.current
-    val widthPx = with(density) { 90.dp.toPx() }
     var revision by remember { mutableIntStateOf(0) }
     val renderer = mapView?.mapRenderer
     val pendingFrame = remember { AtomicBoolean() }
     var panelOrigin by remember { mutableStateOf(Offset.Zero) }
+    val invalidateCamera =
+        remember(mapView, host) {
+            {
+                if (pendingFrame.compareAndSet(false, true))
+                    host.postOnAnimation {
+                        pendingFrame.set(false)
+                        revision++
+                    }
+            }
+        }
     val listener =
         remember(renderer, host) {
             object : MapRendererView.MapRendererViewListener {
-                override fun onUpdateFrame(mapRenderer: MapRendererView) {}
+                override fun onUpdateFrame(mapRenderer: MapRendererView) {
+                    invalidateCamera()
+                }
 
                 override fun onFrameReady(mapRenderer: MapRendererView) {
-                    if (pendingFrame.compareAndSet(false, true))
-                        host.postOnAnimation {
-                            pendingFrame.set(false)
-                            revision++
-                        }
+                    invalidateCamera()
                 }
             }
         }
+    val zoomListener =
+        remember(mapView) { OsmandMapTileView.MapZoomChangeListener { invalidateCamera() } }
+    val viewportListener =
+        remember(mapView) { OsmandMapTileView.ViewportListener { invalidateCamera() } }
+    FlightVisibilityEffect(mapView, zoomListener, viewportListener) { visible ->
+        if (visible) {
+            mapView?.addMapZoomChangeListener(zoomListener)
+            mapView?.addViewportListener(viewportListener)
+            invalidateCamera()
+        } else {
+            mapView?.removeMapZoomChangeListener(zoomListener)
+            mapView?.removeViewportListener(viewportListener)
+        }
+    }
     FlightVisibilityEffect(renderer, listener) { visible ->
         if (visible) renderer?.addListener(listener) else renderer?.removeListener(listener)
     }
@@ -236,49 +256,12 @@ internal fun FlightMapPanel(
                 )
             }
         }
-        Column(
-            Modifier.align(Alignment.BottomStart)
-                .padding(6.dp)
-                .background(Color(0x5018252D))
-                .padding(4.dp)
-        ) {
-            @Suppress("UNUSED_VARIABLE") val frame = revision
-            val box = mapView?.currentRotatedTileBox
-            val meters =
-                if (box != null) {
-                    val y = box.pixHeight - with(density) { 20.dp.toPx() }.roundToInt()
-                    val x = with(density) { 10.dp.toPx() }.roundToInt()
-                    val a = NativeUtilities.getLatLonFromPixel(renderer, box, x, y)
-                    val b =
-                        NativeUtilities.getLatLonFromPixel(
-                            renderer,
-                            box,
-                            x + widthPx.roundToInt(),
-                            y,
-                        )
-                    if (a != null && b != null) MapUtils.getDistance(a, b) else 0.0
-                } else 0.0
-            if (meters > 0 && meters.isFinite()) {
-                val rounded = flightScaleStep(meters)
-                FlightCompactScale(
-                    if (rounded >= 1000) "%.1f km".format(rounded / 1000)
-                    else "%.0f m".format(rounded),
-                    (rounded / meters).toFloat(),
-                )
-                val speed = state.snapshot?.sample?.speedMetersPerSecond?.toDouble() ?: 0.0
-                if (speed > 0.5 && speed.isFinite()) {
-                    val visibleSeconds = meters / speed
-                    val seconds = flightTimeScaleStep(visibleSeconds)
-                    if (seconds > 0.0) {
-                        val label = flightTimeScaleLabel(seconds)
-                        val description = stringResource(R.string.flight_map_time_scale, label)
-                        Column(Modifier.semantics { contentDescription = description }) {
-                            FlightCompactScale("◷ $label", (seconds / visibleSeconds).toFloat())
-                        }
-                    }
-                }
-            }
-        }
+        FlightMapScales(
+            mapView,
+            revision,
+            state.snapshot?.sample?.speedMetersPerSecond?.toDouble() ?: 0.0,
+            Modifier.align(Alignment.BottomStart),
+        )
         Row(
             Modifier.align(Alignment.BottomEnd)
                 .width(184.dp)
@@ -298,6 +281,50 @@ internal fun FlightMapPanel(
                 color = Color.White,
                 fontSize = 10.sp,
             )
+        }
+    }
+}
+
+/** Camera revision is an explicit key, even when the flight sample and view identity stay fixed. */
+@Composable
+private fun FlightMapScales(
+    mapView: OsmandMapTileView?,
+    cameraRevision: Int,
+    speed: Double,
+    modifier: Modifier,
+) {
+    val density = LocalDensity.current
+    val renderer = mapView?.mapRenderer
+    val meters =
+        remember(mapView, renderer, cameraRevision, density) {
+            val box = mapView?.currentRotatedTileBox
+            if (box != null) {
+                val width = with(density) { 90.dp.toPx() }.roundToInt()
+                val x = with(density) { 10.dp.toPx() }.roundToInt()
+                val y = box.pixHeight - with(density) { 20.dp.toPx() }.roundToInt()
+                val a = NativeUtilities.getLatLonFromPixel(renderer, box, x, y)
+                val b = NativeUtilities.getLatLonFromPixel(renderer, box, x + width, y)
+                if (a != null && b != null) MapUtils.getDistance(a, b) else 0.0
+            } else 0.0
+        }
+    Column(modifier.padding(6.dp).background(Color(0x5018252D)).padding(4.dp)) {
+        if (meters > 0 && meters.isFinite()) {
+            val rounded = flightScaleStep(meters)
+            FlightCompactScale(
+                if (rounded >= 1000) "%.1f km".format(rounded / 1000) else "%.0f m".format(rounded),
+                (rounded / meters).toFloat(),
+            )
+            if (speed > 0.5 && speed.isFinite()) {
+                val visibleSeconds = meters / speed
+                val seconds = flightTimeScaleStep(visibleSeconds)
+                if (seconds > 0.0) {
+                    val label = flightTimeScaleLabel(seconds)
+                    val description = stringResource(R.string.flight_map_time_scale, label)
+                    Column(Modifier.semantics { contentDescription = description }) {
+                        FlightCompactScale("◷ $label", (seconds / visibleSeconds).toFloat())
+                    }
+                }
+            }
         }
     }
 }
