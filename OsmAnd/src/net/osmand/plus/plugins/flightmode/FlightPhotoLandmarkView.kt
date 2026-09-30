@@ -19,6 +19,13 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     var onMapPoint: (Double, Double) -> Unit = { _, _ -> }
     var onRotation: (Float) -> Unit = {}
     var dragToPlace: Boolean = false
+    internal var pointingMarkers: List<FlightPhotoPickedMarker> = emptyList()
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
     private var placementPreview: PointF? = null
     var coverage: List<Pair<TerrainTileId, Int>> = emptyList()
         set(value) {
@@ -88,12 +95,12 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     private var tilesFramePending = false
     private var released = false
     private var workVisible = false
-    private val workLifecycle = FlightViewVisibility(this) { visible ->
-        workVisible = visible
-        FlightPhotoTileCache.setVisible(this, visible)
-        if (visible) requestTiles()
-        else runningTiles.values.toList().forEach { it.cancel() }
-    }
+    private val workLifecycle =
+        FlightViewVisibility(this) { visible ->
+            workVisible = visible
+            FlightPhotoTileCache.setVisible(this, visible)
+            if (visible) requestTiles() else runningTiles.values.toList().forEach { it.cancel() }
+        }
     private var attached = false
 
     fun update(
@@ -465,6 +472,30 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                     )
                 }
             }
+            pointingMarkers.forEachIndexed { i, marker ->
+                val x = marker.x
+                val y = marker.y
+                if (x != null && y != null && x in 0.0..1.0 && y in 0.0..1.0) {
+                    val at =
+                        PhotoLandmarkGeometry.rotate(
+                            rect.left + x * rect.width(),
+                            rect.top + y * rect.height(),
+                            rect.centerX().toDouble(),
+                            rect.centerY().toDouble(),
+                            rotation.toDouble(),
+                        )
+                    val layer =
+                        canvas.saveLayer(
+                            0f,
+                            0f,
+                            width.toFloat(),
+                            height.toFloat(),
+                            Paint().apply { alpha = (255 * marker.opacity).roundToInt() },
+                        )
+                    mark(canvas, at[0].toFloat(), at[1].toFloat(), i + 1, Color.YELLOW)
+                    canvas.restoreToCount(layer)
+                }
+            }
         } else drawMap(canvas)
         placementPreview?.let { mark(canvas, it.x, it.y, selected + 1, Color.YELLOW) }
         canvas.restoreToCount(viewportSave)
@@ -554,6 +585,10 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
                 val at = projectOnScreen(p.latitude, p.longitude)
                 mark(canvas, at.x, at.y, i + 1, if (i == selected) Color.YELLOW else Color.CYAN)
             }
+        }
+        pointingMarkers.forEachIndexed { i, marker ->
+            val at = projectOnScreen(marker.point.latitude, marker.point.longitude)
+            mark(canvas, at.x, at.y, i + 1, Color.YELLOW)
         }
         if (mode == 2)
             reference?.let {
@@ -647,7 +682,15 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
     }
 
     private fun planTiles() {
-        if (mode <= 0 || width == 0 || released || !workVisible || !attached || visibility != VISIBLE) return
+        if (
+            mode <= 0 ||
+                width == 0 ||
+                released ||
+                !workVisible ||
+                !attached ||
+                visibility != VISIBLE
+        )
+            return
         val z = floor(zoom).toInt().coerceIn(3, if (satellite) 14 else 18)
         val cx = floor(FlightTerrainTilePlanner.longitudeToTileX(longitude, z)).toInt()
         val cy = floor(FlightTerrainTilePlanner.latitudeToTileY(latitude, z)).toInt()

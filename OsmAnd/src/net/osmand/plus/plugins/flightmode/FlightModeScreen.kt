@@ -2851,7 +2851,9 @@ internal fun FlightWindowScene(
 	onRenderStats: (FlightTerrainRenderStats) -> Unit,
 	showTerrainDiagnostics: Boolean = false,
 	gesturesOnly: Boolean = false,
-	modifier: Modifier = Modifier
+	modifier: Modifier = Modifier,
+	pointing: FlightPointingState? = null,
+	onTerrainTap: ((Offset) -> Unit)? = null
 ) {
 	val latestPlacement by rememberUpdatedState(placement)
 	val latestMoveLook by rememberUpdatedState(onMoveLook)
@@ -2860,6 +2862,7 @@ internal fun FlightWindowScene(
 	val latestTransformPhoto by rememberUpdatedState(onTransformPhoto)
 	val latestTransformLinkedView by rememberUpdatedState(onTransformLinkedView)
 	val latestRotatePhoto by rememberUpdatedState(onRotatePhoto)
+	val latestTerrainTap by rememberUpdatedState(onTerrainTap)
 	var sceneAspectRatio by remember { mutableStateOf(0f) }
 	val activePhoto = photo?.takeIf { photoOverlay.photoId == it.id }
 	val latestActivePhotoId by rememberUpdatedState(activePhoto?.id)
@@ -2892,8 +2895,10 @@ internal fun FlightWindowScene(
 			.onSizeChanged { size ->
 				sceneAspectRatio = size.width.toFloat() / size.height.coerceAtLeast(1)
 			}
-			.pointerInput(Unit) {
-				detectFineFlightTransforms { _, pan, zoom, rotationDegrees ->
+			.pointerInput(onTerrainTap != null) {
+				detectFineFlightTransforms(onTap = if (onTerrainTap != null) { at ->
+					latestTerrainTap?.invoke(Offset(at.x / size.width.coerceAtLeast(1), at.y / size.height.coerceAtLeast(1)))
+				} else null) { _, pan, zoom, rotationDegrees ->
 					val photoPresent = latestPhotoOverlay.photoId != null
 					when {
 						photoPresent && latestPhotoOverlay.gestureTarget == FlightWindowGestureTarget.PHOTO -> {
@@ -2949,8 +2954,10 @@ internal fun FlightWindowScene(
 			spatialPhoto = spatialPhoto,
 			onRendererError = onRendererError,
 			onRenderStats = onRenderStats,
-			modifier = Modifier.fillMaxSize()
+			modifier = Modifier.fillMaxSize(),
+			onPickingFrame = pointing?.let { it::acceptFrame }
 		)
+		if (pointing != null) FlightTerrainPointingOverlay(pointing, Modifier.fillMaxSize())
 		if (showSatelliteQualityOverlay) {
 			SatelliteQualityLegend(
 				modifier = Modifier.align(Alignment.CenterStart).padding(start = 7.dp)

@@ -53,6 +53,8 @@ internal fun FlightMapPanel(
     onToggleControls: (() -> Unit)? = null,
     onLockCenter: (() -> Unit)? = null,
     onSetHeadingLocked: (Boolean) -> Unit = {},
+    pickedPoints: List<FlightPickedPoint> = emptyList(),
+    onMapPoint: ((Double, Double) -> Unit)? = null,
 ) {
     val host = LocalView.current
     val bounds by rememberUpdatedState(onBounds)
@@ -61,6 +63,7 @@ internal fun FlightMapPanel(
     var revision by remember { mutableIntStateOf(0) }
     val renderer = mapView?.mapRenderer
     val pendingFrame = remember { AtomicBoolean() }
+    var panelOrigin by remember { mutableStateOf(Offset.Zero) }
     val listener =
         remember(renderer, host) {
             object : MapRendererView.MapRendererViewListener {
@@ -82,7 +85,14 @@ internal fun FlightMapPanel(
     if (showCone && mapView != null) {
         val coneLayer = remember(mapView) { FlightViewConeLayer(host.context) }
         SideEffect {
-            coneLayer.update(flightMapViewCone(state.snapshot?.sample, state.windowPlacement, state.windowLook, coneAspectRatio))
+            coneLayer.update(
+                flightMapViewCone(
+                    state.snapshot?.sample,
+                    state.windowPlacement,
+                    state.windowLook,
+                    coneAspectRatio,
+                )
+            )
         }
         FlightVisibilityEffect(mapView, coneLayer) { visible ->
             if (visible) mapView.addLayer(coneLayer, FlightViewConeLayer.Z_ORDER)
@@ -98,6 +108,7 @@ internal fun FlightMapPanel(
             val offset = coordinates.positionInRoot()
             val left = origin[0] + offset.x.roundToInt()
             val top = origin[1] + offset.y.roundToInt()
+            panelOrigin = Offset(left.toFloat(), top.toFloat())
             bounds(Rect(left, top, left + coordinates.size.width, top + coordinates.size.height))
         }
     ) {
@@ -107,10 +118,37 @@ internal fun FlightMapPanel(
                 factory = { FlightMapGestureProxyView(it, mapView, onExplore) },
                 update = {
                     it.update(mapView, onExplore)
+                    it.onMapPoint = onMapPoint
                     it.lockedCenter = state.snapshot?.sample.takeIf { state.mapCenterLocked }
-                    it.lockedBearingDegrees = state.snapshot?.sample?.bearingDegrees.takeIf { state.mapHeadingLocked }
+                    it.lockedBearingDegrees =
+                        state.snapshot?.sample?.bearingDegrees.takeIf { state.mapHeadingLocked }
                 },
             )
+        Canvas(Modifier.fillMaxSize()) {
+            // Read in the drawing phase: map frames invalidate markers without rebuilding controls.
+            @Suppress("UNUSED_VARIABLE") val frame = revision
+            val targetView = mapView?.view
+            if (mapView != null && targetView != null) {
+                val location = IntArray(2)
+                targetView.getLocationOnScreen(location)
+                val box = mapView.currentRotatedTileBox
+                pickedPoints.forEach { point ->
+                    val pixel =
+                        NativeUtilities.getElevatedPixelFromLatLon(
+                            renderer,
+                            box,
+                            point.latitude,
+                            point.longitude,
+                        )
+                    val at =
+                        Offset(
+                            pixel.x + location[0] - panelOrigin.x,
+                            pixel.y + location[1] - panelOrigin.y,
+                        )
+                    drawFlightPickedMarker(at, 1f)
+                }
+            }
+        }
         Row(
             Modifier.align(Alignment.TopEnd).background(Color(0x9018252D)),
             verticalAlignment = Alignment.CenterVertically,
@@ -128,7 +166,10 @@ internal fun FlightMapPanel(
             val bearing = state.snapshot?.sample?.bearingDegrees?.takeIf { it.isFinite() }
             MapControl(
                 R.drawable.ic_action_direction_arrow,
-                stringResource(if (state.mapHeadingLocked) R.string.flight_map_heading_unlock else R.string.flight_map_heading_lock),
+                stringResource(
+                    if (state.mapHeadingLocked) R.string.flight_map_heading_unlock
+                    else R.string.flight_map_heading_lock
+                ),
                 label = stringResource(R.string.flight_map_heading_short),
                 enabled = bearing != null || state.mapHeadingLocked,
                 active = state.mapHeadingLocked,
@@ -148,7 +189,11 @@ internal fun FlightMapPanel(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(if (renderer != null) "GL" else "V1", color = Color.White, fontSize = 9.sp)
-                    Text("${(mapView?.elevationAngle ?: 90f).roundToInt()}°", color = Color.White, fontSize = 8.sp)
+                    Text(
+                        "${(mapView?.elevationAngle ?: 90f).roundToInt()}°",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                    )
                 }
             }
             onLockCenter?.let { lock ->
@@ -161,7 +206,8 @@ internal fun FlightMapPanel(
                     ),
                     active = state.mapCenterLocked,
                     onClick = {
-                        if (!state.mapCenterLocked) mapView?.animatedDraggingThread?.stopAnimatingSync()
+                        if (!state.mapCenterLocked)
+                            mapView?.animatedDraggingThread?.stopAnimatingSync()
                         lock()
                     },
                 )
@@ -169,7 +215,10 @@ internal fun FlightMapPanel(
             onFollow?.let { follow ->
                 MapControl(
                     R.drawable.ic_action_get_my_location,
-                    stringResource(if (state.mapFollowing) R.string.flight_map_follow_off else R.string.flight_map_follow_on),
+                    stringResource(
+                        if (state.mapFollowing) R.string.flight_map_follow_off
+                        else R.string.flight_map_follow_on
+                    ),
                     label = stringResource(R.string.flight_map_follow_short),
                     active = state.mapFollowing,
                     onClick = follow,
@@ -275,8 +324,10 @@ private fun MapControl(
                 painterResource(icon),
                 contentDescription = null,
                 tint = tint,
-                modifier = Modifier.size(if (label == null) 21.dp else 17.dp)
-                    .graphicsLayer { rotationZ = rotation },
+                modifier =
+                    Modifier.size(if (label == null) 21.dp else 17.dp).graphicsLayer {
+                        rotationZ = rotation
+                    },
             )
             if (label != null) Text(label, color = tint, fontSize = 8.sp, maxLines = 1)
         }

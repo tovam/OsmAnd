@@ -8,7 +8,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 
 @Composable
-fun FlightTerrainSurface(
+internal fun FlightTerrainSurface(
     scene: FlightTerrainScene?,
     sample: FlightSample?,
     windowPlacement: FlightWindowPlacement,
@@ -26,6 +26,7 @@ fun FlightTerrainSurface(
     modifier: Modifier = Modifier,
     inspection: FlightPhotoInspection? = null,
     rendererRevision: Int = 0,
+    onPickingFrame: ((FlightPickingFrame) -> Unit)? = null,
 ) {
     key(rendererRevision) {
         val context = LocalContext.current
@@ -55,6 +56,7 @@ fun FlightTerrainSurface(
                     onRendererError = onRendererError,
                     onRenderStats = onRenderStats,
                     inspection = inspection,
+                    onPickingFrame = onPickingFrame,
                 )
             },
         )

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+	<string name="flight_pointing_mode">Pointer entre les vues</string>
+	<string name="flight_pointing_clear">Effacer les points</string>
+	<string name="flight_pointing_no_terrain">Aucune intersection avec le relief ici. Choisir un point sur le terrain chargé.</string>
+	<string name="flight_pointing_loading">Chargement du relief pour le pointage…</string>
+	<string name="flight_photo_pointing_tab">Photo / carte</string>
+	<string name="flight_photo_pointing_hint">Toucher une vue pour ajouter un point. Pincer, déplacer ou tourner pour explorer la photo.</string>
 	<string name="flight_dates_unknown">Dates indisponibles</string>
 	<string name="flight_dates_planned">Prévu</string>
 	<string name="flight_dates_simulated">Simulation</string>

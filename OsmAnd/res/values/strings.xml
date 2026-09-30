@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="flight_pointing_mode">Point between views</string>
+	<string name="flight_pointing_clear">Clear points</string>
+	<string name="flight_pointing_no_terrain">No terrain intersection here. Choose a point on the loaded ground.</string>
+	<string name="flight_pointing_loading">Loading terrain for pointing…</string>
+	<string name="flight_photo_pointing_tab">Photo / map</string>
+	<string name="flight_photo_pointing_hint">Tap either view to add a point. Pinch, drag or rotate to explore the photo.</string>
 	<string name="flight_dates_unknown">Dates unavailable</string>
 	<string name="flight_dates_planned">Planned</string>
 	<string name="flight_dates_simulated">Simulation</string>

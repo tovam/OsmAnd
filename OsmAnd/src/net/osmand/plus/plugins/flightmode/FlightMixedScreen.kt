@@ -26,29 +26,89 @@ internal fun FlightMixedScreen(
     onSetHeadingLocked: (Boolean) -> Unit,
 ) {
     var sceneAspectRatio by remember { mutableFloatStateOf(1f) }
-    Column(Modifier.fillMaxSize()) {
-        FlightWindowScene(
-            placement = state.windowPlacement, look = state.windowLook, trip = state.trip,
-            sample = state.snapshot?.sample, scene = state.terrainScene,
-            terrainStatus = state.terrainStatus, rendererRecovery = state.terrainRendererRecovery,
-            terrainRenderStats = state.terrainRenderStats, altitudeOverrideMeters = state.windowAltitudeOverrideMeters,
-            shadingEnabled = state.plan.shadowsEnabled, shadowIntensity = state.plan.shadowIntensity,
-            satelliteOpacity = state.satelliteOpacity, satelliteQuality = state.plan.satelliteQuality,
-            showSatelliteQualityOverlay = state.showSatelliteQualityOverlay,
-            photo = null, photoOverlay = FlightWindowPhotoOverlay(),
-            onMoveLook = onMoveLook, onChangeZoom = onChangeZoom, onRecenterLook = onRecenterLook,
-            onSetSide = {}, onTransformPhoto = { _, _, _ -> }, onTransformLinkedView = { _, _, _, _ -> },
-            onInitializePhotoViewport = { _, _ -> }, onSetPhotoOpacity = {}, onSetGestureTarget = {},
-            onResetPhotoTransform = {}, onRotatePhoto = { _, _ -> }, onClearPhoto = {}, onSetShadowsEnabled = {},
-            onRetryTerrain = onRetry, onRendererError = onRendererError, onRenderStats = onRenderStats,
-            gesturesOnly = true, modifier = Modifier.weight(1f).fillMaxWidth().onSizeChanged {
-                sceneAspectRatio = it.width.toFloat() / it.height.coerceAtLeast(1)
-            },
+    var pointingEnabled by remember { mutableStateOf(false) }
+    val pointing = remember(state.journeyId) { FlightPointingState() }
+    val scope = rememberCoroutineScope()
+    val picker =
+        rememberTerrainPicker(
+            pointing.frame?.scene.takeIf { pointingEnabled && state.terrainScene != null }
         )
-        FlightMapPanel(state, mapView, onMapExplore, onMapBounds,
-            modifier = Modifier.weight(1f).fillMaxWidth(), showCone = true,
+    LaunchedEffect(pointingEnabled, state.terrainScene == null) {
+        if (!pointingEnabled || state.terrainScene == null) pointing.resetFrame()
+    }
+    SideEffect { pointing.terrain = picker }
+    DisposableEffect(pointing) { onDispose { pointing.clear() } }
+    Column(Modifier.fillMaxSize()) {
+        FlightPointingControls(pointingEnabled, { pointingEnabled = it }, pointing::clear)
+        if (pointingEnabled) FlightPointingStatus(pointing.missingTerrain, picker != null)
+        FlightWindowScene(
+            placement = state.windowPlacement,
+            look = state.windowLook,
+            trip = state.trip,
+            sample = state.snapshot?.sample,
+            scene = state.terrainScene,
+            terrainStatus = state.terrainStatus,
+            rendererRecovery = state.terrainRendererRecovery,
+            terrainRenderStats = state.terrainRenderStats,
+            altitudeOverrideMeters = state.windowAltitudeOverrideMeters,
+            shadingEnabled = state.plan.shadowsEnabled,
+            shadowIntensity = state.plan.shadowIntensity,
+            satelliteOpacity = state.satelliteOpacity,
+            satelliteQuality = state.plan.satelliteQuality,
+            showSatelliteQualityOverlay = state.showSatelliteQualityOverlay,
+            photo = null,
+            photoOverlay = FlightWindowPhotoOverlay(),
+            onMoveLook = onMoveLook,
+            onChangeZoom = onChangeZoom,
+            onRecenterLook = onRecenterLook,
+            onSetSide = {},
+            onTransformPhoto = { _, _, _ -> },
+            onTransformLinkedView = { _, _, _, _ -> },
+            onInitializePhotoViewport = { _, _ -> },
+            onSetPhotoOpacity = {},
+            onSetGestureTarget = {},
+            onResetPhotoTransform = {},
+            onRotatePhoto = { _, _ -> },
+            onClearPhoto = {},
+            onSetShadowsEnabled = {},
+            onRetryTerrain = onRetry,
+            onRendererError = onRendererError,
+            onRenderStats = onRenderStats,
+            gesturesOnly = true,
+            modifier =
+                Modifier.weight(1f).fillMaxWidth().onSizeChanged {
+                    sceneAspectRatio = it.width.toFloat() / it.height.coerceAtLeast(1)
+                },
+            pointing = pointing.takeIf { pointingEnabled },
+            onTerrainTap =
+                if (pointingEnabled)
+                    { at ->
+                        val frame = pointing.frame
+                        pointing.select(scope) {
+                            frame?.ray(at.x.toDouble(), at.y.toDouble())?.let {
+                                picker?.pointAt(it)
+                            }
+                        }
+                    }
+                else null,
+        )
+        FlightMapPanel(
+            state,
+            mapView,
+            onMapExplore,
+            onMapBounds,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            showCone = true,
             coneAspectRatio = sceneAspectRatio,
-            onFollow = onFollow, onLockCenter = onLockCenter, onSetHeadingLocked = onSetHeadingLocked)
+            onFollow = onFollow,
+            onLockCenter = onLockCenter,
+            onSetHeadingLocked = onSetHeadingLocked,
+            pickedPoints = if (pointingEnabled) pointing.points else emptyList(),
+            onMapPoint =
+                if (pointingEnabled)
+                    { lat, lon -> pointing.select(scope) { picker?.groundAt(lat, lon) } }
+                else null,
+        )
         FlightBottomNavigation(state, onPage, minimalChrome = true)
     }
 }

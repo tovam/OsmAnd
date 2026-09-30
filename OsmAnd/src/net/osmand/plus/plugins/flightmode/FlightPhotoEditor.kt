@@ -71,6 +71,9 @@ internal fun FlightPhotoEditor(
     var clearAllConfirmation by remember(photo.id) { mutableStateOf(false) }
     var associationAction by remember(photo.id) { mutableStateOf<PhotoAssociationAction?>(null) }
     var tab by remember(photo.id) { mutableStateOf(0) }
+    val pointing = remember(photo.id) { FlightPointingState() }
+    var pointingRotation by remember(photo.id) { mutableFloatStateOf(0f) }
+    DisposableEffect(pointing) { onDispose { pointing.clear() } }
     var status by remember(photo.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var solveJob by remember { mutableStateOf<Job?>(null) }
@@ -208,6 +211,31 @@ internal fun FlightPhotoEditor(
     val currentOnSave by rememberUpdatedState(onSave)
     val currentData by rememberUpdatedState(data)
     val currentReference by rememberUpdatedState(reference)
+    val pointingProjection =
+        estimate?.let { pose ->
+            FlightPhotoProjection(
+                pose,
+                data.imageWidth.toFloat() / data.imageHeight.coerceAtLeast(1),
+                rotation = data.fit?.imageRotationDegrees() ?: photo.rotationDegrees,
+            )
+        } ?: processingPhoto.dehazeProjection()
+    val pointingTerrain = rememberTerrainPicker(state.terrainScene.takeIf { tab == 6 })
+    val photoPicker =
+        remember(pointingProjection, pointingTerrain) {
+            if (pointingProjection != null && pointingTerrain != null)
+                FlightPhotoPicker(pointingProjection, pointingTerrain)
+            else null
+        }
+    val pointingPoints = pointing.points
+    val pointingMarkers by
+        produceState<List<FlightPhotoPickedMarker>>(emptyList(), photoPicker, pointingPoints) {
+            value = emptyList()
+            if (photoPicker != null)
+                value =
+                    runInterruptible(Dispatchers.Default) {
+                        pointingPoints.map(photoPicker::project)
+                    }
+        }
     LaunchedEffect(cameraMode, yaw, pitch, zoom, opacity) {
         val settings = FlightPhotoEditorView(cameraMode, yaw, pitch, zoom, opacity)
         if (data.editorView != settings) {
@@ -376,10 +404,16 @@ internal fun FlightPhotoEditor(
                         5 to R.string.flight_photo_adjust_tab,
                         2 to R.string.flight_cal_compare,
                         3 to R.string.flight_cal_window,
+                        6 to R.string.flight_photo_pointing_tab,
                         4 to R.string.flight_mode_photo_details,
                     )
                     .forEach { (i, res) ->
-                        EditorAction(stringResource(res), { changeTab(i) }, tab == i)
+                        EditorAction(
+                            stringResource(res),
+                            { changeTab(i) },
+                            tab == i,
+                            enabled = i != 6 || pointingProjection != null,
+                        )
                     }
             }
             if (tab == 0) {
@@ -491,6 +525,20 @@ internal fun FlightPhotoEditor(
                         }
                 }
             }
+            if (tab == 6) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.flight_photo_pointing_hint),
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    )
+                    TextButton(onClick = pointing::clear) {
+                        Text(stringResource(R.string.flight_pointing_clear))
+                    }
+                }
+                FlightPointingStatus(pointing.missingTerrain, photoPicker != null)
+            }
             Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                 // Keep both panes mounted behind the other tabs to preserve framing and tile work.
                 Column(Modifier.fillMaxSize()) {
@@ -500,20 +548,36 @@ internal fun FlightPhotoEditor(
                             modifier = Modifier.fillMaxSize().clipToBounds(),
                             update = { v ->
                                 v.visibility =
-                                    if (tab == 0) android.view.View.VISIBLE
+                                    if (tab == 0 || tab == 6) android.view.View.VISIBLE
                                     else android.view.View.INVISIBLE
                                 v.dragToPlace =
                                     false // A drag always explores; placing is an explicit toolbar
                                 // mode + tap.
-                                v.onImagePoint = { x, y -> placePoint(0) { it.copy(x = x, y = y) } }
+                                v.pointingMarkers =
+                                    if (tab == 6)
+                                        pointingMarkers.filter { it.point in pointingPoints }
+                                    else emptyList()
+                                v.onImagePoint = { x, y ->
+                                    if (tab == 6)
+                                        pointing.select(scope) { photoPicker?.pointAt(x, y) }
+                                    else placePoint(0) { it.copy(x = x, y = y) }
+                                }
                                 v.onRotation = {
-                                    data = data.copy(pickerRotation = it)
-                                    currentOnSave(data)
+                                    if (tab == 6) pointingRotation = it
+                                    else {
+                                        data = data.copy(pickerRotation = it)
+                                        currentOnSave(data)
+                                    }
                                 }
                                 v.imageAdjustments = effectiveAdjustments
                                 v.update(
                                     corrected.bitmap,
-                                    data,
+                                    if (tab == 6)
+                                        data.copy(
+                                            points = emptyList(),
+                                            pickerRotation = pointingRotation,
+                                        )
+                                    else data,
                                     selected,
                                     0,
                                     reference,
@@ -523,7 +587,7 @@ internal fun FlightPhotoEditor(
                                 )
                             },
                         )
-                        if (tab == 0) {
+                        if (tab == 0 || tab == 6) {
                             LandmarkPaneBar(
                                 R.string.flight_cal_photo_pane,
                                 onFit = { photoView.fit() },
@@ -546,20 +610,35 @@ internal fun FlightPhotoEditor(
                             modifier = Modifier.fillMaxSize().clipToBounds(),
                             update = { v ->
                                 v.visibility =
-                                    if (tab == 0) android.view.View.VISIBLE
+                                    if (tab == 0 || tab == 6) android.view.View.VISIBLE
                                     else android.view.View.INVISIBLE
                                 v.mapRotationEnabled = true
                                 v.dragToPlace = false
                                 v.onMapPoint = { lat, lon ->
-                                    placePoint(1) {
-                                        it.copy(latitude = lat, longitude = lon, altitude = null)
-                                    }
+                                    if (tab == 6)
+                                        pointing.select(scope) {
+                                            pointingTerrain?.groundAt(lat, lon)
+                                        }
+                                    else
+                                        placePoint(1) {
+                                            it.copy(
+                                                latitude = lat,
+                                                longitude = lon,
+                                                altitude = null,
+                                            )
+                                        }
                                 }
                                 v.onStatus = { status = it }
-                                if (tab == 0)
+                                v.pointingMarkers =
+                                    if (tab == 6)
+                                        pointingPoints.map {
+                                            FlightPhotoPickedMarker(it, null, null, 1f)
+                                        }
+                                    else emptyList()
+                                if (tab == 0 || tab == 6)
                                     v.update(
                                         null,
-                                        data,
+                                        if (tab == 6) data.copy(points = emptyList()) else data,
                                         selected,
                                         1,
                                         reference,
@@ -569,7 +648,7 @@ internal fun FlightPhotoEditor(
                                     )
                             },
                         )
-                        if (tab == 0)
+                        if (tab == 0 || tab == 6)
                             LandmarkPaneBar(
                                 R.string.flight_cal_map_pane,
                                 onFit = { mapView.fit() },

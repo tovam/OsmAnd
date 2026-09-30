@@ -29,11 +29,13 @@ class FlightTerrainView @JvmOverloads constructor(
 
 	private var rendererErrorListener: ((String) -> Unit)? = null
 	private var renderStatsListener: ((FlightTerrainRenderStats) -> Unit)? = null
+	private var pickingFrameListener: ((FlightPickingFrame) -> Unit)? = null
 	private var paused = false
 	private val retryFrame = Runnable { if (!paused && isAttachedToWindow) requestRender() }
 	private val terrainRenderer = TerrainRenderer(
 		onError = { message -> post { rendererErrorListener?.invoke(message) } },
 		onStats = { stats -> post { renderStatsListener?.invoke(stats) } },
+		onPickingFrame = { frame -> post { pickingFrameListener?.invoke(frame) } },
 		requestFrame = { post { if (!paused && isAttachedToWindow) requestRender() } },
 		requestRetryFrame = { post { if (!paused) { removeCallbacks(retryFrame); postDelayed(retryFrame, 1_000L) } } }
 	)
@@ -42,6 +44,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		// Pending callbacks from a replaced GL surface must not poison its replacement.
 		rendererErrorListener = null
 		renderStatsListener = null
+		pickingFrameListener = null
 		onPause()
 		terrainRenderer.stopPreparation()
 	}
@@ -76,7 +79,7 @@ class FlightTerrainView @JvmOverloads constructor(
 		requestRender()
 	}
 
-	fun updateScene(
+	internal fun updateScene(
 		scene: FlightTerrainScene?,
 		sample: FlightSample?,
 		windowPlacement: FlightWindowPlacement,
@@ -91,10 +94,13 @@ class FlightTerrainView @JvmOverloads constructor(
 		spatialPhoto: FlightSpatialPhotoOverlay?,
 		onRendererError: (String) -> Unit,
 		onRenderStats: (FlightTerrainRenderStats) -> Unit,
-		inspection: FlightPhotoInspection? = null
+		inspection: FlightPhotoInspection? = null,
+		onPickingFrame: ((FlightPickingFrame) -> Unit)? = null
 	) {
 		rendererErrorListener = onRendererError
 		renderStatsListener = onRenderStats
+		pickingFrameListener = onPickingFrame
+		terrainRenderer.pickingEnabled = onPickingFrame != null
 		terrainRenderer.update(
 			scene,
 			sample,
@@ -116,9 +122,15 @@ class FlightTerrainView @JvmOverloads constructor(
 	private class TerrainRenderer(
 		private val onError: (String) -> Unit,
 		private val onStats: (FlightTerrainRenderStats) -> Unit,
+		private val onPickingFrame: (FlightPickingFrame) -> Unit,
 		private val requestFrame: () -> Unit,
 		private val requestRetryFrame: () -> Unit
 	) : GLSurfaceView.Renderer {
+		@Volatile var pickingEnabled = false
+		private var lastPickingFrame: FlightPickingFrame? = null
+		private var pickingSourceScene: FlightTerrainScene? = null
+		private var pickingRenderMeshes: List<RenderMesh>? = null
+		private var pickingScene: FlightTerrainScene? = null
 
 		@Volatile
 		private var viewState = RenderViewState()
@@ -550,6 +562,25 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 			drawSpatialPhoto(currentScene, currentSpatialPhoto, mvp)
 			inspection?.let { inspectionRenderer?.draw(it, coordinates, camera, mvp) }
+			if (pickingEnabled) {
+				if (pickingSourceScene !== currentScene || pickingRenderMeshes !== renderMeshes) {
+					pickingSourceScene = currentScene
+					pickingRenderMeshes = renderMeshes
+					pickingScene = currentScene.copy(meshes = renderMeshes.map { mesh ->
+						FlightTerrainMesh(mesh.geometry.tileId, mesh.geometry.sourceVertices, mesh.geometry.sourceIndices,
+							refinementLevel = mesh.refinementLevel, terrainAvailable = mesh.terrainAvailable)
+					})
+				}
+				val inverse = FloatArray(16)
+				if (Matrix.invertM(inverse, 0, mvp, 0)) {
+					val frame = FlightPickingFrame(requireNotNull(pickingScene), camera.map { it.toDouble() }.toDoubleArray(), mvp, inverse)
+					// Send the initial frame again when enabling pointing at an unchanged camera.
+					if (lastPickingFrame?.sameView(frame) != true) {
+						lastPickingFrame = frame
+						onPickingFrame(frame)
+					}
+				}
+			} else lastPickingFrame = null
 			requestReadyTextureFrame()
 		}
 

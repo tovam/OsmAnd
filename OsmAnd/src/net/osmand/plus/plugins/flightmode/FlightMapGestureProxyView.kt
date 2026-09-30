@@ -5,6 +5,8 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.GestureDetector
+import net.osmand.plus.utils.NativeUtilities
 import net.osmand.plus.views.OsmandMapTileView
 import net.osmand.util.MapUtils
 import kotlin.math.abs
@@ -25,6 +27,20 @@ class FlightMapGestureProxyView(
 	var lockedCenter: FlightSample? = null
 	/** Zoom and tilt remain available, but an active heading lock rejects manual rotation. */
 	var lockedBearingDegrees: Float? = null
+	var onMapPoint: ((Double, Double) -> Unit)? = null
+	private val tapDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+		override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+			val callback = onMapPoint ?: return false
+			val targetView = target.view ?: return false
+			getLocationOnScreen(sourceLocation)
+			targetView.getLocationOnScreen(targetLocation)
+			val point = NativeUtilities.getLatLonFromElevatedPixel(target.mapRenderer, target.currentRotatedTileBox,
+				(event.x + sourceLocation[0] - targetLocation[0]).toInt(),
+				(event.y + sourceLocation[1] - targetLocation[1]).toInt())
+			callback(point.latitude, point.longitude)
+			return true
+		}
+	})
 
 	private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 	private val touchSlopSquared = touchSlop * touchSlop
@@ -57,6 +73,7 @@ class FlightMapGestureProxyView(
 	}
 
 	override fun onTouchEvent(event: MotionEvent): Boolean {
+		if (onMapPoint != null) tapDetector.onTouchEvent(event)
 		var reportExploration = false
 		when (event.actionMasked) {
 			MotionEvent.ACTION_DOWN -> {
@@ -237,6 +254,7 @@ class FlightMapGestureProxyView(
 	}
 
 	override fun onDetachedFromWindow() {
+		onMapPoint = null
 		if (targetGestureActive) {
 			val now = SystemClock.uptimeMillis()
 			val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
