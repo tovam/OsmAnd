@@ -184,6 +184,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSetPhotoSources = viewModel::setPhotoSources,
 					onPhotoAction = ::handlePhotoAction,
 					onImportPhotos = { openPhotosLauncher.launch(arrayOf("image/*")) },
+                    onInspectStorageCleanup = viewModel::inspectStorageCleanup,
+                    onCleanUnusedStorage = viewModel::cleanUnusedStorage,
                     onCorrectPhotoTimes = viewModel::correctPhotoTimes,
                     onUndoPhotoTimeCorrection = viewModel::undoPhotoTimeCorrection,
 					onValidatePhotos = viewModel::validatePendingPhotos,

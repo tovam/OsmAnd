@@ -1060,7 +1060,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
         return result(status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR))
 	}
 
-	private fun loadTerrainTile(tileId: TerrainTileId): LoadedTerrainTile {
+	private fun loadTerrainTile(tileId: TerrainTileId): LoadedTerrainTile = FlightTileStorageGate.read { loadTerrainTileLocked(tileId) }
+
+    private fun loadTerrainTileLocked(tileId: TerrainTileId): LoadedTerrainTile {
 		ensureWorkActive()
 		cachedDecodedTerrain(tileId)?.let { tile ->
 			return LoadedTerrainTile(
@@ -1303,16 +1305,16 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		return assetLocks.putIfAbsent(key, candidate) ?: candidate
 	}
 
-	private inline fun <T> withAssetLock(file: File, block: () -> T): T {
+	private fun <T> withAssetLock(file: File, block: () -> T): T = FlightTileStorageGate.read {
 		val lock = assetLock(file)
 		lock.lockInterruptibly()
-		return try {
-			ensureWorkActive()
-			block()
-		} finally {
-			lock.unlock()
-		}
-	}
+        try {
+            ensureWorkActive()
+            block()
+        } finally {
+            lock.unlock()
+        }
+    }
 
 	private fun downloadTerrainTile(tileId: TerrainTileId, destination: File): CachedAsset =
 		downloadAsset(

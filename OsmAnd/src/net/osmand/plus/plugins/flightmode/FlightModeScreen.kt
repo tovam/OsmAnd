@@ -219,6 +219,7 @@ fun FlightModeScreen(
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
 	onPreparePhotoCalibration: (String) -> Unit,
+    onInspectStorageCleanup: () -> Unit = {}, onCleanUnusedStorage: () -> Unit = {},
     onCorrectPhotoTimes: (Set<String>, Int, Int) -> Unit = { _, _, _ -> },
     onUndoPhotoTimeCorrection: () -> Unit = {},
     onRequestPointingTerrain: (Double, Double) -> Unit,
@@ -507,7 +508,7 @@ fun FlightModeScreen(
                     onRequestPointingTerrain = onRequestPointingTerrain, onRetryTerrain = onRetryTerrain,
                     onCorrectPhotoTimes = onCorrectPhotoTimes, onUndoPhotoTimeCorrection = onUndoPhotoTimeCorrection
 				)
-				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload)
+				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload, onInspectStorageCleanup, onCleanUnusedStorage)
 			}
 
 			}
@@ -1961,7 +1962,16 @@ internal fun decodePhotoPreview(file: File, maximumPixels: Int = MAXIMUM_PHOTO_P
 
 @Composable
 private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage) -> Unit,
-    onPreload: (FlightOfflineQuote) -> Unit, onPausePreload: () -> Unit) {
+    onPreload: (FlightOfflineQuote) -> Unit, onPausePreload: () -> Unit,
+    onInspectCleanup: () -> Unit, onCleanUnused: () -> Unit) {
+    var confirmCleanup by remember { mutableStateOf(false) }
+    if (confirmCleanup && state.storageCleanup != null) AlertDialog(
+        onDismissRequest = { confirmCleanup = false },
+        title = { Text(stringResource(R.string.flight_storage_clean_confirm_title)) },
+        text = { Text(stringResource(R.string.flight_storage_clean_confirm, state.storageCleanup.files,
+            formatStorageBytes(state.storageCleanup.bytes))) },
+        confirmButton = { TextButton(onClick = { confirmCleanup = false; onCleanUnused() }) { Text(stringResource(R.string.flight_storage_clean)) } },
+        dismissButton = { TextButton(onClick = { confirmCleanup = false }) { Text(stringResource(R.string.shared_string_cancel)) } })
     var showFiles by remember { mutableStateOf(false) }
     if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload)
     Column(Modifier.fillMaxSize().background(FlightBackground)) {
@@ -1970,6 +1980,19 @@ private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage)
         }
         TextButton(onClick = { showFiles = true }) {
             Text(stringResource(R.string.flight_files_title), fontSize = 12.sp)
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            Text(stringResource(R.string.flight_storage_protection_help), fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onInspectCleanup, enabled = !state.storageCleanupBusy) { Text(stringResource(R.string.flight_storage_scan)) }
+                if (state.storageCleanup?.files?.let { it > 0 } == true) TextButton(
+                    onClick = { confirmCleanup = true }, enabled = !state.storageCleanupBusy) { Text(stringResource(R.string.flight_storage_clean)) }
+            }
+            if (state.storageCleanupBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            state.storageCleanup?.let { summary -> Text(stringResource(R.string.flight_storage_reclaimable,
+                formatStorageBytes(summary.bytes), summary.files, formatStorageBytes(summary.protectedBytes)), fontSize = 12.sp) }
+            state.storageCleanupError?.let { Text(it, color = FlightWarning, fontSize = 12.sp) }
+            state.journeyMessage?.let { Text(it, fontSize = 12.sp) }
         }
         LazyColumn(Modifier.weight(1f)) {
             item {

@@ -34,6 +34,26 @@ class FlightJourneyStore(private val context: Context) {
 	private val journeysDirectory = File(context.filesDir, JOURNEYS_DIRECTORY).also { it.mkdirs() }
 	private val mediaDirectory = File(context.filesDir, MEDIA_DIRECTORY).also { it.mkdirs() }
 
+    internal fun storageProtectionSnapshot(): Pair<String, List<FlightJourney>> = synchronized(STORE_LOCK) {
+        storageLibrarySignature() to journeyFiles().map { file ->
+            journeyFromJson(JSONObject(file.readText())) { name -> File(mediaDirectory, name).absolutePath }
+        }
+    }
+
+    private fun storageLibrarySignature(): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        journeyFiles().sortedBy { it.name }.forEach { file ->
+            digest.update(file.name.toByteArray(Charsets.UTF_8))
+            digest.update(java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes()))
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+    }
+
+    internal fun <T> withUnchangedStorageLibrary(signature: String, block: () -> T): T = synchronized(STORE_LOCK) {
+        if (storageLibrarySignature() != signature) throw IOException(context.getString(net.osmand.plus.R.string.flight_storage_scan_changed))
+        block()
+    }
+
 	fun storageUsage(
 		currentJourneyId: String?,
 		currentPhotos: List<FlightPhotoAttachment>,
@@ -302,7 +322,9 @@ class FlightJourneyStore(private val context: Context) {
 		first == 'P'.code && second == 'K'.code
 	} ?: false
 
-	fun importArchive(uri: Uri): FlightJourney {
+	fun importArchive(uri: Uri): FlightJourney = FlightTileStorageGate.read { importArchiveLocked(uri) }
+
+    private fun importArchiveLocked(uri: Uri): FlightJourney {
 		val importedMedia = linkedMapOf<String, String>()
 		val createdPhotos = mutableListOf<File>()
 		val inventory = FlightArchiveInventory()

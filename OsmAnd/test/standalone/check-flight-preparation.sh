@@ -24,7 +24,7 @@ javac -d "$test_output" \
   "$repo_root/OsmAnd-java/src/main/java/net/osmand/map/MapTileDownloader.java"
 java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   -no-stdlib -no-reflect -jvm-target 1.8 -classpath "$classpath" -d "$test_output" \
-  "$sources/FlightModels.kt" "$sources/FlightPrecisionProfile.kt" "$sources/FlightReadiness.kt" "$sources/FlightPreparation.kt" "$sources/FlightRecordingData.kt" "$sources/FlightCameraOptics.kt" \
+  "$sources/FlightModels.kt" "$sources/FlightPrecisionProfile.kt" "$sources/FlightReadiness.kt" "$sources/FlightStorageProtection.kt" "$sources/FlightTileStorageGate.kt" "$sources/FlightPreparation.kt" "$sources/FlightRecordingData.kt" "$sources/FlightCameraOptics.kt" \
   "$sources/FlightDatePresentation.kt" "$sources/FlightPhotoTime.kt" "$sources/FlightPhotoTimestampParser.kt" \
   "$sources/FlightPhotoCalibration.kt" "$sources/FlightTerrainCoordinates.kt" \
   "$sources/FlightPhotoFitDiagnostics.kt" \

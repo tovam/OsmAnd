@@ -550,6 +550,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun showPage(page: FlightPage) {
+        if (page != FlightPage.JOURNAL && storageCleanupJob?.isActive == true) {
+            storageCleanupJob?.cancel()
+            storageCleanupPlan = null
+            uiState = uiState.copy(storageCleanup = null, storageCleanupBusy = false)
+        }
 		if (uiState.loadingTrip) return
 		if (!FlightWorkspaceNavigation.allows(uiState.sessionMode, page)) return
 		if (page == FlightPage.DETAIL && uiState.page !in listOf(FlightPage.DETAIL, FlightPage.JOURNAL))
@@ -621,6 +626,53 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			catch (e: Exception) { uiState = uiState.copy(journeyMessage = e.message, savedJourneysLoading = false) }
 		}
 	}
+
+    private var storageCleanupPlan: FlightStorageCleanupPlan? = null
+    private var storageCleanupJob: Job? = null
+
+    private fun storageCleanupBlocked(): Boolean = uiState.activeRecording.running ||
+        FlightRecordingService.state.value.running || preparationDownload?.isActive == true
+
+    fun inspectStorageCleanup() {
+        if (storageCleanupJob?.isActive == true) return
+        if (storageCleanupBlocked()) {
+            uiState = uiState.copy(storageCleanupError = app.getString(net.osmand.plus.R.string.flight_storage_active)); return
+        }
+        val operation = journalOperations.capture()
+        storageCleanupPlan = null
+        uiState = uiState.copy(storageCleanup = null, storageCleanupBusy = true, storageCleanupError = null)
+        storageCleanupJob = viewModelScope.launch {
+            try {
+                savePendingLocalChanges()
+                val plan = FlightStorageManager(app, journeyStore).inspect()
+                if (!journalOperations.isCurrent(operation)) return@launch
+                storageCleanupPlan = plan
+                uiState = uiState.copy(storageCleanup = plan.summary)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (journalOperations.isCurrent(operation)) uiState = uiState.copy(storageCleanupError = e.message) }
+            finally { if (journalOperations.isCurrent(operation)) uiState = uiState.copy(storageCleanupBusy = false) }
+        }
+    }
+
+    fun cleanUnusedStorage() {
+        val plan = storageCleanupPlan ?: return
+        if (storageCleanupJob?.isActive == true) return
+        if (storageCleanupBlocked()) { uiState = uiState.copy(storageCleanupError = app.getString(net.osmand.plus.R.string.flight_storage_active)); return }
+        val operation = journalOperations.capture()
+        uiState = uiState.copy(storageCleanupBusy = true, storageCleanupError = null)
+        storageCleanupJob = viewModelScope.launch {
+            try {
+                val reclaimed = FlightStorageManager(app, journeyStore).clean(plan)
+                if (!journalOperations.isCurrent(operation)) return@launch
+                storageCleanupPlan = null
+                uiState = uiState.copy(storageCleanup = null,
+                    journeyMessage = app.getString(net.osmand.plus.R.string.flight_storage_cleaned, formatStorageBytes(reclaimed)))
+                refreshStorageUsage()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (journalOperations.isCurrent(operation)) uiState = uiState.copy(storageCleanup = null, storageCleanupError = e.message) }
+            finally { if (journalOperations.isCurrent(operation)) uiState = uiState.copy(storageCleanupBusy = false) }
+        }
+    }
 
 	fun refreshStorageUsage() {
 		storageJob?.cancel()
@@ -1077,6 +1129,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun abandonJournalNavigationWork() {
+        storageCleanupJob?.cancel()
+        storageCleanupPlan = null
+        uiState = uiState.copy(storageCleanupBusy = false, storageCleanup = null, storageCleanupError = null)
         pointingDemand = null
         photoTimeUndo = emptyMap()
         uiState = uiState.copy(photoTimeUndoAvailable = false)

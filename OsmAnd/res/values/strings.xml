@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_storage_scan">Scan unused tiles</string>
+    <string name="flight_storage_clean">Clean unused tiles</string>
+    <string name="flight_storage_clean_confirm_title">Remove unused downloaded tiles?</string>
+    <string name="flight_storage_clean_confirm">Remove %1$d unused source files (%2$s)? Files needed by retained flights and photo views are protected. Gallery originals and journals are preserved.</string>
+    <string name="flight_storage_protection_help">Shared tiles used by retained flight routes and photo views are protected. Small global backdrops are retained. Cleanup is available when GPS recording and preparation downloads are stopped.</string>
+    <string name="flight_storage_reclaimable">%1$s reclaimable · %2$d files · %3$s protected</string>
+    <string name="flight_storage_active">Stop GPS recording and pause preparation downloads before scanning or cleaning tiles.</string>
+    <string name="flight_storage_scan_changed">Flights or downloaded files changed since the scan. Scan again before cleaning.</string>
+    <string name="flight_storage_cleaned">Unused tiles removed: %1$s reclaimed.</string>
     <string name="flight_readiness_title">Ready for flight?</string>
     <string name="flight_readiness_ready">Ready for offline flight viewing</string>
     <string name="flight_readiness_itinerary">Route and dates</string>

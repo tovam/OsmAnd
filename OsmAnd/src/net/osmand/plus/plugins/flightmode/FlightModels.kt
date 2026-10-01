@@ -857,6 +857,9 @@ data class FlightRecordingPolicy(
 
 data class FlightUiState(
     val photoTimeUndoAvailable: Boolean = false,
+    val storageCleanup: FlightStorageCleanupSummary? = null,
+    val storageCleanupBusy: Boolean = false,
+    val storageCleanupError: String? = null,
 	val activeRecording: FlightLiveState = FlightLiveState(),
 	val liveTimeline: FlightTrip? = null,
 	val browsingLiveTimeline: Boolean = false,
