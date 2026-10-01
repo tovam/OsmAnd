@@ -27,6 +27,12 @@ data class FlightPhotoFit(
     val pointIndices: List<Int> = emptyList(),
     val influences: List<FlightPhotoPointInfluence>? = null,
 ) {
+    /** One policy for every geographic use of a fitted photo, not a metric accuracy guarantee. */
+    fun isReliable(): Boolean = !weak && rms.isFinite() && rms in 0.0..5.0 &&
+        parameters.size == 7 && parameters.all(Double::isFinite) &&
+        originLatitude.isFinite() && originLatitude in -90.0..90.0 &&
+        originLongitude.isFinite() && originLongitude in -180.0..180.0
+
     fun pose(reference: FlightPhotoSpatialPose, aspect: Float): FlightPhotoSpatialPose {
         val coordinates = FlightTerrainCoordinates(originLatitude, originLongitude)
         val geo = coordinates.toGeographic(DoubleArray(3) { parameters[it] * 1000 })

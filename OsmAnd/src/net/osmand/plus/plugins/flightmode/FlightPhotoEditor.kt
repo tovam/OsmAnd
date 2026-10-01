@@ -212,14 +212,8 @@ internal fun FlightPhotoEditor(
     val currentOnSave by rememberUpdatedState(onSave)
     val currentData by rememberUpdatedState(data)
     val currentReference by rememberUpdatedState(reference)
-    val pointingProjection =
-        estimate?.let { pose ->
-            FlightPhotoProjection(
-                pose,
-                data.imageWidth.toFloat() / data.imageHeight.coerceAtLeast(1),
-                rotation = data.fit?.imageRotationDegrees() ?: photo.rotationDegrees,
-            )
-        } ?: processingPhoto.dehazeProjection()
+    val pointingChoice = processingPhoto.photoProjection()
+    val pointingProjection = pointingChoice?.projection
     val pointingTerrain = rememberTerrainPicker(state.terrainScene.takeIf { tab == 6 })
     val photoPicker =
         remember(pointingProjection, pointingTerrain) {
@@ -589,6 +583,15 @@ internal fun FlightPhotoEditor(
                             },
                         )
                         if (tab == 6) {
+                            pointingChoice?.let { choice ->
+                                Text(
+                                    stringResource(if (choice.quality == FlightPhotoProjectionQuality.MANUAL)
+                                        R.string.flight_photo_alignment_approximate else R.string.flight_photo_alignment_checked),
+                                    color = Color.LightGray, fontSize = 11.sp,
+                                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                                        .background(Color(0xB018252D)).padding(5.dp),
+                                )
+                            }
                             if (pointingProjection == null) {
                                 Column(
                                     Modifier.align(Alignment.BottomStart)
@@ -875,10 +878,10 @@ internal fun FlightPhotoEditor(
                     )
                     Text(
                         stringResource(
-                            if (fit.weak || fit.rms > 5) R.string.flight_cal_weak
+                            if (!fit.isReliable()) R.string.flight_cal_weak
                             else R.string.flight_cal_uncertainty
                         ),
-                        color = if (fit.weak || fit.rms > 5) Color(0xFFFFCC66) else Color.LightGray,
+                        color = if (!fit.isReliable()) Color(0xFFFFCC66) else Color.LightGray,
                         fontSize = 10.sp,
                         modifier = Modifier.padding(horizontal = 8.dp),
                     )

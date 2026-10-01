@@ -191,7 +191,15 @@ data class FlightPhotoDepthProfile(
  * Use a deliberate manual alignment first, otherwise a reliable point-based fit. Never guess a
  * heading.
  */
-fun FlightPhotoAttachment.dehazeProjection(): FlightPhotoProjection? {
+internal enum class FlightPhotoProjectionQuality { MANUAL, FIT }
+internal data class FlightPhotoProjectionChoice(
+    val projection: FlightPhotoProjection,
+    val quality: FlightPhotoProjectionQuality,
+)
+
+fun FlightPhotoAttachment.dehazeProjection(): FlightPhotoProjection? = photoProjection()?.projection
+
+internal fun FlightPhotoAttachment.photoProjection(): FlightPhotoProjectionChoice? {
     val aspect =
         (calibration.imageWidth.toFloat() / calibration.imageHeight.coerceAtLeast(1)).takeIf {
             it > 0 && it.isFinite()
@@ -202,18 +210,18 @@ fun FlightPhotoAttachment.dehazeProjection(): FlightPhotoProjection? {
             ?.takeIf { it.eyeAltitudeMeters != null && it.referenceAspectRatio != null }
             ?.let { pose ->
                 if (aspect != null)
-                    return FlightPhotoProjection(
+                    return FlightPhotoProjectionChoice(FlightPhotoProjection(
                         pose,
                         aspect,
                         alignment.scale,
                         alignment.offsetXFraction,
                         alignment.offsetYFraction,
                         rotationDegrees,
-                    )
+                    ), FlightPhotoProjectionQuality.MANUAL)
             }
     }
     val fit =
-        calibration.fit?.takeIf { !it.weak && it.rms <= 8 && it.parameters.size == 7 }
+        calibration.fit?.takeIf(FlightPhotoFit::isReliable)
             ?: return null
     if (aspect == null) return null
     val reference =
@@ -231,7 +239,8 @@ fun FlightPhotoAttachment.dehazeProjection(): FlightPhotoProjection? {
         )
     return runCatching {
             fit.pose(reference, aspect).clampedOrNull()?.let {
-                FlightPhotoProjection(it, aspect, rotation = fit.imageRotationDegrees())
+                FlightPhotoProjectionChoice(FlightPhotoProjection(it, aspect, rotation = fit.imageRotationDegrees()),
+                    FlightPhotoProjectionQuality.FIT)
             }
         }
         .getOrNull()

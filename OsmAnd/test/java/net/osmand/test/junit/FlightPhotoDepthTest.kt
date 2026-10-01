@@ -66,6 +66,20 @@ class FlightPhotoDepthTest {
         )
 
     @Test
+    fun everyProjectionUsesTheSameFitPolicyAndManualAlignmentWins() {
+        val fit = FlightPhotoFit(0.0, 0.0, listOf(0.0, 10.0, 0.0, 0.0, -.5, 0.0, 0.0), emptyList(), 2.0, false)
+        val base = photo().copy(windowAlignment = null, calibration = photo().calibration.copy(fit = fit))
+        assertNotNull(base.dehazeProjection())
+        for (bad in listOf(fit.copy(weak = true), fit.copy(rms = 6.0), fit.copy(rms = Double.NaN),
+            fit.copy(parameters = emptyList()), fit.copy(originLatitude = 200.0))) {
+            assertNull(base.copy(calibration = base.calibration.copy(fit = bad)).dehazeProjection())
+        }
+        val manual = base.copy(windowAlignment = photo().windowAlignment)
+        assertEquals(pose, manual.dehazeProjection()!!.pose)
+        assertEquals(FlightPhotoProjectionQuality.MANUAL, manual.photoProjection()!!.quality)
+    }
+
+    @Test
     fun cameraAboveFlatGroundHasCorrectMetricRange() {
         val projection = FlightPhotoProjection(pose, 1f)
         val result = FlightPhotoDepth.calculate(projection, scene(ground()))
