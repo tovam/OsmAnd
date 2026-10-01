@@ -1061,7 +1061,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		)
 		refreshSavedJourneys()
 		firstSnapshot?.sample?.let(::requestTerrain)
-		if (hasOfflineCorridorSource()) scheduleAutomaticOfflinePreload()
 	}
 
 	private fun abandonJournalNavigationWork() {
@@ -1138,53 +1137,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
-	private fun scheduleAutomaticOfflinePreload() {
-		// A configurable large package requires the user's explicit estimate/download confirmation.
-		if (uiState.plan.preparation!=null || uiState.offlineSimulation) return
-		terrainStreamingEngine.scheduleBackgroundWork {
-			runOfflinePreload()
-		}
-	}
-
 	private fun hasOfflineCorridorSource(): Boolean =
 		uiState.trip?.samples?.size?.let { it >= 2 } == true ||
 			uiState.plan.stops.count { it.latitude != null && it.longitude != null } >= 2
-
-	private suspend fun runOfflinePreload() {
-		val operation = journalOperations.capture()
-		val sourceId = uiState.journeyId
-		fun ownsDisplay() = journalOperations.isCurrent(operation) && uiState.journeyId == sourceId
-		try {
-			val plan = uiState.plan
-			val trip = uiState.trip
-			val finalStatus = terrainRepository.preloadCorridor(plan, trip) { status ->
-				if (ownsDisplay()) uiState = uiState.copy(offlinePreloadStatus = status)
-			}
-			if (!ownsDisplay()) return
-			val assets = if (trip != null) withContext(Dispatchers.IO) {
-				journeyStore.discoverOfflineAssets(plan, trip, uiState.offlineAssets)
-			} else uiState.offlineAssets
-			if (!ownsDisplay()) return
-			val assetsChanged = assets != uiState.offlineAssets
-			uiState = uiState.copy(
-				offlinePreloadStatus = finalStatus,
-				offlineAssets = assets,
-				journeyDirty = uiState.journeyDirty || assetsChanged
-			)
-			refreshStorageUsage()
-			if (assetsChanged && uiState.journeyId != null) saveJourney()
-		} catch (error: CancellationException) {
-			throw error
-		} catch (error: Exception) {
-			if (!ownsDisplay()) return
-			uiState = uiState.copy(
-				offlinePreloadStatus = uiState.offlinePreloadStatus.copy(
-					phase = FlightTerrainPhase.ERROR,
-					message = error.message ?: "Préchargement du relief impossible"
-				)
-			)
-		}
-	}
 
 	fun retryTerrain() {
         pointingDemand?.let { terrainStreamingEngine.retry(it); return }
