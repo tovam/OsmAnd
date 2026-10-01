@@ -57,6 +57,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var simulationOriginal: FlightJourney? = null
 	private var simulationJob: Job? = null
 	private var liveTimelineJob: Job? = null
+    private var lastTimelineBuildElapsed = 0L
+    private var lastTimelineBuildPlan: FlightPlan? = null
 	private var liveCursorMillis: Long? = null
 	private val preparationSaveMutex = Mutex()
 	private var pendingJournalNavigation: (suspend () -> Unit)? = null
@@ -354,15 +356,22 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (!visualWorkActive || uiState.page !in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED)) return
 		val fix = live.latest ?: return
 		if (liveTimelineJob?.isActive == true) return
-		val plan = uiState.plan
-		liveTimelineJob = viewModelScope.launch {
-			val timeline = withContext(Dispatchers.Default) { FlightLiveTimeline.build(plan, live.trip, fix) }
+        val plan = uiState.plan
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (uiState.liveTimeline != null && lastTimelineBuildPlan == plan && now - lastTimelineBuildElapsed < 5000L) return
+        lastTimelineBuildElapsed = now
+        lastTimelineBuildPlan = plan
+        liveTimelineJob = viewModelScope.launch {
+            val (timeline, profile, engine) = withContext(Dispatchers.Default) {
+                val timeline = FlightLiveTimeline.build(plan, live.trip, fix)
+                Triple(timeline, FlightProfilePlanner.fromTrip(timeline), FlightReplayEngine(timeline,
+                    recordedSampleCount = timeline.samples.indexOfLast { it.timestampMillis <= fix.timestampMillis } + 1))
+            }
 			if (uiState.journeyId != live.journeyId || uiState.sessionMode != FlightSessionMode.LIVE || uiState.plan != plan) return@launch
-			replayEngine = FlightReplayEngine(timeline,
-				recordedSampleCount = timeline.samples.indexOfLast { it.timestampMillis <= fix.timestampMillis } + 1)
+            replayEngine = engine
 			val time = liveCursorMillis.takeIf { uiState.browsingLiveTimeline } ?: fix.timestampMillis
 			val progress = FlightLiveTimeline.progress(timeline, time)
-			uiState = uiState.copy(liveTimeline=timeline, profile=FlightProfilePlanner.fromTrip(timeline),
+			uiState = uiState.copy(liveTimeline=timeline, profile=profile,
 				replayProgress=progress,
 				snapshot=if(uiState.browsingLiveTimeline) replayEngine?.snapshotAt(progress)?.let {
 					FlightLiveTimeline.withoutFutureMeasurements(it, fix.timestampMillis)

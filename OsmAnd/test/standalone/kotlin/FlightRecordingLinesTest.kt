@@ -1,5 +1,6 @@
 package net.osmand.test.junit
 
+import net.osmand.plus.plugins.flightmode.*
 import java.io.File
 import net.osmand.plus.plugins.flightmode.FlightRecordingLines
 import org.junit.Assert.*
@@ -11,6 +12,26 @@ import org.junit.rules.TemporaryFolder
 class FlightRecordingLinesTest {
     // This is intentionally inside the checkout, never the user's flight data or system temp root.
     @get:Rule val folder = TemporaryFolder(File(System.getProperty("user.dir")))
+
+    @Test
+    fun recordingSnapshotsStayImmutableAcrossChunksAndRestorationKeepsDistance() {
+        val history = FlightRecordedHistory()
+        val saved = mutableListOf<List<FlightSample>>()
+        repeat(1030) { index ->
+            history.append(FlightSample(index, 0, index * 1000L, 0.0, index * .0001,
+                1000.0, 20f, 90f, 5f))
+            if (index in listOf(0, 254, 255, 256, 1023)) saved += listOf(history.snapshot())
+        }
+        for (snapshot in saved) {
+            assertEquals(snapshot.size - 1, snapshot.last().index)
+            assertEquals((0 until snapshot.size).toList(), snapshot.map { it.index })
+        }
+        val restored = FlightRecordedHistory(history.snapshot())
+        val full = recordedFlightTrip("Synthetic", history.snapshot())
+        assertEquals(full.totalDistanceMeters, history.distanceMeters, 1e-6)
+        assertEquals(history.distanceMeters, restored.distanceMeters, 1e-6)
+        assertEquals(full, recordedFlightTrip("Synthetic", history.snapshot(), history.distanceMeters))
+    }
 
     @Test
     fun completedRecordsAreUnchanged() {

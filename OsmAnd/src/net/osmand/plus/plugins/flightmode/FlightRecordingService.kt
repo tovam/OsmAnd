@@ -23,7 +23,7 @@ class FlightRecordingService : Service(), LocationListener {
     private lateinit var manager: LocationManager
     private var store: FlightRecordingStore? = null
     private var journey: FlightJourney? = null
-    private var samples = mutableListOf<FlightSample>()
+    private var samples = FlightRecordedHistory()
     private var battery = mutableListOf<FlightBatteryPoint>()
     private var tracking = FlightTrackingState()
     private var environment = FlightEnvironmentReading()
@@ -299,7 +299,7 @@ class FlightRecordingService : Service(), LocationListener {
                     return@post
                 }
                 val recorded = store!!.samplesAndBattery()
-                samples = recorded.first.toMutableList()
+                samples = FlightRecordedHistory(recorded.first)
                 battery = recorded.second.toMutableList()
                 if (tracking.baselineAltitude == null)
                     tracking =
@@ -311,7 +311,7 @@ class FlightRecordingService : Service(), LocationListener {
                 updates.value =
                     FlightLiveState(
                         id,
-                        recordedFlightTrip(journey!!.name, samples.toList()),
+                        recordedFlightTrip(journey!!.name, samples.snapshot(), samples.distanceMeters),
                         samples.lastOrNull(),
                         tracking,
                         battery.toList(),
@@ -439,12 +439,12 @@ class FlightRecordingService : Service(), LocationListener {
             val record = decision.shouldRecord
             if (record) {
                 store!!.append(sample)
-                samples += sample
+                samples.append(sample)
             }
             updates.value =
                 updates.value.copy(
                     trip =
-                        if (record) recordedFlightTrip(journey!!.name, samples.toList())
+                        if (record) recordedFlightTrip(journey!!.name, samples.snapshot(), samples.distanceMeters)
                         else updates.value.trip,
                     latest = sample,
                     receivedFixesThisSession = updates.value.receivedFixesThisSession + 1L,
@@ -566,9 +566,9 @@ class FlightRecordingService : Service(), LocationListener {
         runCatching {
             FlightLiveSafety.finalFix(samples.lastOrNull(), updates.value.latest)?.let { sample ->
                 store?.append(sample)
-                samples += sample
+                samples.append(sample)
                 journey?.let { j ->
-                    updates.value = updates.value.copy(trip = recordedFlightTrip(j.name, samples.toList()))
+                    updates.value = updates.value.copy(trip = recordedFlightTrip(j.name, samples.snapshot(), samples.distanceMeters))
                 }
             }
         }.onFailure { updates.value = updates.value.copy(error = it.message) }
