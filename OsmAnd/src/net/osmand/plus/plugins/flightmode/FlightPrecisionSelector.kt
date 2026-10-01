@@ -29,7 +29,7 @@ internal fun FlightPrecisionSelector(plan: FlightPlan, onUpdate: (FlightPlan) ->
             FlightPrecisionProfile.BALANCED -> R.string.flight_precision_balanced_help
             FlightPrecisionProfile.DETAILED -> R.string.flight_precision_detailed_help
             null -> R.string.flight_precision_custom
-        }), fontSize = 12.sp)
+        }), color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp)
         TextButton(onClick = { onAdvanced(!advanced) }) {
             Text(stringResource(if (advanced) R.string.flight_precision_hide_advanced else R.string.flight_precision_advanced), fontSize = 12.sp)
         }

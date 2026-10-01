@@ -1982,7 +1982,7 @@ private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage)
             Text(stringResource(R.string.flight_files_title), fontSize = 12.sp)
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-            Text(stringResource(R.string.flight_storage_protection_help), fontSize = 12.sp)
+            Text(stringResource(R.string.flight_storage_protection_help), color = FlightText, fontSize = 12.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onInspectCleanup, enabled = !state.storageCleanupBusy) { Text(stringResource(R.string.flight_storage_scan)) }
                 if (state.storageCleanup?.files?.let { it > 0 } == true) TextButton(
@@ -1990,9 +1990,9 @@ private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage)
             }
             if (state.storageCleanupBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.storageCleanup?.let { summary -> Text(stringResource(R.string.flight_storage_reclaimable,
-                formatStorageBytes(summary.bytes), summary.files, formatStorageBytes(summary.protectedBytes)), fontSize = 12.sp) }
+                formatStorageBytes(summary.bytes), summary.files, formatStorageBytes(summary.protectedBytes)), color = FlightText, fontSize = 12.sp) }
             state.storageCleanupError?.let { Text(it, color = FlightWarning, fontSize = 12.sp) }
-            state.journeyMessage?.let { Text(it, fontSize = 12.sp) }
+            state.journeyMessage?.let { Text(it, color = FlightText, fontSize = 12.sp) }
         }
         LazyColumn(Modifier.weight(1f)) {
             item {

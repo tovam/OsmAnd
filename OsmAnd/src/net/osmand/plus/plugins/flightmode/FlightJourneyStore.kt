@@ -493,7 +493,9 @@ class FlightJourneyStore(private val context: Context) {
 		val detectedTimestamp = storedPhotoTimestamp(file, photo.fileName, trip) ?: return photo
 		return photo.copy(
 			timestampMillis = detectedTimestamp.timestampMillis,
-			timestampSource = detectedTimestamp.source
+			timestampSource = detectedTimestamp.source,
+            captureUtcOffsetMinutes = detectedTimestamp.utcOffsetMinutes,
+            captureLocalTimestampMillis = detectedTimestamp.localTimestampMillis
 		)
 	}
 
@@ -622,7 +624,7 @@ class FlightJourneyStore(private val context: Context) {
 					timestampSource = json.optString("timestampSource").takeIf(String::isNotBlank)?.let { value ->
 						runCatching { FlightPhotoTimestampSource.valueOf(value) }.getOrNull()
 					},
-					captureUtcOffsetMinutes = json.optNullableLong("captureUtcOffsetMinutes")?.toInt()?.takeIf { it in -720..840 },
+					captureUtcOffsetMinutes = json.optNullableLong("captureUtcOffsetMinutes")?.takeIf { it in -720L..840L }?.toInt(),
                     captureLocalTimestampMillis = json.optNullableLong("captureLocalTimestampMillis"),
                     cameraVerticalFieldOfViewDegrees = json.optNullableDouble("cameraVerticalFieldOfViewDegrees")
 						?.toFloat()
