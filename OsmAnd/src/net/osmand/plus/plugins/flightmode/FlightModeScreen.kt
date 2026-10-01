@@ -398,7 +398,7 @@ fun FlightModeScreen(
 					{ onPageChange(FlightPage.PLANS) },
 					onUpdateStop, onSelectCity, onDismissCitySuggestions,
 					onDisarmPreparation, { onPageChange(FlightPage.DETAIL) }, preparationSection,
-					{ FlightBottomNavigation(state, onPageChange) }) }
+					{ FlightBottomNavigation(state, onPageChange) }, { onPageChange(FlightPage.JOURNAL) }) }
 				FlightPage.MAP -> MapScreen(
 					onMapBounds = onSplitMapBounds,
 					state = state,
@@ -2032,7 +2032,7 @@ private fun StorageRow(label: String, bytes: Long) {
 	}
 }
 
-private fun formatStorageBytes(bytes: Long): String {
+internal fun formatStorageBytes(bytes: Long): String {
 	if (bytes < 1_024L) return "$bytes o"
 	val kib = bytes / 1_024.0
 	if (kib < 1_024.0) return "%.1f Ko".format(Locale.ROOT, kib)

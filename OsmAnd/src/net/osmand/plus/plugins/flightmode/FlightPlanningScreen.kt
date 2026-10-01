@@ -45,6 +45,7 @@ internal fun FlightPlanningScreen(
     onDetails: () -> Unit,
     initialSection: Int = 0,
     bottomNavigation: @Composable () -> Unit,
+    onStorage: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val prep = state.plan.preparation ?: FlightPreparation()
@@ -54,6 +55,7 @@ internal fun FlightPlanningScreen(
             state.offlineCoverageError == null &&
             FlightOfflinePreparation.canSimulate(state.plan)
     val error = state.offlineCoverageError
+    var readiness by remember { mutableStateOf(false) }
     var mapEditor by remember { mutableStateOf(false) }
     var section by remember { mutableStateOf(initialSection.coerceIn(0, 2)) }
     var showSaveError by remember { mutableStateOf(false) }
@@ -112,6 +114,10 @@ internal fun FlightPlanningScreen(
         dispatcher?.addCallback(callback)
         onDispose { callback.remove() }
     }
+    if (readiness) FlightReadinessDialog(state, { readiness = false },
+        { readiness = false; section = 0 }, onPermissions,
+        { readiness = false; section = 1; showTileFiles = true },
+        { readiness = false; section = 2 }, { readiness = false; onStorage() })
     if (showTileFiles) FlightTileFilesDialog(state, { showTileFiles = false }, onPreload, onCancelPreload)
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth()) {
@@ -125,6 +131,7 @@ internal fun FlightPlanningScreen(
                 )
                 FlightDateCaption(state)
             }
+            PlanAction(stringResource(R.string.flight_readiness_title), { readiness = true })
             PlanAction(stringResource(R.string.flight_detail_title), onDetails)
         }
         Row(Modifier.fillMaxWidth()) {

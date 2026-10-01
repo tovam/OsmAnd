@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_readiness_title">Ready for flight?</string>
+    <string name="flight_readiness_ready">Ready for offline flight viewing</string>
+    <string name="flight_readiness_itinerary">Route and dates</string>
+    <string name="flight_readiness_itinerary_ok">Located stops and valid flight dates</string>
+    <string name="flight_readiness_itinerary_missing">Complete the route and flight dates</string>
+    <string name="flight_readiness_edit">Edit</string>
+    <string name="flight_readiness_permissions">GPS permissions</string>
+    <string name="flight_readiness_permissions_ok">Required permissions granted for this start mode</string>
+    <string name="flight_readiness_permissions_missing">A permission required for this start mode is missing</string>
+    <string name="flight_readiness_offline">Offline route files</string>
+    <string name="flight_readiness_offline_ok">Required source files fully verified</string>
+    <string name="flight_readiness_offline_missing">Download missing files and verify stored files</string>
+    <string name="flight_readiness_verify">Check files</string>
+    <string name="flight_readiness_storage">Storage</string>
+    <string name="flight_readiness_checking">Checking free space…</string>
+    <string name="flight_readiness_free">%1$s free on the phone</string>
+    <string name="flight_readiness_manage">Manage</string>
+    <string name="flight_readiness_schedule">GPS start</string>
+    <string name="flight_readiness_schedule_ok">Automatic start scheduled on this phone</string>
+    <string name="flight_readiness_schedule_manual">Manual start selected</string>
+    <string name="flight_readiness_schedule_action">Configure</string>
     <string name="flight_precision_economy">Economy</string>
     <string name="flight_precision_balanced">Balanced</string>
     <string name="flight_precision_detailed">Detailed</string>

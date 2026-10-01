@@ -6,9 +6,26 @@ import net.osmand.plus.plugins.flightmode.*
 import org.junit.Assert.*
 import org.junit.Test
 import net.osmand.plus.plugins.flightmode.FlightPrecisionProfile
+import net.osmand.plus.plugins.flightmode.FlightReadiness
 
 /** Synthetic routes only; no files, devices, accounts or network are used by this suite. */
 class FlightPreparationLogicTest {
+    @Test
+    fun readinessRequiresRealVerificationAndDoesNotRequireAutomaticDeparture() {
+        val plan = FlightPlan(listOf(FlightStop("A", 0.0, 0.0), FlightStop("B", 1.0, 1.0)),
+            preparation = FlightPreparation(departureMillis = 1000, arrivalMillis = 3000))
+        val quote = FlightOfflineQuote(emptyList(), listOf(0.0 to 0.0, 1.0 to 1.0), plan.preparation!!.bands)
+        val state = FlightUiState(plan = plan, offlineQuote = quote, offlinePreloadStatus = FlightTerrainStatus(
+            phase = FlightTerrainPhase.READY, offlineFilesVerified = true))
+        assertTrue(FlightReadiness.evaluate(state, true, 1024L * 1024 * 1024, 2000).ready)
+        assertFalse(FlightReadiness.evaluate(state, true, 1024L * 1024 * 1024, 2000).scheduled)
+        assertFalse(FlightReadiness.evaluate(state.copy(offlinePreloadStatus = FlightTerrainStatus()), true,
+            1024L * 1024 * 1024, 2000).ready)
+        assertFalse(FlightReadiness.evaluate(state, false, 1024L * 1024 * 1024, 2000).ready)
+        assertFalse(FlightReadiness.evaluate(state, true, 10, 2000).ready)
+        assertFalse(FlightReadiness.evaluate(state, true, 1024L * 1024 * 1024, 4000).ready)
+    }
+
     @Test
     fun precisionPresetsPreserveRouteDatesAndCoverageAndRecognizeCustomSettings() {
         val original = FlightPlan(emptyList(), terrainCorridorKm = 150,
