@@ -998,13 +998,14 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			if (catalog.summary().complete) flightMissingTilesFirst(quote.requests) { catalog.get(it) != null }
 			else quote.requests
 		}
-		flightConcurrentTransfers(ordered, 3, transfer = { request ->
-				runInterruptible(Dispatchers.IO) {
-				if (app.filesDir.usableSpace < 256L * 1024 * 1024 &&
-					!(if (request.satellite) satelliteFile(request.tile) else tileFile(request.tile)).isFile)
-					throw IOException(app.getString(net.osmand.plus.R.string.flight_plan_low_space))
-				preparationCancellation.set(cancellation)
-				try {
+        val failurePolicy = FlightTransferFailurePolicy()
+        flightConcurrentTransfers(ordered, 3, transfer = { request ->
+            runInterruptible(Dispatchers.IO) {
+                preparationCancellation.set(cancellation)
+                try {
+                    if (app.filesDir.usableSpace < 256L * 1024 * 1024 &&
+                        !(if (request.satellite) satelliteFile(request.tile) else tileFile(request.tile)).isFile)
+                        throw FlightLowStorageFailure(app.getString(net.osmand.plus.R.string.flight_plan_low_space))
 					var cached=if(request.satellite) ensureSatelliteSourceFile(request.tile,true)
 						else ensureTerrainFile(request.tile)
 					if (!fullyDecodedTile(cached.file)) {
@@ -1027,8 +1028,9 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				finally { preparationCancellation.remove() }
 			}
 		}, completed = { request, result ->
-				completedCount++
-				result.onSuccess {
+                completedCount++
+                failurePolicy.completed(result.exceptionOrNull())
+                result.onSuccess {
 					(if(request.satellite)verifiedSatellite else verifiedTerrain).add(request.tile)
 					if(request.satellite) satellite++ else terrain++
 					if(it.downloaded) downloaded++
@@ -1045,8 +1047,17 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 				onStatus(status(FlightTerrainPhase.DOWNLOADING))
 				lastPublished = now
 			}
-		})
-		return result(status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR))
+        }, shouldContinue = { failurePolicy.blocked == null })
+        failurePolicy.blocked?.let { reason ->
+            val message = app.getString(when (reason) {
+                FlightTransferBlockReason.LOW_STORAGE -> net.osmand.plus.R.string.flight_plan_low_space
+                FlightTransferBlockReason.SERVER_BUSY -> net.osmand.plus.R.string.flight_download_server_busy
+                FlightTransferBlockReason.CONNECTION -> net.osmand.plus.R.string.flight_download_connection_paused
+                FlightTransferBlockReason.OFFLINE -> net.osmand.plus.R.string.flight_download_offline_paused
+            })
+            return result(status(FlightTerrainPhase.PAUSED).copy(bytesPerSecond = 0, message = message))
+        }
+        return result(status(if(terrain+satellite==quote.requests.size) FlightTerrainPhase.READY else FlightTerrainPhase.ERROR))
 	}
 
 	private fun loadTerrainTile(tileId: TerrainTileId): LoadedTerrainTile {
@@ -1342,7 +1353,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			connection.connect()
 			ensureWorkActive()
 			if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-				throw IOException("$sourceName HTTP ${connection.responseCode}")
+				throw FlightTileHttpFailure(connection.responseCode, sourceName)
 			}
 			var total = 0L
 			BufferedInputStream(connection.inputStream).use { input ->

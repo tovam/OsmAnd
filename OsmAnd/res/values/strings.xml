@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_download_connection_paused">Download paused after repeated connection failures. Check the connection, then resume.</string>
+    <string name="flight_download_server_busy">Download paused: the tile server is busy. Resume later.</string>
+    <string name="flight_download_offline_paused">Download paused in offline mode. Verified files are retained.</string>
     <string name="flight_photo_time_confirm">Confirm photo capture UTC offset</string>
     <string name="flight_photo_time_batch">Correct photo UTC offsets</string>
     <string name="flight_photo_time_import_help">Choose the offset used when the photos were taken. The phone’s current offset is only a suggested value. Dates with an explicit metadata offset remain unchanged.</string>

@@ -1,11 +1,41 @@
 package net.osmand.test.junit
 
 import kotlinx.coroutines.*
-import net.osmand.plus.plugins.flightmode.flightConcurrentTransfers
+import net.osmand.plus.plugins.flightmode.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class FlightConcurrentTransfersTest {
+    @Test
+    fun pausingStopsNewRequestsAndDrainsInFlightResults() = runBlocking {
+        var allowed = true
+        val started = mutableListOf<Int>()
+        val completed = mutableListOf<Int>()
+        flightConcurrentTransfers((0..100).toList(), 3,
+            transfer = { started += it; yield(); it },
+            completed = { _, result -> completed += result; allowed = false },
+            shouldContinue = { allowed })
+        assertEquals(started.toSet(), completed.toSet())
+        assertTrue(started.size <= 6)
+    }
+
+    @Test
+    fun globalFailurePolicyDistinguishesMissingTilesFromConnectionAndStorageFailures() {
+        val policy = FlightTransferFailurePolicy()
+        repeat(20) { policy.completed(FlightTileHttpFailure(404, "Synthetic")) }
+        assertNull(policy.blocked)
+        repeat(2) { policy.completed(java.net.UnknownHostException("synthetic")) }
+        policy.completed(null)
+        assertNull(policy.blocked)
+        repeat(3) { policy.completed(java.net.SocketTimeoutException("synthetic")) }
+        assertEquals(FlightTransferBlockReason.CONNECTION, policy.blocked)
+        policy.completed(null)
+        assertNotNull(policy.blocked)
+        val disk = FlightTransferFailurePolicy()
+        disk.completed(FlightLowStorageFailure("synthetic"))
+        assertEquals(FlightTransferBlockReason.LOW_STORAGE, disk.blocked)
+    }
+
     @Test
     fun slowFirstTileDoesNotBlockLaterDownloadsOrProgress() = runBlocking {
         val releaseFirst = CompletableDeferred<Unit>()
