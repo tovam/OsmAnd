@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -86,7 +87,11 @@ internal fun FlightPointingButton(
 internal fun FlightPointingStatus(
     state: FlightPointingSelectionState,
     modifier: Modifier = Modifier,
+    terrainStatus: FlightTerrainStatus = FlightTerrainStatus(),
+    onRetry: (() -> Unit)? = null,
 ) {
+    val blocked = state.phase in listOf(FlightPointingPhase.LOADING, FlightPointingPhase.WAITING_GROUND) &&
+        terrainStatus.phase in listOf(FlightTerrainPhase.ERROR, FlightTerrainPhase.PAUSED)
     var showReady by remember { mutableStateOf(false) }
     LaunchedEffect(state.phase) {
         showReady = state.phase == FlightPointingPhase.READY
@@ -96,7 +101,7 @@ internal fun FlightPointingStatus(
         }
     }
     if (state.phase == FlightPointingPhase.READY && !showReady) return
-    val working =
+    val working = !blocked &&
         state.phase in
             listOf(
                 FlightPointingPhase.LOADING,
@@ -130,7 +135,8 @@ internal fun FlightPointingStatus(
                 color = Color(0xFF9AD9FF),
             )
         Text(
-            if (
+            if (blocked) terrainStatus.message ?: stringResource(R.string.flight_pointing_blocked)
+            else if (
                 state.pendingClick &&
                     state.phase in
                         listOf(FlightPointingPhase.LOADING, FlightPointingPhase.PREPARING)
@@ -141,7 +147,11 @@ internal fun FlightPointingStatus(
                 if (state.phase == FlightPointingPhase.READY) Color(0xFF9AD9FF)
                 else Color.LightGray,
             fontSize = 11.sp,
+            modifier = Modifier.weight(1f, fill = false),
         )
+        if (blocked && onRetry != null) TextButton(onClick = onRetry) {
+            Text(stringResource(R.string.flight_pointing_retry), fontSize = 12.sp)
+        }
     }
 }
 

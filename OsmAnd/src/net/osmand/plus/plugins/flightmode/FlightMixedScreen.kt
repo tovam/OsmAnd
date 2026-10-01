@@ -26,11 +26,13 @@ internal fun FlightMixedScreen(
     onFollow: () -> Unit,
     onLockCenter: () -> Unit,
     onSetHeadingLocked: (Boolean) -> Unit,
+    onRequestPointingTerrain: (Double, Double) -> Unit,
 ) {
     var sceneAspectRatio by remember { mutableFloatStateOf(1f) }
     var pointingEnabled by remember { mutableStateOf(false) }
     val pointing = remember(state.journeyId) { FlightPointingState() }
     val scope = rememberCoroutineScope()
+    SideEffect { pointing.selection.onGroundNeeded = onRequestPointingTerrain }
     val selection by pointing.selection.state.collectAsState()
     val picker =
         rememberTerrainPicker(
@@ -113,7 +115,8 @@ internal fun FlightMixedScreen(
                 Modifier.align(Alignment.TopEnd).padding(6.dp),
             )
             if (pointingEnabled)
-                FlightPointingStatus(selection, Modifier.align(Alignment.BottomStart).padding(8.dp))
+                FlightPointingStatus(selection, Modifier.align(Alignment.BottomStart).padding(8.dp),
+                    state.terrainStatus, { onRetry(); pointing.selection.retry(scope) })
         }
         FlightMapPanel(
             state,

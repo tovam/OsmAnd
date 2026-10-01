@@ -572,6 +572,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		val leavingWindow = page != FlightPage.WINDOW && page != FlightPage.WINDOW_SETUP
 		if (leavingWindow) {
 			exitWindowPhotoEditing()
+			pointingDemand = null
 			uiState = uiState.copy(page = page, terrainDetailFocus = null)
 			(uiState.snapshot?.sample ?: previewFlightSample())?.let { sample ->
 				requestTerrain(sample, FlightSceneDemandReason.PAGE)
@@ -1064,6 +1065,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	private fun abandonJournalNavigationWork() {
+        pointingDemand = null
 		// Leaving invalidates old completions even if loading the next flight fails.
 		// Do not leave the retained flight with spinners whose owners can no longer clear them.
 		simulationJob?.cancel()
@@ -1185,6 +1187,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun retryTerrain() {
+        pointingDemand?.let { terrainStreamingEngine.retry(it); return }
 		// Reloading tiles alone cannot recover a failed shader/context. Recreate the AndroidView.
 		if (uiState.terrainRendererRecovery.error != null) {
 			uiState = uiState.copy(terrainRendererRecovery = uiState.terrainRendererRecovery.retry())
@@ -1882,14 +1885,28 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		replacePhoto(photo.copy(calibration = calibration), message = null)
 	}
 
-	fun preparePhotoCalibration(id: String) {
-		val photo = findPhoto(id) ?: return
-		val sample = FlightSampleInterpolator.sampleAt(uiState.trip, photo.matchedSamplePosition) ?: return
-		terrainStreamingEngine.submit(sceneDemand(sample).copy(
-			consumers = setOf(FlightSceneConsumer.WINDOW, FlightSceneConsumer.BACKGROUND),
-			motion = FlightSceneMotion.MANUAL
-		), FlightSceneDemandReason.PAGE)
-	}
+    private var pointingDemand: FlightSceneDemand? = null
+
+    fun requestPointingTerrain(latitude: Double, longitude: Double) {
+        if (!latitude.isFinite() || latitude !in -90.0..90.0 || !longitude.isFinite() || longitude !in -180.0..180.0) return
+        val sample = (pointingDemand?.aircraft ?: uiState.snapshot?.sample ?: previewFlightSample()
+            ?: FlightSample(0, 0, 0L, latitude, longitude, null, null, null, null)).copy(latitude = latitude, longitude = longitude)
+        val demand = sceneDemand(sample).copy(detailFocus = FlightTerrainDetailFocus(latitude, longitude), motion = FlightSceneMotion.MANUAL)
+        pointingDemand = demand
+        terrainStreamingEngine.submit(demand, FlightSceneDemandReason.RETRY)
+    }
+
+    fun preparePhotoCalibration(id: String) {
+        val photo = findPhoto(id) ?: return
+        val pose = photo.dehazeProjection()?.pose
+        val sample = if (pose != null) FlightSample(0, 0, pose.timestampMillis ?: 0L,
+            pose.eyeLatitude, pose.eyeLongitude, pose.eyeAltitudeMeters?.toDouble(), null, null, null)
+            else FlightSampleInterpolator.sampleAt(uiState.trip, photo.matchedSamplePosition) ?: return
+        val demand = sceneDemand(sample).copy(detailFocus = null,
+            consumers = setOf(FlightSceneConsumer.WINDOW, FlightSceneConsumer.BACKGROUND), motion = FlightSceneMotion.MANUAL)
+        pointingDemand = demand
+        terrainStreamingEngine.submit(demand, FlightSceneDemandReason.PAGE)
+    }
 
 	fun openPhotoOnMap(id: String) {
 		selectPhoto(id)

@@ -63,6 +63,27 @@ class FlightPointingSelectionTest {
     private val projection = FlightPhotoProjection(pose, 1f)
 
     @Test
+    fun unavailableMapGroundRequestsCoverageOnceAndExplicitRetryRequestsItAgain() {
+        val tasks = Tasks()
+        val scope = CoroutineScope(SupervisorJob() + tasks)
+        val selection = FlightPointingSelection(tasks)
+        val demands = mutableListOf<Pair<Double, Double>>()
+        selection.onGroundNeeded = { lat, lon -> demands += lat to lon }
+        selection.select(scope, FlightPointingClick.Map(2.0, 3.0))
+        assertEquals(listOf(2.0 to 3.0), demands)
+        val context = FlightPointingContext(FlightTerrainPicker(scene(mesh())))
+        selection.update(scope, context, false)
+        tasks.drain()
+        assertEquals(FlightPointingPhase.WAITING_GROUND, selection.state.value.phase)
+        assertEquals(1, demands.size)
+        selection.retry(scope)
+        tasks.drain()
+        assertEquals(2, demands.size)
+        assertTrue(selection.state.value.pendingClick)
+        scope.cancel()
+    }
+
+    @Test
     fun earlyClicksAreQueuedAndOnlyTheLastOneIsResolvedWithoutAnotherTap() {
         val tasks = Tasks()
         val scope = CoroutineScope(SupervisorJob() + tasks)

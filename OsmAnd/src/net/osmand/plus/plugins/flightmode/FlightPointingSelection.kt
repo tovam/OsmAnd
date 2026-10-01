@@ -64,6 +64,33 @@ internal class FlightPointingSelection(
     private var latestClick: FlightPointingClick? = null
     private var request: Job? = null
     private var revision = 0L
+    var onGroundNeeded: ((Double, Double) -> Unit)? = null
+    private var demandSent = false
+
+    /** Approximate location requests coverage only; it never becomes a selected point. */
+    private fun demandLocation(click: FlightPointingClick, current: FlightPointingContext?): Pair<Double, Double>? {
+        if (click is FlightPointingClick.Map) return click.latitude to click.longitude
+        current ?: return null
+        val ray = click.ray(current) ?: return null
+        if (ray.direction[1] >= -1e-6) return null
+        val distance = -ray.eye[1] / ray.direction[1]
+        if (!distance.isFinite() || distance !in 0.0..500_000.0) return null
+        val geo = current.terrain.coordinates.toGeographic(DoubleArray(3) { ray.eye[it] + ray.direction[it] * distance })
+        return geo[0] to geo[1]
+    }
+
+    private fun requestGround(click: FlightPointingClick, current: FlightPointingContext?) {
+        val location = demandLocation(click, current) ?: return
+        val callback = onGroundNeeded ?: return
+        if (!demandSent) { demandSent = true; callback(location.first, location.second) }
+    }
+
+    fun retry(scope: CoroutineScope) {
+        val click = latestClick ?: return
+        demandSent = false
+        requestGround(click, context)
+        if (context?.terrain?.hasTerrain == true) resolve(scope)
+    }
 
     fun update(scope: CoroutineScope, next: FlightPointingContext?, preparing: Boolean) {
         val previous = context
@@ -99,8 +126,10 @@ internal class FlightPointingSelection(
     fun select(scope: CoroutineScope, click: FlightPointingClick) {
         cancelRequest()
         latestClick = click
+        demandSent = false
         val current = context
         if (current == null || !current.terrain.hasTerrain) {
+            requestGround(click, current)
             publish(
                 mutableState.value.phase.takeIf { it == FlightPointingPhase.PREPARING }
                     ?: FlightPointingPhase.LOADING
@@ -130,9 +159,20 @@ internal class FlightPointingSelection(
                         mutableState.value =
                             FlightPointingSelectionState(result.point, FlightPointingPhase.READY)
                     }
-                    FlightTerrainPickResult.WaitingForGround ->
+                    FlightTerrainPickResult.WaitingForGround -> {
                         publish(FlightPointingPhase.WAITING_GROUND)
-                    FlightTerrainPickResult.Miss -> publish(FlightPointingPhase.NO_INTERSECTION)
+                        requestGround(click, current)
+                    }
+                    FlightTerrainPickResult.Miss -> {
+                        val location = demandLocation(click, current)
+                        val outside = location != null && FlightTerrainTilePlanner.distanceKm(
+                            current.terrain.scene.centerLatitude, current.terrain.scene.centerLongitude,
+                            location.first, location.second) > current.terrain.scene.radiusKm
+                        if (onGroundNeeded != null && (click is FlightPointingClick.Map || outside)) {
+                            publish(FlightPointingPhase.WAITING_GROUND)
+                            requestGround(click, current)
+                        } else publish(FlightPointingPhase.NO_INTERSECTION)
+                    }
                 }
             }
     }

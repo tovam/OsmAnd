@@ -58,6 +58,8 @@ internal fun FlightPhotoEditor(
     onClearAssociation: () -> Unit,
     onSetImageAdjustments: (FlightPhotoImageAdjustments) -> Unit,
     startInPointingMode: Boolean = false,
+    onRequestPointingTerrain: (Double, Double) -> Unit = { _, _ -> },
+    onRetryTerrain: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -73,6 +75,7 @@ internal fun FlightPhotoEditor(
     var associationAction by remember(photo.id) { mutableStateOf<PhotoAssociationAction?>(null) }
     var tab by remember(photo.id) { mutableStateOf(if (startInPointingMode) 6 else 0) }
     val pointing = remember(photo.id) { FlightPointingState() }
+    SideEffect { pointing.selection.onGroundNeeded = onRequestPointingTerrain }
     var pointingRotation by remember(photo.id) { mutableFloatStateOf(0f) }
     DisposableEffect(pointing) { onDispose { pointing.resetFrame() } }
     var status by remember(photo.id) { mutableStateOf("") }
@@ -616,6 +619,8 @@ internal fun FlightPhotoEditor(
                                 FlightPointingStatus(
                                     selection,
                                     Modifier.align(Alignment.BottomStart).padding(8.dp),
+                                    state.terrainStatus,
+                                    { onRetryTerrain(); pointing.selection.retry(scope) },
                                 )
                             }
                         }

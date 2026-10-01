@@ -183,6 +183,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSetPhotoImageAdjustments = viewModel::setPhotoImageAdjustments,
 					onSetPhotoCalibration = viewModel::setPhotoCalibration,
 					onPreparePhotoCalibration = viewModel::preparePhotoCalibration,
+                    onRequestPointingTerrain = viewModel::requestPointingTerrain,
 					onOpenPhotoOnMap = viewModel::openPhotoOnMap,
 					onOpenPhotoInWindow = viewModel::openPhotoInWindow,
 					onSetWindowPhotoOpacity = viewModel::setWindowPhotoOpacity,

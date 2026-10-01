@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_pointing_blocked">Terrain unavailable. Last click retained.</string>
+    <string name="flight_pointing_retry">Retry</string>
     <string name="flight_photo_alignment_approximate">Manual alignment · approximate position</string>
     <string name="flight_photo_alignment_checked">Landmark fit checked · accuracy depends on references</string>
 	<string name="flight_pointing_preparing">Preparing pointing on the visible terrain…</string>

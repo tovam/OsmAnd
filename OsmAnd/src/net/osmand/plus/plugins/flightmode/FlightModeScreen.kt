@@ -219,6 +219,7 @@ fun FlightModeScreen(
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
 	onPreparePhotoCalibration: (String) -> Unit,
+    onRequestPointingTerrain: (Double, Double) -> Unit,
 	onOpenPhotoOnMap: (String) -> Unit,
 	onOpenPhotoInWindow: (String) -> Unit,
 	onSetWindowPhotoOpacity: (Float) -> Unit,
@@ -460,7 +461,7 @@ fun FlightModeScreen(
 					{ onSetMapFollowing(false) }, onSplitMapBounds, onMoveWindowLook, onChangeWindowZoom,
 					onRecenterWindowLook, onRetryTerrain, onTerrainRendererError, onTerrainRenderStats,
 					{ onSetMapFollowing(!state.mapFollowing) }, { onSetMapCenterLocked(!state.mapCenterLocked) },
-					onSetMapHeadingLocked)
+					onSetMapHeadingLocked, onRequestPointingTerrain)
 				FlightPage.WINDOW_SETUP -> WindowSetupScreen(
 					state = state,
 					onBack = { onPageChange(FlightPage.WINDOW) },
@@ -499,7 +500,8 @@ fun FlightModeScreen(
 					onOpenPhotoInWindow = onOpenPhotoInWindow,
 					onSetPhotoCalibration = onSetPhotoCalibration,
 					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
-					onPreparePhotoCalibration = onPreparePhotoCalibration
+					onPreparePhotoCalibration = onPreparePhotoCalibration,
+                    onRequestPointingTerrain = onRequestPointingTerrain, onRetryTerrain = onRetryTerrain
 				)
 				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload)
 			}
@@ -1607,7 +1609,8 @@ private fun PhotoScreen(
 	onOpenPhotoInWindow: (String) -> Unit,
 	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
-	onPreparePhotoCalibration: (String) -> Unit
+	onPreparePhotoCalibration: (String) -> Unit,
+    onRequestPointingTerrain: (Double, Double) -> Unit, onRetryTerrain: () -> Unit
 ) {
 	var editorId by remember { mutableStateOf<String?>(null) }
 	var editorPointingMode by remember { mutableStateOf(false) }
@@ -1616,7 +1619,7 @@ private fun PhotoScreen(
 	var favoritesOnly by rememberSaveable(state.journeyId) { mutableStateOf(false) }
 	val all = state.photos + state.pendingPhotos
 	val editorPhoto = all.firstOrNull { it.id == editorId }
-	LaunchedEffect(editorId, editorPhoto?.matchedSamplePosition) { editorId?.let(onPreparePhotoCalibration) }
+	LaunchedEffect(editorId, editorPhoto?.matchedSamplePosition, editorPhoto?.calibration?.fit, editorPhoto?.windowAlignment) { editorId?.let(onPreparePhotoCalibration) }
 	val fullScreenPhoto = all.firstOrNull { it.id == fullScreenPhotoId }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
@@ -1670,7 +1673,7 @@ private fun PhotoScreen(
 			{ onAssociatePhotoAutomatically(photo.id) }, { onAssociatePhotoAtCurrentReplay(photo.id) },
 			{ fullScreenPhotoId = photo.id }, { editorId = null; onOpenPhotoInWindow(photo.id) },
 			{ editorId = null; onOpenPhotoOnMap(photo.id) }, { onClearPhotoAssociation(photo.id) },
-			{ onSetPhotoImageAdjustments(photo.id, it) }, startInPointingMode = editorPointingMode)
+			{ onSetPhotoImageAdjustments(photo.id, it) }, startInPointingMode = editorPointingMode, onRequestPointingTerrain = onRequestPointingTerrain, onRetryTerrain = onRetryTerrain)
 	}
 	fullScreenPhoto?.let { photo ->
 		androidx.compose.ui.window.Dialog(onDismissRequest = { fullScreenPhotoId = null },
@@ -4137,7 +4140,7 @@ private fun FlightModePreview(state: FlightUiState) {
 		onPhotoAction = {}, onValidatePhotos = {}, onDiscardPhotos = {}, onSelectPhoto = {},
 		onAssociatePhotoAutomatically = {}, onAssociatePhotoAtCurrentReplay = {},
 		onClearPhotoAssociation = {}, onRotatePhoto = { _, _ -> },
-	onSetPhotoImageAdjustments = { _, _ -> }, onSetPhotoCalibration = { _, _ -> }, onPreparePhotoCalibration = {}, onOpenPhotoOnMap = {}, onOpenPhotoInWindow = {},
+	onSetPhotoImageAdjustments = { _, _ -> }, onSetPhotoCalibration = { _, _ -> }, onPreparePhotoCalibration = {}, onRequestPointingTerrain = { _, _ -> }, onOpenPhotoOnMap = {}, onOpenPhotoInWindow = {},
 		onSetWindowPhotoOpacity = {}, onSetWindowGestureTarget = {},
 		onTransformWindowPhoto = { _, _, _ -> }, onTransformLinkedWindowView = { _, _, _, _ -> },
 		onInitializeWindowPhotoViewport = { _, _ -> },
