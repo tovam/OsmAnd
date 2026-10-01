@@ -66,7 +66,7 @@ internal fun FlightPointingButton(
     IconToggleButton(
         checked = enabled,
         onCheckedChange = onEnabled,
-        modifier = modifier.size(40.dp),
+        modifier = modifier.size(48.dp),
     ) {
         Icon(
             painterResource(R.drawable.ic_action_get_my_location),

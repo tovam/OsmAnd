@@ -884,7 +884,7 @@ private fun FlightRangeEditor(
 				stringResource(R.string.flight_mode_many_flights_defined, state.flightSpans.size).uppercase()
 			},
 			color = if (state.flightSpans.isEmpty()) FlightMuted else FlightGreen,
-			fontSize = 8.sp,
+			fontSize = 12.sp,
 			fontWeight = FontWeight.Bold,
 			modifier = Modifier.weight(1f),
 			maxLines = 1
@@ -892,11 +892,11 @@ private fun FlightRangeEditor(
 		val firstVisibleSpan = (state.flightSpans.size - 3).coerceAtLeast(0)
 		for (index in firstVisibleSpan..state.flightSpans.lastIndex) {
 			Box(
-				Modifier.height(28.dp).border(1.dp, FlightLine).clickable { onRemoveSpan(index) }
+				Modifier.heightIn(min = 40.dp).border(1.dp, FlightLine).clickable { onRemoveSpan(index) }
 					.padding(horizontal = 7.dp),
 				contentAlignment = Alignment.Center
 			) {
-				Text(stringResource(R.string.flight_mode_flight_number_remove, index + 1), color = FlightBlue, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+				Text(stringResource(R.string.flight_mode_flight_number_remove, index + 1), color = FlightBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 			}
 		}
 		if (state.pendingFlightStartProgress == null) {
@@ -911,10 +911,10 @@ private fun FlightRangeEditor(
 @Composable
 private fun CompactAction(text: String, color: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
 	Box(
-		modifier.height(28.dp).border(1.dp, color).clickable(onClick = onClick).padding(horizontal = 7.dp),
+		modifier.heightIn(min = 40.dp).border(1.dp, color).clickable(onClick = onClick).padding(horizontal = 7.dp),
 		contentAlignment = Alignment.Center
 	) {
-		Text(text, color = color, fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+		Text(text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
 	}
 }
 
@@ -1144,7 +1144,7 @@ private fun WindowPanelSelector(panel: WindowPanel, onSelect: (WindowPanel) -> U
 				contentAlignment = Alignment.Center
 			) {
 				if (panel == item) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(FlightOrange))
-				Text(label, color = if (panel == item) FlightText else FlightMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+				Text(label, color = if (panel == item) FlightText else FlightMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 			}
 		}
 	}
@@ -1170,7 +1170,7 @@ private fun CompactInstrumentStrip(sample: FlightSample?, showAccuracy: Boolean 
 @Composable
 private fun CompactMetric(label: String, value: String, modifier: Modifier) {
 	Column(modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.Center) {
-		Text(label, color = FlightMuted, fontSize = 8.sp, maxLines = 1)
+		Text(label, color = FlightMuted, fontSize = 12.sp, maxLines = 1)
 		Text(value, color = FlightText, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
 	}
 }
@@ -1236,21 +1236,21 @@ internal fun SatelliteQualitySelector(
 		verticalArrangement = Arrangement.spacedBy(3.dp)
 	) {
 		Row(
-			Modifier.fillMaxWidth().height(27.dp),
+			Modifier.fillMaxWidth().heightIn(min = 40.dp).horizontalScroll(rememberScrollState()),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(4.dp)
 		) {
 			Text(
 				stringResource(R.string.flight_mode_satellite_quality).uppercase(),
 				color = FlightMuted,
-				fontSize = 8.sp,
+				fontSize = 12.sp,
 				fontWeight = FontWeight.Bold,
-				modifier = Modifier.width(61.dp)
+				modifier = Modifier.width(96.dp)
 			)
 			FlightSatelliteQuality.values().forEach { item ->
 				val selected = item == quality
 				Box(
-					Modifier.weight(1f).height(25.dp)
+					Modifier.width(90.dp).heightIn(min = 40.dp)
 						.background(if (selected) FlightBlue.copy(alpha = 0.16f) else Color.Transparent)
 						.border(1.dp, if (selected) FlightBlue else FlightLine)
 						.clickable { onSetQuality(item) },
@@ -1266,7 +1266,7 @@ internal fun SatelliteQualitySelector(
 							FlightSatelliteQuality.ULTRA_PLUS_PLUS_PLUS -> stringResource(R.string.flight_mode_satellite_quality_ultra_plus_plus_plus)
 						},
 						color = if (selected) FlightBlue else FlightText,
-						fontSize = 8.sp,
+						fontSize = 12.sp,
 						fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
 					)
 				}
@@ -1275,8 +1275,8 @@ internal fun SatelliteQualitySelector(
 		Text(
 			stringResource(R.string.flight_mode_satellite_quality_help),
 			color = FlightMuted,
-			fontSize = 7.sp,
-			lineHeight = 9.sp
+			fontSize = 11.sp,
+			lineHeight = 14.sp
 		)
 		if (baseZoom != null) {
 			val representativeLatitude = latitude?.takeIf(Double::isFinite) ?: 45.0
@@ -1298,21 +1298,21 @@ internal fun SatelliteQualitySelector(
 					metersPerPixel[5]
 				),
 				color = FlightMuted,
-				fontSize = 7.sp,
-				lineHeight = 9.sp
+				fontSize = 11.sp,
+				lineHeight = 14.sp
 			)
 		}
 		Text(
 			text = satelliteQualityRingsText(quality, radiusKm),
 			color = FlightBlue,
-			fontSize = 7.sp,
-			lineHeight = 9.sp
+			fontSize = 11.sp,
+			lineHeight = 14.sp
 		)
 		Text(
 			stringResource(R.string.flight_mode_satellite_gaze_help),
 			color = FlightMuted,
-			fontSize = 7.sp,
-			lineHeight = 9.sp
+			fontSize = 11.sp,
+			lineHeight = 14.sp
 		)
 	}
 }
@@ -1388,14 +1388,14 @@ private fun TerrainElevationZoomSelector(
 		Text(
 			stringResource(R.string.flight_mode_terrain_detail_title).uppercase(),
 			color = FlightText,
-			fontSize = 8.sp,
+			fontSize = 12.sp,
 			fontWeight = FontWeight.Bold
 		)
 		Text(
 			stringResource(R.string.flight_mode_terrain_zoom_help),
 			color = FlightMuted,
-			fontSize = 7.sp,
-			lineHeight = 9.sp
+			fontSize = 11.sp,
+			lineHeight = 14.sp
 		)
 		TerrainElevationZoomRow(
 			label = stringResource(R.string.flight_mode_terrain_fine_zone),
@@ -1412,7 +1412,7 @@ private fun TerrainElevationZoomSelector(
 			onSetZoom = onSetMiddleZoom
 		)
 		if (baseZoom == null) {
-			Text(stringResource(R.string.flight_mode_terrain_far_waiting), color = FlightMuted, fontSize = 7.sp)
+			Text(stringResource(R.string.flight_mode_terrain_far_waiting), color = FlightMuted, fontSize = 11.sp)
 		} else {
 			TerrainElevationDetails(
 				label = stringResource(R.string.flight_mode_terrain_far_zone),
@@ -1434,15 +1434,15 @@ private fun TerrainElevationZoomRow(
 ) {
 	Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 		Row(
-			Modifier.fillMaxWidth().height(27.dp),
+			Modifier.fillMaxWidth().heightIn(min = 40.dp).horizontalScroll(rememberScrollState()),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(4.dp)
 		) {
-			Text(label, color = FlightText, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+			Text(label, color = FlightText, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(140.dp))
 			(FlightPlan.MIN_TERRAIN_DETAIL_ZOOM..FlightPlan.MAX_TERRAIN_DETAIL_ZOOM).forEach { candidate ->
 				val selected = candidate == zoom
 				Box(
-					Modifier.width(38.dp).height(23.dp)
+					Modifier.width(48.dp).heightIn(min = 40.dp)
 						.background(if (selected) FlightOrange.copy(alpha = 0.16f) else Color.Transparent)
 						.border(1.dp, if (selected) FlightOrange else FlightLine)
 						.clickable { onSetZoom(candidate) },
@@ -1451,7 +1451,7 @@ private fun TerrainElevationZoomRow(
 					Text(
 						"z$candidate",
 						color = if (selected) FlightOrange else FlightText,
-						fontSize = 8.sp,
+						fontSize = 12.sp,
 						fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
 					)
 				}
@@ -1471,7 +1471,7 @@ private fun TerrainElevationDetails(label: String?, zoom: Int, gridQuads: Int, l
 	val triangles = squares * 2
 	Column(Modifier.fillMaxWidth()) {
 		if (label != null) {
-			Text(label, color = FlightText, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+			Text(label, color = FlightText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 		}
 		Text(
 			stringResource(
@@ -1486,8 +1486,8 @@ private fun TerrainElevationDetails(label: String?, zoom: Int, gridQuads: Int, l
 				meshSpacingMeters.roundToInt()
 			),
 			color = FlightMuted,
-			fontSize = 7.sp,
-			lineHeight = 9.sp
+			fontSize = 11.sp,
+			lineHeight = 14.sp
 		)
 	}
 }
@@ -1503,14 +1503,14 @@ private fun SatelliteQualityOverlayControl(show: Boolean, onSetShow: (Boolean) -
 			Text(
 				stringResource(R.string.flight_mode_show_loaded_quality),
 				color = if (show) FlightBlue else FlightText,
-				fontSize = 9.sp,
+				fontSize = 12.sp,
 				fontWeight = FontWeight.Bold,
 				maxLines = 1
 			)
 			Text(
 				stringResource(R.string.flight_mode_show_loaded_quality_help),
 				color = FlightMuted,
-				fontSize = 7.sp,
+				fontSize = 11.sp,
 				maxLines = 1
 			)
 		}
@@ -1536,7 +1536,7 @@ private fun SatelliteQualityLegend(modifier: Modifier = Modifier) {
 		).forEach { (color, label) ->
 			Row(verticalAlignment = Alignment.CenterVertically) {
 				Box(Modifier.size(8.dp).background(color))
-				Text(label, color = FlightText, fontSize = 7.sp, modifier = Modifier.padding(start = 4.dp))
+				Text(label, color = FlightText, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
 			}
 		}
 	}
@@ -1729,15 +1729,15 @@ private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, o
 				?: sample?.timestampMillis?.takeIf { it > 0 }?.let {
 					stringResource(R.string.flight_mode_photo_date_inferred_short, formatDateTime(it))
 				} ?: stringResource(R.string.flight_mode_photo_without_date)
-			Text(date, color = FlightMuted, fontSize = 9.sp)
+			Text(date, color = FlightMuted, fontSize = 12.sp)
 			Text(photo.matchedSamplePosition?.let { stringResource(R.string.flight_mode_photo_matched_point, formatVirtualPoint(it)) }
 				?: stringResource(R.string.flight_mode_photo_not_matched),
-				color = if (sample != null) FlightGreen else FlightWarning, fontSize = 9.sp)
+				color = if (sample != null) FlightGreen else FlightWarning, fontSize = 12.sp)
 		}
 		FlightFavoriteButton(photo.id in favorites.favorites.photos, favorites.ready, { favorites.togglePhoto(photo.id) })
 		val pairCount = photo.calibration.points.count { it.x != null && it.latitude != null }
 		Text(stringResource(if (pairCount <= 1) R.string.flight_cal_single_pair else R.string.flight_cal_pairs, pairCount),
-			color = if (pairCount == 0) FlightMuted.copy(alpha = 0.5f) else FlightBlue, fontSize = 9.sp)
+			color = if (pairCount == 0) FlightMuted.copy(alpha = 0.5f) else FlightBlue, fontSize = 12.sp)
 	}
 	Box(Modifier.fillMaxWidth().height(1.dp).background(FlightLine))
 }
@@ -1813,7 +1813,7 @@ internal fun FlightPhotoMetadata(photo: FlightPhotoAttachment, sample: FlightSam
 		Text(
 			stringResource(R.string.flight_mode_photo_details).uppercase(),
 			color = FlightBlue,
-			fontSize = 8.sp,
+			fontSize = 12.sp,
 			fontWeight = FontWeight.Bold,
 			modifier = Modifier.padding(vertical = 4.dp)
 		)
@@ -1930,11 +1930,11 @@ private fun PhotoMetadataLine(label: String, value: String, warning: Boolean = f
 		Modifier.fillMaxWidth().height(27.dp),
 		verticalAlignment = Alignment.CenterVertically
 	) {
-		Text(label.uppercase(), color = FlightMuted, fontSize = 8.sp, modifier = Modifier.width(92.dp), maxLines = 1)
+		Text(label.uppercase(), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.width(92.dp), maxLines = 1)
 		Text(
 			value,
 			color = if (warning) FlightWarning else FlightText,
-			fontSize = 9.sp,
+			fontSize = 12.sp,
 			fontFamily = FontFamily.Monospace,
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
@@ -2016,8 +2016,8 @@ private fun StorageHeader(label: String, value: String) {
 		Modifier.fillMaxWidth().height(29.dp).background(Color(0xFF0D1419)).padding(horizontal = 12.dp),
 		verticalAlignment = Alignment.CenterVertically
 	) {
-		Text(label.uppercase(), color = FlightOrange, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-		Text(value, color = FlightText, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+		Text(label.uppercase(), color = FlightOrange, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+		Text(value, color = FlightText, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
 	}
 }
 
@@ -2027,8 +2027,8 @@ private fun StorageRow(label: String, bytes: Long) {
 		Modifier.fillMaxWidth().height(27.dp).padding(horizontal = 12.dp),
 		verticalAlignment = Alignment.CenterVertically
 	) {
-		Text(label, color = FlightMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
-		Text(formatStorageBytes(bytes), color = FlightText, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+		Text(label, color = FlightMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+		Text(formatStorageBytes(bytes), color = FlightText, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
 	}
 }
 
@@ -2061,12 +2061,12 @@ private fun SavedJourneyRow(journey: FlightJourneySummary, onOpen: (String) -> U
 					maxLines = 1,
 					overflow = TextOverflow.Ellipsis
 				)
-				Text(formatDateTime(journey.updatedAtMillis), color = FlightMuted, fontSize = 9.sp)
+				Text(formatDateTime(journey.updatedAtMillis), color = FlightMuted, fontSize = 12.sp)
 			}
 			Text(
 				"${journey.sampleCount} pts · ${journey.photoCount} photos",
 				color = FlightBlue,
-				fontSize = 9.sp
+				fontSize = 12.sp
 			)
 		}
 		Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 12.dp).background(FlightLine))
@@ -2168,11 +2168,11 @@ private fun ReplayBar(
 			verticalArrangement = Arrangement.Center
 		) {
 			Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-				Text(windowLabel, color = FlightMuted, fontSize = 7.sp, maxLines = 1)
+				Text(windowLabel, color = FlightMuted, fontSize = 11.sp, maxLines = 1)
 				Text(
 					if (activeFineScrubDivisor > 1f) "précision ×${activeFineScrubDivisor.toInt()}" else "pincer · glisser ↑ = fin",
 					color = if (activeFineScrubDivisor > 1f) FlightOrange else FlightMuted,
-					fontSize = 7.sp,
+					fontSize = 11.sp,
 					maxLines = 1
 				)
 			}
@@ -2304,10 +2304,10 @@ private fun ReplayBar(
 			Text(
 				sample?.timestampMillis?.takeIf { it > 0 }?.let(::formatClock) ?: "point ${sample?.index?.plus(1) ?: 0}",
 				color = FlightText,
-				fontSize = 9.sp,
+				fontSize = 12.sp,
 				maxLines = 1
 			)
-			Text("${(state.replayProgress * 100).toInt()} %", color = FlightBlue, fontSize = 8.sp)
+			Text("${(state.replayProgress * 100).toInt()} %", color = FlightBlue, fontSize = 12.sp)
 		}
 	}
 }
@@ -2318,7 +2318,7 @@ private fun ReplayStepButton(text: String, onClick: () -> Unit) {
 		Modifier.padding(start = 3.dp).width(30.dp).height(28.dp).border(1.dp, FlightLine).clickable(onClick = onClick),
 		contentAlignment = Alignment.Center
 	) {
-		Text(text, color = FlightBlue, fontSize = 7.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+		Text(text, color = FlightBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
 	}
 }
 
@@ -2400,7 +2400,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 				Text(
 					label,
 					color = if (selected == page) FlightText else FlightMuted,
-					fontSize = 8.sp,
+					fontSize = 12.sp,
 					fontWeight = if (selected == page) FontWeight.Bold else FontWeight.Normal,
 					maxLines = 1
 				)
@@ -2600,7 +2600,7 @@ private fun TerrainPreloadStatus(status: FlightTerrainStatus) {
 		Text(
 			stringResource(R.string.flight_mode_preload_explanation),
 			color = FlightMuted,
-			fontSize = 9.sp,
+			fontSize = 12.sp,
 			modifier = Modifier.padding(top = 5.dp)
 		)
 	}
@@ -3006,7 +3006,7 @@ private fun WindowQuickControls(
 					.clickable { onSetSide(side) },
 				contentAlignment = Alignment.Center
 			) {
-				Text(label, color = if (placement.side == side) Color.Black else FlightText, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+				Text(label, color = if (placement.side == side) Color.Black else FlightText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 			}
 		}
 		Box(
@@ -3014,7 +3014,7 @@ private fun WindowQuickControls(
 				.clickable(onClick = onRecenter).padding(horizontal = 8.dp),
 			contentAlignment = Alignment.Center
 		) {
-			Text(stringResource(R.string.flight_mode_recenter_short).uppercase(), color = if (look == FlightWindowLook()) FlightMuted else FlightBlue, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+			Text(stringResource(R.string.flight_mode_recenter_short).uppercase(), color = if (look == FlightWindowLook()) FlightMuted else FlightBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 		}
 		Box(
 			Modifier.size(29.dp)
@@ -3053,7 +3053,7 @@ private fun WindowPhotoOverlayControls(
 			Text(
 				photo.fileName,
 				color = FlightText,
-				fontSize = 8.sp,
+				fontSize = 12.sp,
 				maxLines = 1,
 				overflow = TextOverflow.Ellipsis,
 				modifier = Modifier.weight(1f)
@@ -3063,22 +3063,22 @@ private fun WindowPhotoOverlayControls(
 					stringResource(R.string.flight_mode_photo_fov_pair, viewVerticalFovDegrees, photoFov)
 				} ?: stringResource(R.string.flight_mode_photo_fov_view_only, viewVerticalFovDegrees),
 				color = FlightBlue,
-				fontSize = 7.sp,
+				fontSize = 11.sp,
 				maxLines = 1,
 				modifier = Modifier.padding(horizontal = 4.dp)
 			)
 			Text(
 				stringResource(R.string.flight_mode_photo_overlay_close).uppercase(),
 				color = FlightMuted,
-				fontSize = 8.sp,
+				fontSize = 12.sp,
 				fontWeight = FontWeight.Bold,
 				modifier = Modifier.clickable(onClick = onClose).padding(horizontal = 5.dp, vertical = 3.dp)
 			)
 		}
 		Row(Modifier.fillMaxWidth().height(26.dp), verticalAlignment = Alignment.CenterVertically) {
-			Text(stringResource(R.string.flight_mode_photo_opacity).uppercase(), color = FlightBlue, fontSize = 7.sp, modifier = Modifier.width(48.dp))
+			Text(stringResource(R.string.flight_mode_photo_opacity).uppercase(), color = FlightBlue, fontSize = 11.sp, modifier = Modifier.width(48.dp))
 			Slider(value = overlay.opacity, onValueChange = onSetOpacity, modifier = Modifier.weight(1f).height(24.dp))
-			Text("${(overlay.opacity * 100).roundToInt()} %", color = FlightText, fontSize = 8.sp, modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
+			Text("${(overlay.opacity * 100).roundToInt()} %", color = FlightText, fontSize = 12.sp, modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
 		}
 		Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
 			listOf(
@@ -3094,7 +3094,7 @@ private fun WindowPhotoOverlayControls(
 						.clickable { onSetGestureTarget(target) },
 					contentAlignment = Alignment.Center
 				) {
-					Text(label.uppercase(), color = if (selected) FlightBlue else FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+					Text(label.uppercase(), color = if (selected) FlightBlue else FlightMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 				}
 			}
 			Box(
@@ -3102,7 +3102,7 @@ private fun WindowPhotoOverlayControls(
 					.padding(horizontal = 7.dp),
 				contentAlignment = Alignment.Center
 			) {
-				Text(stringResource(R.string.flight_mode_reset).uppercase(), color = FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+				Text(stringResource(R.string.flight_mode_reset).uppercase(), color = FlightMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 			}
 		}
 	}
@@ -3144,7 +3144,7 @@ internal fun FlightPhotoAdjustmentControls(
 					.clickable { onSetImageAdjustments(FlightPhotoImageAdjustments()) },
 				contentAlignment = Alignment.Center
 			) {
-				Text(stringResource(R.string.flight_photo_adjust_reset), color = FlightMuted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+				Text(stringResource(R.string.flight_photo_adjust_reset), color = FlightMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 			}
 		}
 	}
@@ -3183,7 +3183,7 @@ private fun CompactPhotoAdjustment(
 		Text(
 			"%+d".format((value.coerceIn(-1f, 1f) * 100).roundToInt()),
 			color = FlightText,
-			fontSize = 7.sp,
+			fontSize = 11.sp,
 			fontFamily = FontFamily.Monospace,
 			textAlign = TextAlign.End,
 			modifier = Modifier.width(29.dp)
@@ -3429,7 +3429,7 @@ private fun AltitudeOverrideControls(
 				Text(
 					stringResource(R.string.flight_mode_window_altitude).uppercase(),
 					color = FlightOrange,
-					fontSize = 9.sp,
+					fontSize = 12.sp,
 					fontWeight = FontWeight.Bold
 				)
 				Text(
@@ -3462,7 +3462,7 @@ private fun AltitudeOverrideControls(
 				Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 10.dp),
 				verticalAlignment = Alignment.CenterVertically
 			) {
-				Text("−500 m", color = FlightMuted, fontSize = 9.sp, modifier = Modifier.width(44.dp))
+				Text("−500 m", color = FlightMuted, fontSize = 12.sp, modifier = Modifier.width(44.dp))
 				Slider(
 					value = overrideAltitudeMeters,
 					onValueChange = onSetOverride,
@@ -3470,7 +3470,7 @@ private fun AltitudeOverrideControls(
 					steps = 154,
 					modifier = Modifier.weight(1f)
 				)
-				Text("15 km", color = FlightMuted, fontSize = 9.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
+				Text("15 km", color = FlightMuted, fontSize = 12.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
 			}
 		}
 	}
@@ -3491,7 +3491,7 @@ private fun WindowSunControls(
 			Text(
 				stringResource(R.string.flight_mode_sun_shadows),
 				color = if (enabled) FlightOrange else FlightMuted,
-				fontSize = 9.sp,
+				fontSize = 12.sp,
 				fontWeight = FontWeight.Bold,
 				modifier = Modifier.weight(1f)
 			)
@@ -3502,9 +3502,9 @@ private fun WindowSunControls(
 				Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 10.dp),
 				verticalAlignment = Alignment.CenterVertically
 			) {
-				Text(stringResource(R.string.flight_mode_shadow_intensity), color = FlightMuted, fontSize = 8.sp, modifier = Modifier.width(56.dp))
+				Text(stringResource(R.string.flight_mode_shadow_intensity), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.width(56.dp))
 				Slider(value = intensity.coerceIn(0f, 1f), onValueChange = onSetIntensity, modifier = Modifier.weight(1f).height(26.dp))
-				Text("${(intensity * 100).roundToInt()} %", color = FlightText, fontSize = 9.sp, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
+				Text("${(intensity * 100).roundToInt()} %", color = FlightText, fontSize = 12.sp, modifier = Modifier.width(36.dp), textAlign = TextAlign.End)
 			}
 		}
 	}
@@ -3524,14 +3524,14 @@ private fun WindowViewControls(
 			verticalAlignment = Alignment.CenterVertically
 		) {
 			Column(Modifier.weight(1f)) {
-				Text(stringResource(R.string.flight_mode_window_position).uppercase(), color = FlightOrange, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-				Text(windowPlacementText(placement), color = FlightText, fontSize = 9.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+				Text(stringResource(R.string.flight_mode_window_position).uppercase(), color = FlightOrange, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+				Text(windowPlacementText(placement), color = FlightText, fontSize = 12.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
 			}
 			Text(stringResource(R.string.flight_mode_adjust).uppercase(), color = FlightBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
 		}
 		Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 12.dp).background(FlightLine))
 		Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-			Text(stringResource(R.string.flight_mode_zoom).uppercase(), color = FlightMuted, fontSize = 9.sp, modifier = Modifier.width(48.dp))
+			Text(stringResource(R.string.flight_mode_zoom).uppercase(), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.width(48.dp))
 			Slider(
 				value = kotlin.math.ln(placement.zoom),
 				onValueChange = { onSetZoom(kotlin.math.exp(it)) },
@@ -3693,13 +3693,13 @@ private fun WindowPlacementDiagram(
 		Text(
 			stringResource(R.string.flight_mode_fixed_eye),
 			color = FlightBlue,
-			fontSize = 9.sp,
+			fontSize = 12.sp,
 			modifier = Modifier.align(Alignment.Center).padding(top = 70.dp)
 		)
 		Text(
 			stringResource(R.string.flight_mode_fixed_window_size),
 			color = FlightMuted,
-			fontSize = 9.sp,
+			fontSize = 12.sp,
 			modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
 		)
 	}
@@ -3740,7 +3740,7 @@ private fun DenseSensorLine(label: String, value: String) {
 		Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
 		verticalAlignment = Alignment.CenterVertically
 	) {
-		Text(label.uppercase(), color = FlightMuted, fontSize = 8.sp, modifier = Modifier.weight(1f), maxLines = 1)
+		Text(label.uppercase(), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1)
 		Text(
 			text = value,
 			color = if (value == "—") FlightMuted else FlightText,
@@ -3761,7 +3761,7 @@ private fun EnvironmentSensorRow(title: String, value: String?) {
 	) {
 		Box(Modifier.size(7.dp).background(if (value == null) FlightLine else FlightGreen, RoundedCornerShape(50)))
 		Text(title, color = FlightText, fontSize = 10.sp, modifier = Modifier.weight(1f).padding(start = 8.dp))
-		Text(value ?: stringResource(R.string.flight_mode_missing), color = if (value == null) FlightMuted else FlightText, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+		Text(value ?: stringResource(R.string.flight_mode_missing), color = if (value == null) FlightMuted else FlightText, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
 	}
 	Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 10.dp).background(FlightLine))
 }
@@ -3776,7 +3776,7 @@ private fun SpectrumStrip(levels: List<Float>?) {
 			Text(
 				stringResource(R.string.flight_mode_spectrum_missing),
 				color = FlightMuted,
-				fontSize = 9.sp
+				fontSize = 12.sp
 			)
 		}
 		return
@@ -3810,7 +3810,7 @@ private fun CompactToggleRow(title: String, checked: Boolean, onChecked: (Boolea
 				if (checked) stringResource(R.string.flight_mode_yes_short).uppercase()
 				else stringResource(R.string.flight_mode_no_short).uppercase(),
 				color = if (checked) Color.Black else FlightMuted,
-				fontSize = 8.sp,
+				fontSize = 12.sp,
 				fontWeight = FontWeight.Bold
 			)
 		}

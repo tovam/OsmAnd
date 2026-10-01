@@ -907,7 +907,7 @@ internal fun FlightPhotoEditor(
                             }
                             .joinToString(" · "),
                         color = Color.LightGray,
-                        fontSize = 9.sp,
+                        fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 8.dp),
                     )
                     EditorAction(
@@ -919,7 +919,7 @@ internal fun FlightPhotoEditor(
                 Text(
                     status,
                     color = Color(0xFFFFCC66),
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     maxLines = 3,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
@@ -1121,7 +1121,7 @@ private fun EditorAction(
     enabled: Boolean = true,
 ) {
     Box(
-        Modifier.heightIn(min = 28.dp)
+        Modifier.heightIn(min = 40.dp)
             .widthIn(min = 32.dp)
             .background(if (selected) Color(0xFF234656) else Color.Transparent)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
