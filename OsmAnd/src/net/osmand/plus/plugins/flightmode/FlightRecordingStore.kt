@@ -17,6 +17,25 @@ internal class FlightRecordingStore(context: Context, id: String) {
 
     fun sizeBytes(): Long = events.length() + stateFile.baseFile.length()
 
+    /** Include durable measurements when validating a storage cleanup snapshot. */
+    fun updateStorageSignature(digest: java.security.MessageDigest) = synchronized(EVENT_LOCK) {
+        digest.update(safeId.toByteArray(Charsets.UTF_8))
+        if (events.exists()) {
+            if (!events.isFile) throw IOException("Invalid flight recording")
+            val content = java.security.MessageDigest.getInstance("SHA-256")
+            events.inputStream().buffered().use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    content.update(buffer, 0, count)
+                }
+            }
+            digest.update(content.digest())
+        }
+    }
+
     fun append(sample: FlightSample) =
         appendObject(JSONObject().put("sample", codec.sampleToJson(sample)))
 

@@ -35,9 +35,13 @@ class FlightJourneyStore(private val context: Context) {
 	private val mediaDirectory = File(context.filesDir, MEDIA_DIRECTORY).also { it.mkdirs() }
 
     internal fun storageProtectionSnapshot(): Pair<String, List<FlightJourney>> = synchronized(STORE_LOCK) {
-        storageLibrarySignature() to journeyFiles().map { file ->
-            journeyFromJson(JSONObject(file.readText())) { name -> File(mediaDirectory, name).absolutePath }
+        val retained = journeyFiles().map { file ->
+            val parsed = journeyFromJson(JSONObject(android.util.AtomicFile(file).openRead().bufferedReader().use { it.readText() })) {
+                name -> File(mediaDirectory, name).absolutePath
+            }
+            FlightRecordingStore(context, parsed.id).merge(parsed)
         }
+        storageLibrarySignature() to retained
     }
 
     private fun storageLibrarySignature(): String {
@@ -45,6 +49,7 @@ class FlightJourneyStore(private val context: Context) {
         journeyFiles().sortedBy { it.name }.forEach { file ->
             digest.update(file.name.toByteArray(Charsets.UTF_8))
             digest.update(java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes()))
+            FlightRecordingStore(context, file.nameWithoutExtension).updateStorageSignature(digest)
         }
         return digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
     }
