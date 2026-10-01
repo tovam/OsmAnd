@@ -18,6 +18,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout release notes from the built revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: build-source
+          persist-credentials: false
+          sparse-checkout: BUILD_CHANGES.md
+          sparse-checkout-cone-mode: false
+
       - name: Download APK artifact
         uses: actions/download-artifact@v8
         with:
@@ -49,11 +58,18 @@ jobs:
           TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
           APK_PATH: ${{ steps.apk.outputs.path }}
         run: |
+          set -euo pipefail
+          notes_path="build-source/BUILD_CHANGES.md"
+          if [[ ! -s "${notes_path}" ]]; then
+            # Older revisions predate curated notes; use their commit subject.
+            git -C build-source log -1 --format='- %s' > "${notes_path}"
+          fi
+
           gh release create "${RELEASE_TAG}" "${APK_PATH}" \
             --repo "${GITHUB_REPOSITORY}" \
             --target "${TARGET_SHA}" \
             --title "${RELEASE_TITLE}" \
-            --notes "Debug ARM64 OpenGL CPU build for testing. Application ID: com.tovam.osmandsmart. Signed with the repository's stable test key, with a monotonically increasing versionCode so later APKs install as updates." \
+            --notes-file "${notes_path}" \
             --prerelease
 
       - name: Delete temporary Actions artifact

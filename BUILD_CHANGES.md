@@ -1,0 +1,2 @@
+- Added optional guidance arrows to help place photo landmarks and reduce fit error.
+- Guidance updates after moving a landmark and follows photo zoom and rotation.

@@ -2,6 +2,7 @@
 
 - Do not run `gh`, request `gh auth login`, inspect credentials, or build locally: the existing `git push` works.
 - Work in `cd /Users/tommy/dev/osmand-fork/OsmAnd`; check `git status --short` and `git branch --show-current` (must be `master`).
+- Before building application changes, update `BUILD_CHANGES.md` with 1–3 short bullets describing the features added, changed, or fixed since the previous published APK. Keep unchanged notes when rebuilding the same application code. Releases publish this file from the exact built revision instead of technical build boilerplate.
 - Stage only the intended changes: `git add <actual-file-paths>`; review with `git diff --cached`.
 - Launch: `git diff --cached --check && git commit -m "Describe the change" && git push` (skip the commit if already committed).
 - The push triggers the APK build for changes in `OsmAnd/**`, `OsmAnd-java/**`, or `.github/workflows/build-osmand-smart.yml`.
