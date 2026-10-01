@@ -440,6 +440,7 @@ fun FlightModeScreen(
 					onSetCabinTransparent = onSetCabinTransparent,
 					onSetCabinHidden = onSetCabinHidden,
 					onSetSatelliteQuality = onSetSatelliteQuality,
+                    onUpdatePlan = onUpdatePlan,
 					onSetTerrainFineZoom = onSetTerrainFineZoom,
 					onSetTerrainMiddleZoom = onSetTerrainMiddleZoom,
 					onSetSatelliteQualityOverlay = onSetSatelliteQualityOverlay,
@@ -956,6 +957,7 @@ private fun WindowScreen(
 	onSetZoom: (Float) -> Unit,
 	onSetCabinTransparent: (Boolean) -> Unit,
 	onSetCabinHidden: (Boolean) -> Unit,
+    onUpdatePlan: (FlightPlan) -> Unit,
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
 	onSetTerrainFineZoom: (Int) -> Unit,
 	onSetTerrainMiddleZoom: (Int) -> Unit,
@@ -974,6 +976,8 @@ private fun WindowScreen(
 	onTerrainRendererError: (String) -> Unit,
 	onTerrainRenderStats: (FlightTerrainRenderStats) -> Unit
 ) {
+    var advancedPrecision by rememberSaveable(state.journeyId) { mutableStateOf(false) }
+
 	var panel by remember(state.sessionMode) {
 		mutableStateOf(WindowPanel.FLIGHT)
 	}
@@ -1066,6 +1070,8 @@ private fun WindowScreen(
 							showTerrainDiagnostics = it
 						}
 					}
+                    item { FlightPrecisionSelector(state.plan, onUpdatePlan, advancedPrecision, { advancedPrecision = it }) }
+                    if (advancedPrecision) {
 					item {
 						SatelliteQualitySelector(
 							quality = state.plan.satelliteQuality,
@@ -1093,6 +1099,7 @@ private fun WindowScreen(
 							onSetShow = onSetSatelliteQualityOverlay
 						)
 					}
+                    }
 					item {
 						WindowSunControls(
 							enabled = state.plan.shadowsEnabled,

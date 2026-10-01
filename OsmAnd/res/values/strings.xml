@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_precision_economy">Economy</string>
+    <string name="flight_precision_balanced">Balanced</string>
+    <string name="flight_precision_detailed">Detailed</string>
+    <string name="flight_precision_economy_help">Less detail, lighter downloads and rendering.</string>
+    <string name="flight_precision_balanced_help">Recommended balance of terrain detail, imagery and storage.</string>
+    <string name="flight_precision_detailed_help">Finer terrain and imagery. Larger downloads and higher rendering cost; check the estimate before downloading.</string>
+    <string name="flight_precision_custom">Custom precision settings are retained.</string>
+    <string name="flight_precision_advanced">Advanced settings</string>
+    <string name="flight_precision_hide_advanced">Hide advanced settings</string>
     <string name="flight_download_connection_paused">Download paused after repeated connection failures. Check the connection, then resume.</string>
     <string name="flight_download_server_busy">Download paused: the tile server is busy. Resume later.</string>
     <string name="flight_download_offline_paused">Download paused in offline mode. Verified files are retained.</string>

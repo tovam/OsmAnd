@@ -714,6 +714,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			schedulePhotoPersistence()
 			return
 		}
+		val previousPrecisionPlan = uiState.plan
 		val simulationChanged = FlightOfflinePreparation.simulationInput(plan) != FlightOfflinePreparation.simulationInput(uiState.plan)
 		val coverageChanged=plan.stops!=uiState.plan.stops || plan.preparation?.bands!=uiState.plan.preparation?.bands
 		if(coverageChanged) { preparationDownloadGeneration++; preparationDownload?.cancel() }
@@ -724,8 +725,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			profile = if (uiState.trip != null) uiState.profile else FlightProfilePlanner.build(plan),
 			journeyDirty = true
 		)
-		if (simulationChanged) schedulePreparationSimulation()
-		schedulePhotoPersistence()
+        if (simulationChanged) schedulePreparationSimulation()
+        if (plan.satelliteQuality != previousPrecisionPlan.satelliteQuality ||
+            plan.terrainFineZoom != previousPrecisionPlan.terrainFineZoom || plan.terrainMiddleZoom != previousPrecisionPlan.terrainMiddleZoom)
+            (uiState.snapshot?.sample ?: previewFlightSample())?.let { requestTerrain(it, FlightSceneDemandReason.CONFIGURATION) }
+        schedulePhotoPersistence()
 	}
 
 	private fun searchCitiesForStop(index: Int, name: String) {

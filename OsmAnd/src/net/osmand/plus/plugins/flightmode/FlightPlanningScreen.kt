@@ -57,6 +57,7 @@ internal fun FlightPlanningScreen(
     var mapEditor by remember { mutableStateOf(false) }
     var section by remember { mutableStateOf(initialSection.coerceIn(0, 2)) }
     var showSaveError by remember { mutableStateOf(false) }
+    var advancedPrecision by remember { mutableStateOf(false) }
     var showTileFiles by remember { mutableStateOf(false) }
     val canSimulate = FlightOfflinePreparation.canSimulate(state.plan)
     var confirmStart by remember { mutableStateOf(false) }
@@ -359,6 +360,8 @@ internal fun FlightPlanningScreen(
             if (section == 1)
                 item {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                        FlightPrecisionSelector(state.plan, onUpdate, advancedPrecision, { advancedPrecision = it })
+                        if (advancedPrecision) {
                         Text(
                             stringResource(R.string.flight_plan_display_quality),
                             color = Color.White,
@@ -501,6 +504,7 @@ internal fun FlightPlanningScreen(
                                 color = Color.LightGray,
                                 fontSize = 10.sp,
                             )
+                        }
                         }
                         quote?.bandEstimatedBytes?.get(-1)?.let { bytes ->
                             Text(

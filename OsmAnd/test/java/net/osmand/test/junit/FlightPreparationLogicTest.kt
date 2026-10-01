@@ -5,9 +5,27 @@ import kotlinx.coroutines.runBlocking
 import net.osmand.plus.plugins.flightmode.*
 import org.junit.Assert.*
 import org.junit.Test
+import net.osmand.plus.plugins.flightmode.FlightPrecisionProfile
 
 /** Synthetic routes only; no files, devices, accounts or network are used by this suite. */
 class FlightPreparationLogicTest {
+    @Test
+    fun precisionPresetsPreserveRouteDatesAndCoverageAndRecognizeCustomSettings() {
+        val original = FlightPlan(emptyList(), terrainCorridorKm = 150,
+            preparation = FlightPreparation(departureMillis = 1234L, arrivalMillis = 5678L,
+                bands = listOf(FlightOfflineBand(20, 12, 12), FlightOfflineBand(150, 10, 10))))
+        for (preset in FlightPrecisionProfile.entries) {
+            val plan = preset.apply(original)
+            assertEquals(original.stops, plan.stops)
+            assertEquals(1234L, plan.preparation!!.departureMillis)
+            assertEquals(150, plan.terrainCorridorKm)
+            assertEquals(listOf(20, 150), plan.preparation!!.bands.map { it.radiusKm })
+            assertEquals(preset, FlightPrecisionProfile.selected(plan))
+            assertEquals(plan, preset.apply(plan))
+        }
+        assertNull(FlightPrecisionProfile.selected(original.copy(satelliteQuality = FlightSatelliteQuality.ULTRA_PLUS_PLUS)))
+    }
+
     @Test
     fun offlineEstimateRespondsToCorridorWidthQualityAndRouteLength() = runBlocking {
         fun plan(radius: Int = 20, satellite: Int = 9, terrain: Int = 9, longitude: Double = 11.0) =
