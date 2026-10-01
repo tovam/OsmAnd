@@ -9,7 +9,7 @@
 	<string name="flight_mode_load_trip">Charger un trip GPX</string>
 	<string name="flight_mode_load_osmand_track">Trace OsmAnd</string>
 	<string name="flight_mode_load_gpx_file">Fichier GPX</string>
-	<string name="flight_mode_start_live">Démarrer le vol</string>
+	<string name="flight_mode_start_live">Start GPS recording</string>
 	<string name="flight_mode_add_stop">Ajouter une escale / arrivée</string>
 	<string name="flight_mode_route">Trajet</string>
 	<string name="flight_mode_city_placeholder">Saisir une ville</string>
@@ -21,7 +21,7 @@
 	<string name="flight_mode_city_type_place">Localité</string>
 	<string name="flight_mode_expected_profile">Profil théorique</string>
 	<string name="flight_mode_profile_stopover_hint">Chaque escale redescend au sol avant le décollage suivant.</string>
-	<string name="flight_mode_preload">Préchargement</string>
+	<string name="flight_mode_preload">Download offline files</string>
 	<string name="flight_mode_terrain_corridor">Relief : ±%1$d km autour du trajet</string>
 	<string name="flight_mode_satellite_radius">Satellite détaillé : %1$d km autour de la position</string>
 	<string name="flight_mode_shadows">Ombres portées du relief</string>
@@ -29,7 +29,7 @@
 	<string name="flight_mode_shadow_intensity">Intensité</string>
 	<string name="flight_mode_resume">Reprendre ce voyage après redémarrage</string>
 	<string name="flight_mode_terrain_source">Relief Terrain Tiles + satellite Sentinel-2</string>
-	<string name="flight_mode_preload_explanation">Automatique : le relief et le satellite Standard du corridor sont enregistrés avec le Journal. Les niveaux Haute à Ultra+++ restent des rendus locaux régénérables.</string>
+	<string name="flight_mode_preload_explanation">Download the route files explicitly before the flight. Opening a flight loads only the visible scene.</string>
 	<string name="flight_mode_terrain_loading">Chargement…</string>
 	<string name="flight_mode_terrain_attribution">Relief Terrain Tiles © Mapzen · Satellite Sentinel-2 cloudless — s2maps.eu par EOX IT Services GmbH (données Copernicus Sentinel modifiées 2016–2017).</string>
 	<string name="flight_mode_satellite_attribution_short">Relief : Terrain Tiles / Mapzen · Satellite : Sentinel-2 cloudless / EOX / Copernicus</string>
@@ -125,8 +125,8 @@
 	<string name="flight_mode_altitude_gps">GPS · %1$.0f m</string>
 	<string name="flight_mode_altitude_gps_missing">GPS · altitude indisponible</string>
 	<string name="flight_mode_altitude_manual">Manuel · %1$.0f m</string>
-	<string name="flight_mode_recording">Enregistrement adaptatif</string>
-	<string name="flight_mode_recording_finished">Données enregistrées</string>
+	<string name="flight_mode_recording">GPS sampling</string>
+	<string name="flight_mode_recording_finished">Recorded GPS and sensor data</string>
 	<string name="flight_mode_recording_read_only">Ce trajet est terminé : les paramètres d’enregistrement ne sont plus modifiables. Les valeurs ci-dessus sont uniquement celles réellement présentes dans le fichier.</string>
 	<string name="flight_mode_recording_now">Intervalle actuel : %1$.1f s · environ %2$.0f m</string>
 	<string name="flight_mode_recording_waiting">Intervalle actuel : en attente d’une vitesse GPS réelle</string>
@@ -207,8 +207,8 @@
 	<string name="flight_mode_current_journey">Journal de vol actuel</string>
 	<string name="flight_mode_journey_stats">%1$d points · %2$d photos · %3$d vols définis</string>
 	<string name="flight_mode_journey_offline_assets">Hors ligne · %1$d tuiles relief · %2$d tuiles satellite Standard</string>
-	<string name="flight_mode_save_journey">Enregistrer</string>
-	<string name="flight_mode_journey_saved">Enregistré</string>
+	<string name="flight_mode_save_journey">Save on phone</string>
+	<string name="flight_mode_journey_saved">Saved on phone</string>
 	<string name="flight_mode_export_journey">Exporter</string>
 	<string name="flight_mode_import_journey_or_gpx">Importer un GPX ou une archive .osmandflight</string>
 	<string name="flight_mode_saved_journeys">Journaux de vol (%1$d)</string>

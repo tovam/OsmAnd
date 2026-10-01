@@ -200,7 +200,7 @@
     <string name="flight_map_top_view">Vue verticale · 90°</string>
     <string name="flight_live_signal_waiting">En attente du signal GPS</string>
     <string name="flight_offline_refreshing">Recontrôle du stockage en cours…</string>
-    <string name="flight_live_recording_active">Enregistrement actif</string>
+    <string name="flight_live_recording_active">GPS recording active</string>
     <string name="flight_live_takeoff_undetected">Décollage non détecté</string>
     <string name="flight_live_recorded_count">%1$d points GPS enregistrés</string>
     <string name="flight_live_simulated_count">%1$d points simulés enregistrés</string>
@@ -223,7 +223,7 @@
     <string name="flight_offline_estimate_note">Volume restant estimé. Les téléchargements incomplets ne sont pas comptés comme stockés. GB = 1 milliard d’octets.</string>
     <string name="flight_archive_invalid">Archive de vol invalide : fichiers manquants, inattendus ou en double.</string>
     <string name="flight_archive_photo_missing">Export impossible : une photo du journal manque sur ce téléphone.</string>
-    <string name="flight_cloud_upload_local_changed">Le vol a changé sur ce téléphone. Relance l’envoi pour partager la version actuelle.</string>
+    <string name="flight_cloud_upload_local_changed">This flight changed on the phone. Publish again to share the current version.</string>
     <string name="flight_recording_policy_preset_minutes">%1$.0f min</string>
     <string name="flight_recording_policy_value_seconds">%1$s s</string>
     <string name="flight_library_active_points"> · %1$d points</string>
@@ -275,13 +275,13 @@
     <string name="flight_detail_test_live_hint">GPS simulé · journal d’essai séparé · caméra réelle</string>
     <string name="flight_detail_end_offline_test">Terminer l’essai</string>
     <string name="flight_detail_route">Trajet et horaires</string>
-    <string name="flight_detail_downloads">Préparer les tuiles</string>
+    <string name="flight_detail_downloads">Prepare offline files</string>
     <string name="flight_detail_departure">Départ sur ce téléphone</string>
     <string name="flight_detail_schedule_manage">Régler le départ auto</string>
     <string name="flight_detail_schedule_changed">Réglages modifiés · ancienne programmation encore active</string>
     <string name="flight_detail_start_real">Démarrer le GPS maintenant</string>
     <string name="flight_detail_other_recording">Un enregistrement est déjà en cours. Ouvre-le depuis Mes vols.</string>
-    <string name="flight_detail_recording">Enregistrement en cours</string>
+    <string name="flight_detail_recording">GPS recording in progress</string>
     <string name="flight_detail_live_controls">Commandes et capteurs du direct</string>
     <string name="flight_detail_stop">Arrêter l’enregistrement</string>
     <string name="flight_detail_stop_confirm">Arrêter ce vol ? Les points et photos déjà enregistrés seront conservés.</string>
@@ -446,7 +446,7 @@
     <string name="flight_sync_not_uploaded">pas encore envoyé</string>
     <string name="flight_sync_local_failed">Téléphone : échec de sauvegarde — réessayer</string>
     <string name="flight_sync_local_pending">Téléphone : modifications non encore enregistrées</string>
-    <string name="flight_sync_local_saved">Téléphone : enregistré</string>
+    <string name="flight_sync_local_saved">Phone: edits saved</string>
     <string name="flight_sync_server_state">Serveur : %1$s</string>
     <string name="flight_sync_upgrade_server">Mets le serveur à jour avant cet envoi : sa version ne garantit pas la conservation des photos existantes. La lecture reste possible.</string>
     <string name="flight_sync_plan_payload">Plan, étapes, horaires et réglages. Pas de GPX sans vol enregistré, ni relief ou satellite. Choisis les photos à ajouter ou mettre à jour ; les autres restent sur le serveur.</string>
@@ -468,13 +468,13 @@
     <string name="flight_cloud_server_only">Sur le serveur · à télécharger</string>
     <string name="flight_cloud_both">Téléphone + serveur</string>
     <string name="flight_cloud_server_changed">Version serveur différente</string>
-    <string name="flight_cloud_local_changed">Modifications locales non envoyées</string>
+    <string name="flight_cloud_local_changed">Phone edits not published</string>
     <string name="flight_cloud_unverified">État serveur non vérifié</string>
     <string name="flight_cloud_row_count">%1$d photos</string>
     <string name="flight_cloud_empty">Aucun journal dans cette vue.</string>
     <string name="flight_cloud_refresh">Actualiser</string>
     <string name="flight_cloud_open">Ouvrir sur ce téléphone</string>
-    <string name="flight_cloud_send">Envoyer au serveur</string>
+    <string name="flight_cloud_send">Publish on server</string>
     <string name="flight_cloud_update">Envoyer les modifications au serveur</string>
     <string name="flight_cloud_download">Télécharger et ouvrir</string>
     <string name="flight_cloud_download_copy">Télécharger une copie serveur distincte</string>
@@ -499,7 +499,7 @@
     <string name="flight_cloud_unlocking">Activation de l’édition…</string>
     <string name="flight_cloud_preparing">Lecture du journal enregistré…</string>
     <string name="flight_cloud_packing">Préparation des fichiers choisis…</string>
-    <string name="flight_cloud_sending">Envoi vers le serveur…</string>
+    <string name="flight_cloud_sending">Publishing on server…</string>
     <string name="flight_cloud_receiving">Téléchargement depuis le serveur…</string>
     <string name="flight_cloud_importing">Création de la copie locale…</string>
     <string name="flight_cloud_cancel_transfer">Interrompre le transfert ?</string>
@@ -538,7 +538,7 @@
     <string name="flight_plan_saving">Enregistrement…</string>
     <string name="flight_plan_disarm">Désactiver</string>
     <string name="flight_plan_unsaved">À enregistrer</string>
-    <string name="flight_plan_saved_short">Téléphone ✓</string>
+    <string name="flight_plan_saved_short">Saved on phone</string>
     <string name="flight_plan_leave_warning">Cette préparation contient des modifications non enregistrées. Enregistre-la avant de quitter pour la retrouver dans Vols prévus.</string>
     <string name="flight_plan_leave_unsaved">Quitter sans enregistrer</string>
     <string name="flight_plan_pick_date">Choisir la date</string>
@@ -619,7 +619,7 @@
 	<string name="flight_live_recording">Journal de vol · GPS actif</string>
 	<string name="flight_live_satellites">Satellites utilisés / visibles</string>
 	<string name="flight_live_speed">Vitesse</string>
-	<string name="flight_live_stop">Arrêter le suivi</string>
+	<string name="flight_live_stop">Stop GPS recording</string>
 	<string name="flight_live_stop_confirm">Arrêter l’enregistrement GPS de ce voyage ? Tous les points déjà mesurés resteront enregistrés.</string>
 	<string name="flight_live_stop_countdown">Temps lent restant avant arrêt</string>
 	<string name="flight_live_stopped">Suivi arrêté manuellement</string>
@@ -637,7 +637,7 @@
 	<string name="flight_plan_cached_estimate">Déjà présents : %1$d fichiers, %2$.2f Gio. À ajouter ≈ %3$.2f Gio. Les fichiers existants seront vérifiés, pas dupliqués.</string>
 	<string name="flight_plan_dates_invalid">Dates invalides : l’arrivée doit être après le départ.</string>
 	<string name="flight_plan_departure">Départ</string>
-	<string name="flight_plan_download">Télécharger les fichiers manquants / reprendre</string>
+	<string name="flight_plan_download">Download missing offline files / resume</string>
 	<string name="flight_plan_edit_map">Modifier le trajet</string>
 	<string name="flight_plan_estimate">%1$d images satellite + %2$d tuiles relief · environ %3$.2f GB</string>
 	<string name="flight_plan_estimate_hint">Estimation avant téléchargement : 45 ko par image, 110 ko par tuile relief, tailles variables. Tous les niveaux grossiers intermédiaires sont inclus. Aucun niveau demandé n’est abaissé en cachette.</string>
@@ -658,7 +658,7 @@
 	<string name="flight_plan_resolution">À cette latitude : satellite ≈ %1$.0f m/pixel · relief ≈ %2$.0f m/pixel</string>
 	<string name="flight_plan_route_hint">Place le départ, l’arrivée et les passages facultatifs. Les segments suivent le plus court chemin autour de la Terre. Les positions mesurées resteront distinctes de ce trajet prévu.</string>
 	<string name="flight_plan_satellite_z">Satellite Z</string>
-	<string name="flight_plan_save">Enregistrer le trajet</string>
+	<string name="flight_plan_save">Save preparation on phone</string>
 	<string name="flight_plan_saved">Préparation enregistrée sur ce téléphone, accessible dans Vols prévus.</string>
 	<string name="flight_plan_simulation">SIMULATION · trajet et altitudes hypothétiques, jamais enregistrés comme mesures.</string>
 	<string name="flight_plan_stop_minutes">Durée lente (min)</string>
@@ -672,7 +672,7 @@
 	<string name="flight_plan_missing_tiles">%1$d / %2$d fichiers valides · %3$d échecs · %4$d restants</string>
 	<string name="flight_plan_ready">Complet</string>
 	<string name="flight_plan_partial">Incomplet</string>
-	<string name="flight_plan_downloading">En cours</string>
+	<string name="flight_plan_downloading">Downloading offline files</string>
 	<string name="flight_plan_simulation_exit">Quitter la simulation</string>
 	<string name="flight_plan_coverage_required">Place au moins le départ et l’arrivée avant d’armer.</string>
 	<string name="flight_cal_add">+ Ajouter</string>
