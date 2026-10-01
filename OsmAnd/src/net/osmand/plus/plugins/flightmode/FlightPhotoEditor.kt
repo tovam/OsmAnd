@@ -9,9 +9,11 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -23,6 +25,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,8 +85,15 @@ internal fun FlightPhotoEditor(
     var status by remember(photo.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var solveJob by remember { mutableStateOf<Job?>(null) }
+    var guidanceEnabled by rememberSaveable(photo.id) { mutableStateOf(false) }
+    var guidance by remember(photo.id) { mutableStateOf<FlightPhotoFitGuidance?>(null) }
+    var guidanceBusy by remember(photo.id) { mutableStateOf(false) }
+    var guidanceError by remember(photo.id) { mutableStateOf(false) }
+    var guidanceRevision by remember(photo.id) { mutableLongStateOf(0L) }
+    var editorVisible by remember { mutableStateOf(true) }
     FlightVisibilityEffect(repository) { visible ->
         repository.setSceneWorkEnabled(visible)
+        editorVisible = visible
         if (!visible) solveJob?.cancel()
     }
     var solveProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -211,6 +222,59 @@ internal fun FlightPhotoEditor(
             reference?.let {
                 f.pose(it, data.imageWidth.toFloat() / data.imageHeight.coerceAtLeast(1))
             }
+        }
+    val fittedGuidance =
+        remember(
+            data.fit,
+            reference,
+            data.imageWidth,
+            data.imageHeight,
+            data.fitFocal,
+            data.verticalFov,
+        ) {
+            data.fit?.let { fit -> reference?.let { FlightPhotoFitGuidance(data, it, fit) } }
+        }
+    val activeGuidance = fittedGuidance ?: guidance?.takeIf { it.compatible(data, reference) }
+    LaunchedEffect(
+        guidanceEnabled,
+        tab,
+        editorVisible,
+        busy,
+        data.points,
+        data.fit,
+        data.imageWidth,
+        data.imageHeight,
+        data.fitFocal,
+        data.verticalFov,
+        reference,
+    ) {
+        val revision = ++guidanceRevision
+        guidanceBusy = false
+        guidanceError = false
+        if (fittedGuidance != null) guidance = fittedGuidance
+        if (!guidanceEnabled || tab != 0 || !editorVisible || busy || data.fit != null)
+            return@LaunchedEffect
+        val previous = activeGuidance ?: return@LaunchedEffect
+        val submitted = data
+        delay(160)
+        guidanceBusy = true
+        try {
+            val next = previous.refine(submitted, repository::calibrationElevation)
+            ensureActive()
+            if (revision == guidanceRevision) guidance = next
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (revision == guidanceRevision) guidanceError = true
+        } finally {
+            if (revision == guidanceRevision) guidanceBusy = false
+        }
+    }
+    val guidanceArrows =
+        remember(guidanceEnabled, tab, data.points, activeGuidance, guidanceError) {
+            if (guidanceEnabled && tab == 0 && !guidanceError)
+                activeGuidance?.arrows(data).orEmpty()
+            else emptyList()
         }
     val currentOnSave by rememberUpdatedState(onSave)
     val currentData by rememberUpdatedState(data)
@@ -567,6 +631,8 @@ internal fun FlightPhotoEditor(
                                         currentOnSave(data)
                                     }
                                 }
+                                v.fitGuidanceArrows = guidanceArrows
+                                v.fitGuidanceProvisional = data.fit == null || activeGuidance?.camera?.weak == true
                                 v.imageAdjustments = effectiveAdjustments
                                 v.update(
                                     corrected.bitmap,
@@ -585,6 +651,50 @@ internal fun FlightPhotoEditor(
                                 )
                             },
                         )
+                        if (tab == 0) {
+                            val guidanceDescription =
+                                stringResource(R.string.flight_cal_guidance_toggle)
+                            IconToggleButton(
+                                guidanceEnabled,
+                                { guidanceEnabled = it },
+                                modifier =
+                                    Modifier.align(Alignment.TopEnd)
+                                        .padding(4.dp)
+                                        .size(40.dp)
+                                        .background(Color(0xBB101820), CircleShape)
+                                        .semantics { contentDescription = guidanceDescription },
+                            ) {
+                                Text(
+                                    "↗",
+                                    fontSize = 20.sp,
+                                    color =
+                                        if (guidanceEnabled) Color(0xFFFFD54F) else Color.LightGray,
+                                )
+                            }
+                            if (guidanceEnabled)
+                                Text(
+                                    stringResource(
+                                        when {
+                                            activeGuidance == null ->
+                                                R.string.flight_cal_guidance_need_fit
+                                            guidanceError ->
+                                                R.string.flight_cal_guidance_unavailable
+                                            guidanceBusy -> R.string.flight_cal_guidance_updating
+                                            data.fit == null -> R.string.flight_cal_guidance_preview
+                                            activeGuidance.camera.weak ->
+                                                R.string.flight_cal_guidance_weak
+                                            else -> R.string.flight_cal_guidance_active
+                                        }
+                                    ),
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    modifier =
+                                        Modifier.align(Alignment.BottomStart)
+                                            .padding(start = 8.dp, bottom = 40.dp)
+                                            .background(Color(0xBB101820))
+                                            .padding(4.dp),
+                                )
+                        }
                         if (tab == 6) {
                             pointingChoice?.let { choice ->
                                 Text(

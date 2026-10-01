@@ -62,6 +62,70 @@ class FlightPhotoFitDiagnosticsTest {
         )
 
     @Test
+    fun guidancePointsTowardLowerPhotoErrorAndTracksDisplayRotation() = runBlocking {
+        val solved = solve(fixture(badPoint = false))
+        val guide = FlightPhotoFitGuidance(solved, reference, solved.fit!!)
+        assertTrue(guide.arrows(solved).isEmpty())
+        val edited = solved.copy(fit = null, points = solved.points.mapIndexed { i, p ->
+            if (i == 0) p.copy(x = p.x!! + .01, y = p.y!! - .02) else p
+        })
+        val arrow = guide.arrows(edited).single()
+        assertEquals(0, arrow.pointIndex)
+        assertTrue(arrow.targetX < arrow.x)
+        assertTrue(arrow.targetY > arrow.y)
+        val vector = arrow.screenVector(1500.0, 1000.0, 0.0, 18.0)!!
+        val turned = arrow.screenVector(6000.0, 4000.0, 90.0, 18.0)!!
+        assertEquals(18.0, hypot(vector.first, vector.second), 1e-9)
+        assertEquals(-vector.second, turned.first, 1e-9)
+        assertEquals(vector.first, turned.second, 1e-9)
+        assertNull(arrow.screenVector(1500.0, 1000.0, Double.NaN, 18.0))
+        assertNull(arrow.screenVector(0.0, 1000.0, 0.0, 18.0))
+        assertTrue(guide.arrows(edited.copy(fitFocal = false)).isEmpty())
+        assertFalse(guide.compatible(edited, reference.copy(eyeLatitude = 46.0)))
+        val corrupt = guide.copy(camera = guide.camera.copy(originLongitude = Double.NaN))
+        assertTrue(corrupt.arrows(edited).isEmpty())
+    }
+
+    @Test
+    fun localGuidanceReducesErrorWithoutPublishingACalibrationAndOnlyQueriesChangedGround() = runBlocking {
+        val solved = solve(fixture(badPoint = false))
+        val guide = FlightPhotoFitGuidance(solved, reference, solved.fit!!)
+        val edited = solved.copy(fit = null, points = solved.points.mapIndexed { i, p ->
+            if (i == 0) p.copy(x = p.x!! + .005, y = p.y!! - .004, altitude = null) else p
+        })
+        fun squaredError(arrows: List<FlightPhotoFitArrow>): Double = arrows.sumOf {
+            ((it.targetX - it.x) * 1500).pow(2) + ((it.targetY - it.y) * 1000).pow(2)
+        }
+        val improved = guide.refine(edited) { _, _ -> error("Unchanged ground must stay cached") }
+        assertTrue(squaredError(improved.arrows(edited)) < squaredError(guide.arrows(edited)))
+        assertNull(edited.fit)
+        assertNull(improved.source.fit)
+        assertNotNull(improved.source.points[0].altitude)
+        assertEquals(solved.fit, guide.camera)
+        val moved = edited.copy(points = edited.points.mapIndexed { i, p ->
+            if (i == 0) p.copy(longitude = p.longitude!! + .001) else p
+        })
+        assertTrue(guide.arrows(moved).isEmpty()) // Its new ground height is not yet known.
+        var queried = 0
+        improved.refine(moved) { lat, lon ->
+            assertEquals(moved.points[0].latitude!!, lat, 0.0)
+            assertEquals(moved.points[0].longitude!!, lon, 0.0)
+            queried++
+            solved.points[0].altitude!!
+        }
+        assertEquals(1, queried)
+        try {
+            guide.refine(edited.copy(points = edited.points.mapIndexed { i, p ->
+                if (i == 0) p.copy(latitude = 91.0) else p
+            })) { _, _ -> error("Invalid coordinates reached terrain lookup") }
+            fail("Invalid geographic point was accepted")
+        } catch (expected: IllegalArgumentException) { }
+        val removed = edited.copy(points = edited.points.drop(1))
+        val renumbered = guide.arrows(removed)
+        assertTrue(renumbered.none { it.pointIndex == 0 }) // Incomplete first row never borrows the removed point.
+    }
+
+    @Test
     fun completeAndEveryExcludedFitUseStablePointNumbersAndReportProgress() = runBlocking {
         val original = fixture()
         val progress = mutableListOf<Pair<Int, Int>>()

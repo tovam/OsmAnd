@@ -41,6 +41,34 @@ public class PhotoPoseSolverTest {
             if (fit.rmsPixels > .02 || Math.abs(fit.parameters[6]-camera[6]) > .001)
                 throw new AssertionError("Telephoto FOV " + fov + ": " + fit.rmsPixels);
         }
+        double[] previous = noisy.parameters.clone();
+        double[][] changed = java.util.Arrays.stream(image).map(double[]::clone).toArray(double[][]::new);
+        changed[0][0] += .003; changed[0][1] -= .002;
+        double before = error(previous, points, changed);
+        long started = System.nanoTime();
+        for (int i = 0; i < 50; i++) {
+            double[] preview = PhotoPoseSolver.refine(points, changed, initial, 1500, 1000, true, previous);
+            if (error(preview, points, changed) > before + 1e-10) throw new AssertionError("Preview increased error");
+        }
+        double[] locked = PhotoPoseSolver.refine(points, changed, initial, 1500, 1000, false, previous);
+        if (locked[6] != initial[6]) throw new AssertionError("Locked focal changed");
+        if (!java.util.Arrays.equals(previous, noisy.parameters)) throw new AssertionError("Validated pose was mutated");
+        Thread.currentThread().interrupt();
+        try {
+            PhotoPoseSolver.refine(points, changed, initial, 1500, 1000, true, previous);
+            throw new AssertionError("Preview swallowed cancellation");
+        } catch (java.util.concurrent.CancellationException expected) {
+        } finally { Thread.interrupted(); }
+        System.out.println("50 bounded local previews: " + ((System.nanoTime() - started) / 1_000_000.0) + " ms (synthetic JVM fixture)");
         System.out.println("Photo resection: exact, noisy, fixed/free focal and degenerate fixtures passed");
+    }
+    private static double error(double[] camera, double[][] world, double[][] image) {
+        double cost = 0;
+        for (int i = 0; i < world.length; i++) {
+            double[] p = PhotoPoseSolver.project(camera, world[i], 1.5);
+            if (p == null) return Double.POSITIVE_INFINITY;
+            cost += Math.pow((p[0] - image[i][0]) * 1.5, 2) + Math.pow(p[1] - image[i][1], 2);
+        }
+        return cost;
     }
 }

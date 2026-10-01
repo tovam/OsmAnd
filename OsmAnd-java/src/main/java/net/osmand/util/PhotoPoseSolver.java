@@ -42,15 +42,7 @@ public final class PhotoPoseSolver {
     // still refer to the original camera, so exclusions have identical constraints.
     static Result solve(double[][] world, double[][] image, double[] initial,
             int width, int height, boolean fitFocal, double[] warmStart) {
-        if (world.length < 4 || world.length != image.length || width <= 0 || height <= 0
-                || initial.length != 7) throw new IllegalArgumentException("Four complete pairs required");
-        for (int i = 0; i < world.length; i++) {
-            if (world[i].length != 3 || image[i].length != 2) throw new IllegalArgumentException("Invalid point dimensions");
-            for (double v : world[i]) if (!Double.isFinite(v)) throw new IllegalArgumentException("Invalid terrain point");
-            for (double v : image[i]) if (!Double.isFinite(v) || v < 0 || v > 1) throw new IllegalArgumentException("Invalid image point");
-        }
-        for (double v : initial) if (!Double.isFinite(v)) throw new IllegalArgumentException("Invalid initial camera");
-        if (spread(image) < 0.00002) throw new IllegalArgumentException("Image points are collinear or too clustered");
+        validate(world, image, initial, width, height);
         double aspect = (double) width / height;
         double[] best = null; double bestCost = Double.POSITIVE_INFINITY;
         double[] centre = new double[3];
@@ -85,12 +77,54 @@ public final class PhotoPoseSolver {
         return new Result(best, errors, weak);
     }
 
+    /** Bounded local preview, never the multistart solution or its quality diagnostics. */
+    public static double[] refine(double[][] world, double[][] image, double[] initial,
+            int width, int height, boolean fitFocal, double[] previous) {
+        validate(world, image, initial, width, height);
+        if (previous.length != 7) throw new IllegalArgumentException("Invalid preview camera");
+        for (double v : previous) if (!Double.isFinite(v)) throw new IllegalArgumentException("Invalid preview camera");
+        double[] seed = previous.clone();
+        if (!fitFocal) seed[6] = initial[6];
+        double aspect = (double) width / height;
+        if (!bounded(seed, initial) || !Double.isFinite(cost(residuals(world, image, seed, aspect))))
+            throw new IllegalArgumentException("Preview camera cannot see these points");
+        return optimize(world, image, seed, initial, aspect, fitFocal, 32,
+                System.nanoTime() + 40_000_000L);
+    }
+
+    private static void validate(double[][] world, double[][] image, double[] initial,
+            int width, int height) {
+        if (world.length < 4 || world.length != image.length || width <= 0 || height <= 0
+                || initial.length != 7) throw new IllegalArgumentException("Four complete pairs required");
+        for (int i = 0; i < world.length; i++) {
+            if (world[i].length != 3 || image[i].length != 2) throw new IllegalArgumentException("Invalid point dimensions");
+            for (double v : world[i]) if (!Double.isFinite(v)) throw new IllegalArgumentException("Invalid terrain point");
+            for (double v : image[i]) if (!Double.isFinite(v) || v < 0 || v > 1) throw new IllegalArgumentException("Invalid image point");
+        }
+        for (double v : initial) if (!Double.isFinite(v)) throw new IllegalArgumentException("Invalid initial camera");
+        if (spread(image) < 0.00002) throw new IllegalArgumentException("Image points are collinear or too clustered");
+    }
+
+    private static boolean bounded(double[] p, double[] origin) {
+        return Math.hypot(p[0]-origin[0], p[2]-origin[2]) <= 100
+                && p[1] >= -0.5 && p[1] <= 30
+                && Math.abs(p[4]) < Math.PI * 0.499
+                && p[6] > Math.log(0.5 / Math.tan(Math.toRadians(85)))
+                && p[6] < Math.log(0.5 / Math.tan(Math.toRadians(0.5)));
+    }
+
     private static double[] optimize(double[][] w, double[][] im, double[] p, double[] origin,
             double aspect, boolean focal) {
+        return optimize(w, im, p, origin, aspect, focal, 160, 0L);
+    }
+
+    private static double[] optimize(double[][] w, double[][] im, double[] p, double[] origin,
+            double aspect, boolean focal, int iterations, long deadline) {
         double damping = 0.001;
         int n = focal ? 7 : 6;
-        for (int iteration = 0; iteration < 160; iteration++) {
+        for (int iteration = 0; iteration < iterations; iteration++) {
             if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+            if (deadline != 0L && System.nanoTime() - deadline >= 0) break;
             double[] r = residuals(w, im, p, aspect);
             if (r == null) return p;
             double[][] j = jacobian(w, im, p, aspect, n), a = normal(j);
@@ -103,12 +137,7 @@ public final class PhotoPoseSolver {
             if (step == null) break;
             double[] next = p.clone();
             for (int k = 0; k < n; k++) next[k] += step[k];
-            boolean bounded = Math.hypot(next[0]-origin[0], next[2]-origin[2]) <= 100
-                    && next[1] >= -0.5 && next[1] <= 30
-                    && Math.abs(next[4]) < Math.PI * 0.499
-                    && next[6] > Math.log(0.5 / Math.tan(Math.toRadians(85)))
-                    && next[6] < Math.log(0.5 / Math.tan(Math.toRadians(0.5)));
-            double nextCost = bounded ? cost(residuals(w, im, next, aspect)) : Double.POSITIVE_INFINITY;
+            double nextCost = bounded(next, origin) ? cost(residuals(w, im, next, aspect)) : Double.POSITIVE_INFINITY;
             double current = cost(r);
             if (nextCost < current) {
                 p = next; damping = Math.max(1e-10, damping / 3);

@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_cal_guidance_toggle">Show fit guidance arrows</string>
+    <string name="flight_cal_guidance_need_fit">Calculate a fit once to show directions.</string>
+    <string name="flight_cal_guidance_unavailable">Guidance unavailable for these points. Calculate a new fit.</string>
+    <string name="flight_cal_guidance_updating">Updating guidance…</string>
+    <string name="flight_cal_guidance_preview">Local preview · arrows indicate direction only</string>
+    <string name="flight_cal_guidance_weak">Fit guidance · ambiguous geometry</string>
+    <string name="flight_cal_guidance_active">Fit guidance · arrows indicate direction only</string>
     <string name="flight_storage_scan">Scan unused tiles</string>
     <string name="flight_storage_clean">Clean unused tiles</string>
     <string name="flight_storage_clean_confirm_title">Remove unused downloaded tiles?</string>

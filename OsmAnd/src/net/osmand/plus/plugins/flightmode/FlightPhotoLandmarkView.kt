@@ -26,6 +26,30 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             invalidate()
         }
 
+    internal var fitGuidanceArrows: List<FlightPhotoFitArrow> = emptyList()
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    internal var fitGuidanceProvisional: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    private val guidancePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+    private val guidancePath = Path()
+
     private var placementPreview: PointF? = null
     var coverage: List<Pair<TerrainTileId, Int>> = emptyList()
         set(value) {
@@ -454,6 +478,7 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
             canvas.rotate(rotation, rect.centerX(), rect.centerY())
             image?.let { canvas.drawBitmap(it, null, rect, imagePaint) }
             canvas.restore()
+            drawFitGuidance(canvas, rect)
             calibration.points.forEachIndexed { i, p ->
                 if (p.x != null && p.y != null && !(i == selected && placementPreview != null)) {
                     val at =
@@ -500,6 +525,61 @@ class FlightPhotoLandmarkView(context: Context) : View(context) {
         } else drawMap(canvas)
         placementPreview?.let { mark(canvas, it.x, it.y, selected + 1, Color.YELLOW) }
         canvas.restoreToCount(viewportSave)
+    }
+
+    private fun drawFitGuidance(canvas: Canvas, rect: RectF) {
+        val density = resources.displayMetrics.density
+        for (arrow in fitGuidanceArrows) {
+            if (arrow.pointIndex == selected && placementPreview != null) continue
+            val vector =
+                arrow.screenVector(
+                    rect.width().toDouble(),
+                    rect.height().toDouble(),
+                    rotation.toDouble(),
+                    (if (arrow.pointIndex == selected) 22.0 else 18.0) * density,
+                ) ?: continue
+            val at =
+                PhotoLandmarkGeometry.rotate(
+                    rect.left + arrow.x * rect.width(),
+                    rect.top + arrow.y * rect.height(),
+                    rect.centerX().toDouble(),
+                    rect.centerY().toDouble(),
+                    rotation.toDouble(),
+                )
+            val norm = hypot(vector.first, vector.second)
+            val dx = vector.first / norm
+            val dy = vector.second / norm
+            val gap = max(12.0 * density, 11.0 + 3.0 * density)
+            val startX = at[0] + gap * dx
+            val startY = at[1] + gap * dy
+            val endX = startX + vector.first
+            val endY = startY + vector.second
+            guidancePath.reset()
+            guidancePath.moveTo(startX.toFloat(), startY.toFloat())
+            guidancePath.lineTo(endX.toFloat(), endY.toFloat())
+            val head = 4 * density
+            guidancePath.moveTo(
+                (endX - head * dx - head * dy).toFloat(),
+                (endY - head * dy + head * dx).toFloat(),
+            )
+            guidancePath.lineTo(endX.toFloat(), endY.toFloat())
+            guidancePath.lineTo(
+                (endX - head * dx + head * dy).toFloat(),
+                (endY - head * dy - head * dx).toFloat(),
+            )
+            val alpha =
+                if (fitGuidanceProvisional) 140 else if (arrow.pointIndex == selected) 230 else 180
+            guidancePaint.color = Color.BLACK
+            guidancePaint.alpha = alpha
+            guidancePaint.strokeWidth = 3 * density
+            canvas.drawPath(guidancePath, guidancePaint)
+            guidancePaint.color =
+                if (arrow.pointIndex == selected) Color.rgb(255, 213, 79)
+                else Color.rgb(128, 222, 234)
+            guidancePaint.alpha = alpha
+            guidancePaint.strokeWidth = 1.2f * density
+            canvas.drawPath(guidancePath, guidancePaint)
+        }
     }
 
     private fun drawMap(canvas: Canvas) {
