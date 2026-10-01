@@ -20,6 +20,20 @@ internal object FlightPhotoTime {
         return result.takeIf { it in -720..840 }
     }
 
+    /** Undo only the fields still owned by the correction; retain subsequent user edits. */
+    fun restoreCorrection(current: FlightPhotoAttachment, original: FlightPhotoAttachment,
+                          applied: FlightPhotoAttachment): FlightPhotoAttachment {
+        if (current.timestampMillis != applied.timestampMillis ||
+            current.captureUtcOffsetMinutes != applied.captureUtcOffsetMinutes ||
+            current.captureLocalTimestampMillis != applied.captureLocalTimestampMillis) return current
+        return current.copy(timestampMillis = original.timestampMillis,
+            captureUtcOffsetMinutes = original.captureUtcOffsetMinutes,
+            captureLocalTimestampMillis = original.captureLocalTimestampMillis,
+            timestampSource = if (current.timestampSource == applied.timestampSource) original.timestampSource else current.timestampSource,
+            matchedSamplePosition = if (current.matchedSamplePosition == applied.matchedSamplePosition)
+                original.matchedSamplePosition else current.matchedSamplePosition)
+    }
+
     fun correctedTimestamp(photo: FlightPhotoAttachment, previousOffset: Int, targetOffset: Int): Long? {
         require(previousOffset in -720..840 && targetOffset in -720..840)
         val wallTime = photo.captureLocalTimestampMillis ?: photo.timestampMillis?.let {

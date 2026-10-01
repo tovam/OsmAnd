@@ -48,6 +48,21 @@ class FlightDatePresentationTest {
     }
 
     @Test
+    fun undoClockCorrectionPreservesLaterAssociationAndImageEdits() {
+        val original = FlightPhotoAttachment("p", "photo", "synthetic", 100L, 1.0)
+        val applied = original.copy(timestampMillis = 200L, captureUtcOffsetMinutes = 60,
+            captureLocalTimestampMillis = 3_600_200L, matchedSamplePosition = 2.0)
+        assertEquals(original, FlightPhotoTime.restoreCorrection(applied, original, applied))
+        val edited = applied.copy(matchedSamplePosition = 3.0, rotationDegrees = 15f)
+        val undone = FlightPhotoTime.restoreCorrection(edited, original, applied)
+        assertEquals(original.timestampMillis, undone.timestampMillis)
+        assertEquals(3.0, undone.matchedSamplePosition!!, 0.0)
+        assertEquals(15f, undone.rotationDegrees, 0f)
+        val laterClockEdit = edited.copy(captureUtcOffsetMinutes = 120)
+        assertEquals(laterClockEdit, FlightPhotoTime.restoreCorrection(laterClockEdit, original, applied))
+    }
+
+    @Test
     fun recordedFlightUsesActualTimesInsteadOfSchedule() {
         val actual =
             flightDateRange(

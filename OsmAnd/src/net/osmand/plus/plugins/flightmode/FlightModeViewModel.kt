@@ -1709,7 +1709,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
-    private var photoTimeUndo = emptyMap<String, Pair<FlightPhotoAttachment, Long?>>()
+    private var photoTimeUndo = emptyMap<String, Pair<FlightPhotoAttachment, FlightPhotoAttachment>>()
 
     fun correctPhotoTimes(ids: Set<String>, previousOffset: Int, targetOffset: Int) {
         if (previousOffset !in -720..840 || targetOffset !in -720..840) return
@@ -1718,12 +1718,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
             val timestamp = runCatching { FlightPhotoTime.correctedTimestamp(photo, previousOffset, targetOffset) }.getOrNull() ?: return@mapNotNull null
             val position = journeyStore.matchPhotoPosition(uiState.trip, timestamp)
             photo.id to photo.copy(timestampMillis = timestamp,
+                timestampSource = photo.timestampSource ?: if (photo.timestampMillis == null) FlightPhotoTimestampSource.FILE_NAME else null,
                 captureUtcOffsetMinutes = targetOffset, captureLocalTimestampMillis = timestamp + targetOffset * 60_000L,
                 matchedSamplePosition = position)
         }.toMap()
         if (corrected.isEmpty()) return
         exitWindowPhotoEditing()
-        photoTimeUndo = before.filter { it.id in corrected }.associate { it.id to (it to corrected[it.id]?.timestampMillis) }
+        photoTimeUndo = before.filter { it.id in corrected }.associate { it.id to (it to corrected.getValue(it.id)) }
         uiState = uiState.copy(photos = uiState.photos.map { corrected[it.id] ?: it }.sortedWith(PHOTO_TIME_COMPARATOR),
             pendingPhotos = uiState.pendingPhotos.map { corrected[it.id] ?: it }.sortedWith(PHOTO_TIME_COMPARATOR),
             photoTimeUndoAvailable = true, journeyDirty = true,
@@ -1734,9 +1735,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
     fun undoPhotoTimeCorrection() {
         fun restored(photo: FlightPhotoAttachment): FlightPhotoAttachment {
             val (old, applied) = photoTimeUndo[photo.id] ?: return photo
-            if (photo.timestampMillis != applied) return photo
-            return photo.copy(timestampMillis = old.timestampMillis, matchedSamplePosition = old.matchedSamplePosition,
-                captureUtcOffsetMinutes = old.captureUtcOffsetMinutes, captureLocalTimestampMillis = old.captureLocalTimestampMillis)
+            return FlightPhotoTime.restoreCorrection(photo, old, applied)
         }
         uiState = uiState.copy(photos = uiState.photos.map(::restored).sortedWith(PHOTO_TIME_COMPARATOR),
             pendingPhotos = uiState.pendingPhotos.map(::restored).sortedWith(PHOTO_TIME_COMPARATOR),

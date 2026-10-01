@@ -1001,12 +1001,13 @@ class FlightJourneyStore(private val context: Context) {
 
     private fun photoExifTimestamp(file: File, confirmedOffset: Int?): DetectedPhotoTimestamp? = runCatching {
         val exif = ExifInterface(file.absolutePath)
-        val tag = listOf("DateTimeOriginal" to "OffsetTimeOriginal", "DateTimeDigitized" to "OffsetTimeDigitized", "DateTime" to "OffsetTime")
-            .firstOrNull { exif.getAttribute(it.first) != null } ?: return@runCatching null
-        val raw = exif.getAttribute(tag.first) ?: return@runCatching null
-        val wall = FlightPhotoTimestampParser.parseLocal(raw.replaceFirst(Regex("^(\\d{4}):(\\d{2}):(\\d{2})"), "$1-$2-$3")) ?: return@runCatching null
-        val offset = exif.getAttribute(tag.second)?.let(FlightPhotoTime::parseOffset) ?: confirmedOffset ?: return@runCatching null
-        DetectedPhotoTimestamp(wall - offset * 60_000L, FlightPhotoTimestampSource.EXIF, offset, wall)
+        for ((dateTag, offsetTag) in listOf("DateTimeOriginal" to "OffsetTimeOriginal", "DateTimeDigitized" to "OffsetTimeDigitized", "DateTime" to "OffsetTime")) {
+            val raw = exif.getAttribute(dateTag) ?: continue
+            val wall = FlightPhotoTimestampParser.parseLocal(raw.replaceFirst(Regex("^(\\d{4}):(\\d{2}):(\\d{2})"), "$1-$2-$3")) ?: continue
+            val offset = exif.getAttribute(offsetTag)?.let(FlightPhotoTime::parseOffset) ?: confirmedOffset ?: continue
+            return@runCatching DetectedPhotoTimestamp(wall - offset * 60_000L, FlightPhotoTimestampSource.EXIF, offset, wall)
+        }
+        null
     }.getOrNull()
 
 	private fun photoTimestamp(uri: Uri, copiedFile: File, originalName: String, confirmedUtcOffsetMinutes: Int): DetectedPhotoTimestamp? {

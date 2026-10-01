@@ -1,8 +1,8 @@
 package net.osmand.plus.plugins.flightmode
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -38,7 +38,8 @@ internal fun FlightPhotoTimeDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(if (photos == null) R.string.flight_photo_time_confirm else R.string.flight_photo_time_batch)) },
         text = {
-            Column(Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(Modifier.heightIn(max = 430.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
                 Text(stringResource(if (photos == null) R.string.flight_photo_time_import_help else R.string.flight_photo_time_batch_help))
                 if (photos != null) OutlinedTextField(previous, { previous = it }, singleLine = true,
                     label = { Text(stringResource(R.string.flight_photo_time_previous_offset)) },
@@ -47,7 +48,8 @@ internal fun FlightPhotoTimeDialog(
                     label = { Text(stringResource(R.string.flight_photo_time_capture_offset)) },
                     supportingText = { Text(stringResource(R.string.flight_photo_time_offset_help)) },
                     isError = newOffset == null)
-                photos?.forEach { photo ->
+                }
+                items(photos.orEmpty(), key = { it.id }) { photo ->
                     val eligible = photo.timestampSource != FlightPhotoTimestampSource.LIVE_CAPTURE &&
                         (photo.timestampMillis != null || FlightPhotoTimestampParser.parseLocal(photo.fileName) != null)
                     Row(Modifier.fillMaxWidth()) {
