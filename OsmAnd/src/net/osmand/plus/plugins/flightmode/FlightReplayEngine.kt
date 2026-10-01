@@ -14,7 +14,8 @@ class FlightReplayEngine(private val trip: FlightTrip, recordedSampleCount: Int 
 	private val gapTrajectories = FlightGapTrajectory.buildAll(trip.samples, recordedSampleCount = recordedCount)
 
 	fun snapshotAt(requestedProgress: Float): FlightSnapshot {
-		val progress = (requestedProgress.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f)
+		val progress = flightProgressOutsideIgnoredTime(trip,
+			(requestedProgress.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f), true)
 		val samples = trip.samples
 		require(samples.isNotEmpty()) { "A flight replay needs at least one sample" }
 		if (samples.size == 1) return FlightSnapshot(samples.first(), progress)
@@ -55,6 +56,10 @@ class FlightReplayEngine(private val trip: FlightTrip, recordedSampleCount: Int 
 		if (lowerIndex == upperIndex) return FlightSnapshot(lower, progress)
 		if (target == upper.timestampMillis) return FlightSnapshot(upper, progress)
 		if (target == lower.timestampMillis) return FlightSnapshot(lower, progress)
+		if (upper.excludedBefore) {
+			val nearest = if (abs(target - lower.timestampMillis) < abs(upper.timestampMillis - target)) lower else upper
+			return FlightSnapshot(nearest, trip.progressFor(nearest))
+		}
 
 		val gapMillis = upper.timestampMillis - lower.timestampMillis
 		if (gapMillis <= 0L) {

@@ -95,6 +95,7 @@ internal fun FlightUiState.hasSameJournalContentAs(
         plan == source.plan &&
         photos == source.photos &&
         flightSpans == source.flightSpans &&
+        ignoredTimeRanges == source.ignoredTimeRanges &&
         (!includeMeasurements || batteryHistory == source.batteryHistory) &&
         (!includeTrip || trip == source.trip)
 
@@ -102,6 +103,7 @@ internal fun FlightUiState.hasSameJournalContentAs(
 internal fun FlightJourney.hasSameCloudContentAs(other: FlightJourney): Boolean =
     id == other.id && name == other.name && createdAtMillis == other.createdAtMillis &&
         plan == other.plan && trip == other.trip && flightSpans == other.flightSpans &&
+        ignoredTimeRanges == other.ignoredTimeRanges &&
         photos == other.photos && batteryHistory == other.batteryHistory && simulation == other.simulation
 
 /** The device alarm registry is authoritative, even before its journal flag is autosaved. */

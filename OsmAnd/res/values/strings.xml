@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_ignored_times">Ignored periods (%1$d)</string>
+    <string name="flight_ignored_times_title">Ignored recording periods</string>
+    <string name="flight_ignored_times_help">Hidden in map, 3D and replay views. The original GPS recording and photo associations are kept. Remove a period to show it again.</string>
+    <string name="flight_ignored_times_zone">Times use your device time zone; each date shows its UTC offset.</string>
+    <string name="flight_ignored_times_before">Ignore before cursor</string>
+    <string name="flight_ignored_times_after">Ignore after cursor</string>
+    <string name="flight_ignored_times_from">From</string>
+    <string name="flight_ignored_times_to">To</string>
+    <string name="flight_ignored_times_add">Ignore this period</string>
+    <string name="flight_ignored_times_restore">Show again</string>
+    <string name="flight_ignored_times_none">No ignored periods.</string>
+    <string name="flight_ignored_times_invalid">Choose a start before the end, within the recording.</string>
+    <string name="flight_ignored_times_working">Updating visible points…</string>
+    <string name="flight_ignored_times_active">Stop recording this flight before editing ignored periods.</string>
+    <string name="flight_ignored_times_no_clock">This recording has no usable timestamps.</string>
+    <string name="flight_ignored_times_all_hidden">All recorded points are hidden. Remove an ignored period to view the flight again.</string>
+    <string name="flight_ignored_times_count">%1$d of %2$d GPS points visible</string>
     <string name="flight_cal_guidance_toggle">Show fit guidance arrows</string>
     <string name="flight_cal_guidance_need_fit">Calculate a fit once to show directions.</string>
     <string name="flight_cal_guidance_unavailable">Guidance unavailable for these points. Calculate a new fit.</string>

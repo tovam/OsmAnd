@@ -116,7 +116,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
                     },
                 )
 				if (!showFlightCamera) FlightModeScreen(
-					state = viewModel.uiState,
+					state = viewModel.displayState,
 					mapView = app.osmandMap.mapView,
 					onClose = ::close,
 					onPageChange = viewModel::showPage,
@@ -176,6 +176,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onMarkFlightEnd = viewModel::markFlightEnd,
 					onCancelFlightStart = viewModel::cancelFlightStart,
 					onRemoveFlightSpan = viewModel::removeFlightSpan,
+					onSetIgnoredTimeRanges = viewModel::setIgnoredTimeRanges,
 					onSetSatelliteQuality = viewModel::setSatelliteQuality,
 					onSetTerrainFineZoom = viewModel::setTerrainFineZoom,
 					onSetTerrainMiddleZoom = viewModel::setTerrainMiddleZoom,

@@ -29,6 +29,7 @@ internal fun FlightDetailScreen(
     onOffline: (Boolean) -> Unit,
     onPolicy: (FlightRecordingPolicy) -> Unit,
     onClone: () -> Unit,
+    onIgnoredTimes: (List<FlightTimeRange>) -> Unit,
 ) {
     val prepared = state.sessionMode == FlightSessionMode.PREPARE && !state.simulatedJourney
     val active = state.activeRecording.takeIf { it.journeyId == state.journeyId && it.running }
@@ -41,6 +42,7 @@ internal fun FlightDetailScreen(
     var confirmStop by remember { mutableStateOf(false) }
     var editingName by remember { mutableStateOf(false) }
     var showPolicy by remember { mutableStateOf(false) }
+    var showIgnoredTimes by remember(state.journeyId) { mutableStateOf(false) }
     val cloud = LocalFlightCloudUi.current
     LazyColumn(
         Modifier.fillMaxSize().background(Color(0xFF0A0F13)),
@@ -266,6 +268,22 @@ internal fun FlightDetailScreen(
                         active,
                     )
             }
+        if (!prepared && !state.trip?.recording()?.samples.isNullOrEmpty())
+            item {
+                DetailSection(R.string.flight_ignored_times_title)
+                TextButton(
+                    onClick = { showIgnoredTimes = true },
+                    enabled = active == null && state.trip?.hasUsableTimestamps == true && !state.previewingPlan,
+                ) {
+                    Text(stringResource(R.string.flight_ignored_times, state.ignoredTimeRanges.size), fontSize = 12.sp)
+                }
+                if (active != null)
+                    Text(stringResource(R.string.flight_ignored_times_active), fontSize = 11.sp)
+                else if (state.trip?.hasUsableTimestamps != true)
+                    Text(stringResource(R.string.flight_ignored_times_no_clock), fontSize = 11.sp)
+                if (state.trip?.samples.isNullOrEmpty() && state.ignoredTimeRanges.isNotEmpty())
+                    Text(stringResource(R.string.flight_ignored_times_all_hidden), fontSize = 12.sp)
+            }
         item {
             DetailSection(R.string.flight_detail_storage)
             FlightStorageStatusStrip(state, compact = true)
@@ -283,7 +301,7 @@ internal fun FlightDetailScreen(
             Row {
                 TextButton(
                     onClick = onExport,
-                    enabled = !state.previewingPlan && !state.trip?.samples.isNullOrEmpty(),
+                    enabled = !state.previewingPlan && !state.trip?.recording()?.samples.isNullOrEmpty(),
                 ) {
                     Text(stringResource(R.string.flight_mode_export_journey), fontSize = 12.sp)
                 }
@@ -299,6 +317,7 @@ internal fun FlightDetailScreen(
             )
         }
     }
+    if (showIgnoredTimes) FlightIgnoredTimesDialog(state, onIgnoredTimes, { showIgnoredTimes = false })
     if (confirmStart)
         AlertDialog(
             onDismissRequest = { confirmStart = false },

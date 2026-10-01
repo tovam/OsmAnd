@@ -1,2 +1,3 @@
-- Added optional guidance arrows to help place photo landmarks and reduce fit error.
-- Guidance updates after moving a landmark and follows photo zoom and rotation.
+- Added ignored recording periods per flight, with before/after cursor shortcuts.
+- Map, 3D, altitude and replay views hide ignored portions; removing a period restores them.
+- Saved and exported flights keep the original GPS recording and photo associations.

@@ -203,6 +203,7 @@ fun FlightModeScreen(
 	onMarkFlightEnd: () -> Unit,
 	onCancelFlightStart: () -> Unit,
 	onRemoveFlightSpan: (Int) -> Unit,
+	onSetIgnoredTimeRanges: (List<FlightTimeRange>) -> Unit = {},
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
 	onSetTerrainFineZoom: (Int) -> Unit,
 	onSetTerrainMiddleZoom: (Int) -> Unit,
@@ -388,7 +389,7 @@ fun FlightModeScreen(
 					onPageChange(page)
 				}, { section -> preparationSection = section; onPageChange(FlightPage.PREPARE) },
 					onSaveJourney, onExportJourney, onUpdateJourneyName, onStartLive, onStopLive,
-					onDisarmPreparation, onSimulateLive, onOfflineSimulation, onSetRecordingPolicy, { onNewPreparation(true) })
+					onDisarmPreparation, onSimulateLive, onOfflineSimulation, onSetRecordingPolicy, { onNewPreparation(true) }, onSetIgnoredTimeRanges)
 				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
 					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, { editLiveRoute = true })
 					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction,onSetRecordingPolicy) }

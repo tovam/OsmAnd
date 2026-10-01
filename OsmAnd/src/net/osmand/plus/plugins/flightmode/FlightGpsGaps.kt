@@ -18,7 +18,7 @@ internal fun flightGpsGaps(
     val count = recordedSampleCount.coerceIn(0, samples.size)
     if (count < 2) return emptyList()
     val positiveIntervals = (1 until count).mapNotNull { index ->
-        if (samples[index].timestampMillis <= 0L || samples[index - 1].timestampMillis <= 0L)
+        if (samples[index].excludedBefore || samples[index].timestampMillis <= 0L || samples[index - 1].timestampMillis <= 0L)
             return@mapNotNull null
         (samples[index].timestampMillis - samples[index - 1].timestampMillis)
             .takeIf { it > 0L }
@@ -27,6 +27,7 @@ internal fun flightGpsGaps(
     return (0 until count - 1).mapNotNull { index ->
         val from = samples[index]
         val to = samples[index + 1]
+        if (to.excludedBefore) return@mapNotNull null
         val interval = to.timestampMillis - from.timestampMillis
         val crossesLegBoundary = from.legIndex != to.legIndex
         val hasMissingFixes = median != null && from.timestampMillis > 0L && to.timestampMillis > 0L && interval > 0L &&
@@ -46,7 +47,7 @@ internal fun flightRouteSegments(
         val ranges = mutableListOf<IntRange>()
         var start = 0
         for (index in 1 until samples.size) {
-            if (samples[index].legIndex != samples[index - 1].legIndex) {
+            if (samples[index].excludedBefore || samples[index].legIndex != samples[index - 1].legIndex) {
                 ranges += start until index
                 start = index
             }
@@ -58,17 +59,21 @@ internal fun flightRouteSegments(
         gap.fromIndex.takeIf { samples.getOrNull(it) == gap.from && samples.getOrNull(it + 1) == gap.to }
     }.toSet()
     val segments = mutableListOf<FlightRouteSegment>()
-    var start = 0
-    var isGap = 0 in gapEdges
-    for (edge in 1 until samples.lastIndex) {
-        val edgeIsGap = edge in gapEdges
-        if (edgeIsGap != isGap) {
-            segments += FlightRouteSegment(start..edge, isGap)
-            start = edge
-            isGap = edgeIsGap
+    val starts = listOf(0) + (1 until samples.size).filter { samples[it].excludedBefore }
+    starts.forEachIndexed { chunk, first ->
+        val last = (starts.getOrNull(chunk + 1) ?: samples.size) - 1
+        var start = first
+        var isGap = first in gapEdges
+        for (edge in first + 1 until last) {
+            val edgeIsGap = edge in gapEdges
+            if (edgeIsGap != isGap) {
+                segments += FlightRouteSegment(start..edge, isGap)
+                start = edge
+                isGap = edgeIsGap
+            }
         }
+        segments += FlightRouteSegment(start..last, isGap)
     }
-    segments += FlightRouteSegment(start..samples.lastIndex, isGap)
     return segments
 }
 

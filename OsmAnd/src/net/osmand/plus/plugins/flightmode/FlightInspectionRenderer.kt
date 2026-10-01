@@ -21,7 +21,7 @@ internal class FlightInspectionRenderer {
     private var track: FlightTrip? = null
     private var originLatitude = Double.NaN
     private var originLongitude = Double.NaN
-    private var trackBuffer: java.nio.FloatBuffer? = null
+    private var trackBuffers: List<java.nio.FloatBuffer> = emptyList()
 
     init {
         fun shader(type: Int, source: String): Int {
@@ -77,18 +77,21 @@ internal class FlightInspectionRenderer {
             originLatitude = coordinates.centerLatitude
             originLongitude = coordinates.centerLongitude
             val samples = state.trip?.samples.orEmpty()
-            val route = ArrayList<Float>()
-            val stride = max(1, samples.size / 1000)
-            samples.forEachIndexed { i, s ->
-                if ((i % stride == 0 || i == samples.lastIndex) && s.altitudeMeters != null) {
-                    coordinates.toLocal(s.latitude, s.longitude, s.altitudeMeters).forEach {
-                        route.add(it)
+            trackBuffers = flightRouteSegments(samples, recorded = false).map { segment ->
+                val route = ArrayList<Float>()
+                val stride = max(1, samples.size / 1000)
+                for (i in segment.range) {
+                    val s = samples[i]
+                    if ((i % stride == 0 || i == segment.range.first || i == segment.range.last) && s.altitudeMeters != null) {
+                        coordinates.toLocal(s.latitude, s.longitude, s.altitudeMeters).forEach {
+                            route.add(it)
+                        }
                     }
                 }
+                buffer(route.toFloatArray())
             }
-            trackBuffer = buffer(route.toFloatArray())
         }
-        trackBuffer?.let { drawBuffer(it, GLES20.GL_LINE_STRIP, floatArrayOf(1f, 0.55f, 0.2f, 1f)) }
+        trackBuffers.forEach { drawBuffer(it, GLES20.GL_LINE_STRIP, floatArrayOf(1f, 0.55f, 0.2f, 1f)) }
         listOfNotNull(
                 state.original to floatArrayOf(1f, 0.55f, 0.2f, 1f),
                 state.estimated?.let { it to floatArrayOf(0.75f, 0.4f, 1f, 1f) },

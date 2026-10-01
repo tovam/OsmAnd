@@ -20,8 +20,10 @@ object FlightSampleInterpolator {
 		timestampMillis: Long?,
 		toleranceMillis: Long
 	): Double? {
-		if (trip == null || timestampMillis == null || !trip.hasUsableTimestamps) return null
-		val timed = trip.samples.withIndex().filter { it.value.timestampMillis > 0L }
+		if (trip == null || timestampMillis == null || !trip.hasUsableTimestamps ||
+			trip.samples.isEmpty() || trip.isTimeIgnored(timestampMillis)) return null
+		val timed = trip.recording().samples.withIndex().filter { it.value.timestampMillis > 0L }
+		fun visible(position: Double?): Double? = position?.takeIf { sampleAt(trip, it) != null }
 		if (timed.isEmpty()) return null
 		val firstTime = timed.minOf { it.value.timestampMillis }
 		val lastTime = timed.maxOf { it.value.timestampMillis }
@@ -38,22 +40,28 @@ object FlightSampleInterpolator {
 			if (lower.value.legIndex != upper.value.legIndex || lowerTime == upperTime ||
 				abs(upperTime - lowerTime) > FlightReplayEngine.MAX_INTERPOLATION_GAP_MILLIS
 			) {
-				return nearestPosition(timestampMillis, lower, upper)
+				return visible(nearestPosition(timestampMillis, lower, upper))
 			}
 			val fraction = (timestampMillis - lowerTime).toDouble() / (upperTime - lowerTime).toDouble()
-			return lower.index + (upper.index - lower.index) * fraction.coerceIn(0.0, 1.0)
+			return visible(lower.index + (upper.index - lower.index) * fraction.coerceIn(0.0, 1.0))
 		}
 
-		return timed.minByOrNull { abs(it.value.timestampMillis - timestampMillis) }?.index?.toDouble()
+		return visible(timed.minByOrNull { abs(it.value.timestampMillis - timestampMillis) }?.index?.toDouble())
 	}
 
 	fun positionAtProgress(trip: FlightTrip?, requestedProgress: Float): Double? {
 		val resolvedTrip = trip ?: return null
 		val samples = resolvedTrip.samples
 		if (samples.isEmpty()) return null
-		if (samples.size == 1) return 0.0
+		if (samples.size == 1) return if (resolvedTrip.recordedSource != null) samples.first().index.toDouble() else 0.0
 		val progress = requestedProgress.coerceIn(0f, 1f)
 		if (!resolvedTrip.hasUsableTimestamps) return (progress * samples.lastIndex).toDouble()
+		if (resolvedTrip.recordedSource != null) {
+			val visibleProgress = flightProgressOutsideIgnoredTime(resolvedTrip, progress, true)
+			val start = samples.first().timestampMillis
+			val target = start + ((samples.last().timestampMillis - start).toDouble() * visibleProgress).toLong()
+			return positionAtTimestamp(resolvedTrip, target, 0L)
+		}
 
 		val start = samples.first().timestampMillis
 		val end = samples.last().timestampMillis
@@ -83,8 +91,8 @@ object FlightSampleInterpolator {
 
 	fun sampleAt(trip: FlightTrip?, rawPosition: Double?): FlightSample? {
 		val resolvedTrip = trip ?: return null
-		val samples = resolvedTrip.samples
-		if (samples.isEmpty() || rawPosition == null || !rawPosition.isFinite()) return null
+		if (resolvedTrip.samples.isEmpty() || rawPosition == null || !rawPosition.isFinite()) return null
+		val samples = resolvedTrip.recording().samples
 		val position = rawPosition.coerceIn(0.0, samples.lastIndex.toDouble())
 		val lowerIndex = floor(position).toInt()
 		val upperIndex = ceil(position).toInt().coerceAtMost(samples.lastIndex)
@@ -93,17 +101,17 @@ object FlightSampleInterpolator {
 		val upper = samples[upperIndex]
 		val crossesRecordingGap = lower.timestampMillis > 0L && upper.timestampMillis > 0L &&
 			abs(upper.timestampMillis - lower.timestampMillis) > FlightReplayEngine.MAX_INTERPOLATION_GAP_MILLIS
-		if (lowerIndex == upperIndex || lower.legIndex != upper.legIndex || crossesRecordingGap) {
-			return if (fraction < 0.5f) lower else upper
-		}
-		return interpolateSamples(lower, upper, fraction)
+		val sample = if (lowerIndex == upperIndex || lower.legIndex != upper.legIndex || crossesRecordingGap) {
+			if (fraction < 0.5f) lower else upper
+		} else interpolateSamples(lower, upper, fraction)
+		return sample.takeUnless { resolvedTrip.isTimeIgnored(it.timestampMillis) }
 	}
 
 	fun progressAt(trip: FlightTrip?, position: Double?): Float? {
 		val resolvedTrip = trip ?: return null
 		val samples = resolvedTrip.samples
 		if (samples.isEmpty() || position == null) return null
-		if (samples.size == 1) return 0f
+		if (samples.size == 1) return if (sampleAt(resolvedTrip, position) != null) 0f else null
 		if (!resolvedTrip.hasUsableTimestamps) {
 			return (position / samples.lastIndex).toFloat().coerceIn(0f, 1f)
 		}

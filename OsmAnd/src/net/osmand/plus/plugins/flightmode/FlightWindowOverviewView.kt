@@ -380,7 +380,9 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 			var pathStarted = false
 			val step = (samples.size / MAXIMUM_TRACK_POINTS).coerceAtLeast(1)
 			samples.forEachIndexed { index, point ->
-				if (index % step != 0 && index != samples.lastIndex) return@forEachIndexed
+				if (point.excludedBefore) pathStarted = false
+				if (index % step != 0 && index != samples.lastIndex && !point.excludedBefore &&
+					samples.getOrNull(index + 1)?.excludedBefore != true) return@forEachIndexed
 				val x = centerX + (eastMeters(current.longitude, point.longitude, current.latitude) * pixelsPerMeter).toFloat()
 				val y = centerY - (northMeters(current.latitude, point.latitude) * pixelsPerMeter).toFloat()
 				if (!pathStarted) {

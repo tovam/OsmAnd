@@ -568,10 +568,10 @@ class FlightJourneyStore(private val context: Context) {
 		put("simulation", journey.simulation)
 		put("createdAtMillis", journey.createdAtMillis)
 		put("updatedAtMillis", journey.updatedAtMillis)
-		put("tripFingerprint", FlightTripFingerprint.create(journey.trip))
+		put("tripFingerprint", FlightTripFingerprint.create(journey.trip.recording()))
 		put("plan", planToJson(journey.plan))
 		put("battery", JSONArray().apply { journey.batteryHistory.forEach { put(JSONArray(listOf(it.timeMillis, it.percent, it.charging))) } })
-		put("trip", tripToJson(journey.trip))
+		put("trip", tripToJson(journey.trip.recording()))
 		put("offlineAssets", offlineAssetsToJson(journey.offlineAssets))
 		put("offlineRequest", offlineAssetsToJson(journey.offlineRequest))
 		put("flightSpans", JSONArray().apply {
@@ -579,6 +579,7 @@ class FlightJourneyStore(private val context: Context) {
 				put(JSONObject().put("start", span.startProgress).put("end", span.endProgress))
 			}
 		})
+		put("ignoredTimeRanges", flightTimeRangesToJson(journey.ignoredTimeRanges))
 		put("photos", JSONArray().apply {
 			journey.photos.forEach { photo ->
 				put(JSONObject().apply {
@@ -665,6 +666,7 @@ class FlightJourneyStore(private val context: Context) {
 			plan = planFromJson(root.optJSONObject("plan")),
 			trip = trip,
 			flightSpans = spans,
+			ignoredTimeRanges = flightTimeRangesFromJson(root.optJSONArray("ignoredTimeRanges")),
 			photos = photos,
 			offlineAssets = offlineAssetsFromJson(root.optJSONObject("offlineAssets")),
 			offlineRequest = offlineAssetsFromJson(root.optJSONObject("offlineRequest")),
@@ -959,7 +961,7 @@ class FlightJourneyStore(private val context: Context) {
 			append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 			append("<gpx version=\"1.1\" creator=\"OsmAnd Smart Flight\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:osmandflight=\"https://osmand.net/xmlschemas/flight/1\">\n")
 			append("  <trk><name>").append(xmlEscape(journey.name)).append("</name>\n")
-			journey.trip.samples.groupBy { it.legIndex }.values.forEach { samples ->
+			journey.trip.recording().samples.groupBy { it.legIndex }.values.forEach { samples ->
 				append("    <trkseg>\n")
 				samples.forEach { sample ->
 					append("      <trkpt lat=\"").append(sample.latitude).append("\" lon=\"").append(sample.longitude).append("\">\n")

@@ -218,7 +218,9 @@ data class FlightSample(
 	val satellitesFound: Int? = null,
 	val soundDb: Float? = null,
 	val soundSpectrum: List<Float>? = null,
-	val vibrationHz: Float? = null
+	val vibrationHz: Float? = null,
+	/** Display-only break before this point; never written into the original recording. */
+	val excludedBefore: Boolean = false
 )
 
 data class FlightLeg(
@@ -237,7 +239,10 @@ data class FlightTrip(
 	val legs: List<FlightLeg>,
 	val hasUsableTimestamps: Boolean,
 	val totalDistanceMeters: Double,
-	val sourceDescription: String
+	val sourceDescription: String,
+	/** A filtered replay keeps canonical photo positions in this immutable original trip. */
+	val recordedSource: FlightTrip? = null,
+	val ignoredTimeRanges: List<FlightTimeRange> = emptyList()
 ) {
 	val durationMillis: Long?
 		get() {
@@ -314,7 +319,8 @@ fun stepFlightReplayProgress(trip: FlightTrip?, currentProgress: Float, deltaMil
 			(if (deltaMillis > 0L) 1.0 else -1.0) / resolvedTrip.samples.lastIndex.toDouble()
 		else -> 0.0
 	}
-	return (currentProgress.toDouble() + deltaProgress).toFloat().coerceIn(0f, 1f)
+	val next = (currentProgress.toDouble() + deltaProgress).toFloat().coerceIn(0f, 1f)
+	return flightProgressOutsideIgnoredTime(resolvedTrip, next, deltaMillis >= 0L)
 }
 
 private const val MINIMUM_REPLAY_TIMELINE_MILLIS = 5_000L
@@ -762,7 +768,8 @@ data class FlightJourney(
 	val offlineAssets: FlightOfflineAssets = FlightOfflineAssets(),
 	val batteryHistory: List<FlightBatteryPoint> = emptyList(),
 	val offlineRequest: FlightOfflineAssets = FlightOfflineAssets(),
-	val simulation: Boolean = false
+	val simulation: Boolean = false,
+	val ignoredTimeRanges: List<FlightTimeRange> = emptyList()
 )
 
 /** Ground point receiving an additional satellite-detail ring. */
@@ -915,6 +922,9 @@ data class FlightUiState(
 	val recordingPolicy: FlightRecordingPolicy = FlightRecordingPolicy(),
 	val showTrackPoints: Boolean = false,
 	val flightSpans: List<FlightSpan> = emptyList(),
+	val ignoredTimeRanges: List<FlightTimeRange> = emptyList(),
+	val ignoredTimeRangesBusy: Boolean = false,
+	val ignoredTimeRangesError: String? = null,
 	val pendingFlightStartProgress: Float? = null,
 	val journeyId: String? = null,
 	val journeyName: String = "",
