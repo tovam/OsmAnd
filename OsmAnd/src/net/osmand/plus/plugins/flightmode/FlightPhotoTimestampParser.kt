@@ -2,6 +2,7 @@ package net.osmand.plus.plugins.flightmode
 
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.TimeZone
 
 /** Extracts the local capture time used by common Android camera file names. */
 internal object FlightPhotoTimestampParser {
@@ -12,7 +13,12 @@ internal object FlightPhotoTimestampParser {
 			"((?:[01]\\d|2[0-3]))[-_.:]?([0-5]\\d)[-_.:]?([0-5]\\d)"
 	)
 
-	fun parse(fileName: String): Long? {
+	fun parse(fileName: String, utcOffsetMinutes: Int? = null): Long? {
+        val offset = utcOffsetMinutes?.takeIf { it in -720..840 } ?: return null
+        return parseLocal(fileName)?.let { it - offset * 60_000L }
+    }
+
+    fun parseLocal(fileName: String): Long? {
 		val encoded = cameraTimestamp.find(fileName)
 			?.groupValues
 			?.drop(1)
@@ -21,6 +27,7 @@ internal object FlightPhotoTimestampParser {
 		return runCatching {
 			SimpleDateFormat("yyyyMMddHHmmss", Locale.US).apply {
 				isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
 			}.parse(encoded)?.time
 		}.getOrNull()
 	}

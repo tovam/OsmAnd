@@ -1065,6 +1065,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	private fun abandonJournalNavigationWork() {
         pointingDemand = null
+        photoTimeUndo = emptyMap()
+        uiState = uiState.copy(photoTimeUndoAvailable = false)
 		// Leaving invalidates old completions even if loading the next flight fails.
 		// Do not leave the retained flight with spinners whose owners can no longer clear them.
 		simulationJob?.cancel()
@@ -1639,13 +1641,49 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
-	fun stageReplayPhotos(uris: List<Uri>) {
+    private var photoTimeUndo = emptyMap<String, Pair<FlightPhotoAttachment, Long?>>()
+
+    fun correctPhotoTimes(ids: Set<String>, previousOffset: Int, targetOffset: Int) {
+        if (previousOffset !in -720..840 || targetOffset !in -720..840) return
+        val before = (uiState.photos + uiState.pendingPhotos).filter { it.id in ids && it.timestampSource != FlightPhotoTimestampSource.LIVE_CAPTURE }
+        val corrected = before.mapNotNull { photo ->
+            val timestamp = runCatching { FlightPhotoTime.correctedTimestamp(photo, previousOffset, targetOffset) }.getOrNull() ?: return@mapNotNull null
+            val position = journeyStore.matchPhotoPosition(uiState.trip, timestamp)
+            photo.id to photo.copy(timestampMillis = timestamp,
+                captureUtcOffsetMinutes = targetOffset, captureLocalTimestampMillis = timestamp + targetOffset * 60_000L,
+                matchedSamplePosition = position)
+        }.toMap()
+        if (corrected.isEmpty()) return
+        exitWindowPhotoEditing()
+        photoTimeUndo = before.filter { it.id in corrected }.associate { it.id to (it to corrected[it.id]?.timestampMillis) }
+        uiState = uiState.copy(photos = uiState.photos.map { corrected[it.id] ?: it }.sortedWith(PHOTO_TIME_COMPARATOR),
+            pendingPhotos = uiState.pendingPhotos.map { corrected[it.id] ?: it }.sortedWith(PHOTO_TIME_COMPARATOR),
+            photoTimeUndoAvailable = true, journeyDirty = true,
+            journeyMessage = app.getString(net.osmand.plus.R.string.flight_photo_time_applied, corrected.size))
+        schedulePhotoPersistence()
+    }
+
+    fun undoPhotoTimeCorrection() {
+        fun restored(photo: FlightPhotoAttachment): FlightPhotoAttachment {
+            val (old, applied) = photoTimeUndo[photo.id] ?: return photo
+            if (photo.timestampMillis != applied) return photo
+            return photo.copy(timestampMillis = old.timestampMillis, matchedSamplePosition = old.matchedSamplePosition,
+                captureUtcOffsetMinutes = old.captureUtcOffsetMinutes, captureLocalTimestampMillis = old.captureLocalTimestampMillis)
+        }
+        uiState = uiState.copy(photos = uiState.photos.map(::restored).sortedWith(PHOTO_TIME_COMPARATOR),
+            pendingPhotos = uiState.pendingPhotos.map(::restored).sortedWith(PHOTO_TIME_COMPARATOR),
+            photoTimeUndoAvailable = false, journeyDirty = true)
+        photoTimeUndo = emptyMap()
+        schedulePhotoPersistence()
+    }
+
+	fun stageReplayPhotos(uris: List<Uri>, confirmedUtcOffsetMinutes: Int) {
 		if (uris.isEmpty()) return
 		val token = journalOperations.capture()
 		val sourceTrip = uiState.trip
 		viewModelScope.launch {
 			journalOperations.loadOwned(token,
-				load = { journeyStore.importPhotos(uris, sourceTrip) },
+				load = { journeyStore.importPhotos(uris, sourceTrip, confirmedUtcOffsetMinutes) },
 				publish = { photos ->
 					uiState = uiState.copy(
 						pendingPhotos = (uiState.pendingPhotos + photos).sortedWith(PHOTO_TIME_COMPARATOR),

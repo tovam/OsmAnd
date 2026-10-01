@@ -65,8 +65,11 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private val openTripLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
 		if (uri != null) viewModel.loadSource(uri)
 	}
+	private var pendingPhotoImport by mutableStateOf<List<android.net.Uri>>(emptyList())
+    private var pendingPhotoImportJourney: String? = null
 	private val openPhotosLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-		viewModel.stageReplayPhotos(uris)
+		pendingPhotoImportJourney = viewModel.uiState.journeyId
+        pendingPhotoImport = uris
 	}
 	private val exportJourneyLauncher = registerForActivityResult(
 		ActivityResultContracts.CreateDocument("application/zip")
@@ -104,6 +107,14 @@ class FlightModeFragment : BaseFullScreenFragment() {
 			layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 			setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 			setContent {
+                if (pendingPhotoImport.isNotEmpty()) FlightPhotoTimeDialog(
+                    onDismiss = { pendingPhotoImport = emptyList() },
+                    onApply = { _, offset, _ ->
+                        if (viewModel.uiState.journeyId == pendingPhotoImportJourney)
+                            viewModel.stageReplayPhotos(pendingPhotoImport, offset)
+                        pendingPhotoImport = emptyList()
+                    },
+                )
 				if (!showFlightCamera) FlightModeScreen(
 					state = viewModel.uiState,
 					mapView = app.osmandMap.mapView,
@@ -173,6 +184,8 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSetPhotoSources = viewModel::setPhotoSources,
 					onPhotoAction = ::handlePhotoAction,
 					onImportPhotos = { openPhotosLauncher.launch(arrayOf("image/*")) },
+                    onCorrectPhotoTimes = viewModel::correctPhotoTimes,
+                    onUndoPhotoTimeCorrection = viewModel::undoPhotoTimeCorrection,
 					onValidatePhotos = viewModel::validatePendingPhotos,
 					onDiscardPhotos = viewModel::discardPendingPhotos,
 					onSelectPhoto = viewModel::togglePhotoSelection,

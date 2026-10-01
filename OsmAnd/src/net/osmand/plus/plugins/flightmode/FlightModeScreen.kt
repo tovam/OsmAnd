@@ -219,6 +219,8 @@ fun FlightModeScreen(
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
 	onPreparePhotoCalibration: (String) -> Unit,
+    onCorrectPhotoTimes: (Set<String>, Int, Int) -> Unit = { _, _, _ -> },
+    onUndoPhotoTimeCorrection: () -> Unit = {},
     onRequestPointingTerrain: (Double, Double) -> Unit,
 	onOpenPhotoOnMap: (String) -> Unit,
 	onOpenPhotoInWindow: (String) -> Unit,
@@ -501,7 +503,8 @@ fun FlightModeScreen(
 					onSetPhotoCalibration = onSetPhotoCalibration,
 					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onPreparePhotoCalibration = onPreparePhotoCalibration,
-                    onRequestPointingTerrain = onRequestPointingTerrain, onRetryTerrain = onRetryTerrain
+                    onRequestPointingTerrain = onRequestPointingTerrain, onRetryTerrain = onRetryTerrain,
+                    onCorrectPhotoTimes = onCorrectPhotoTimes, onUndoPhotoTimeCorrection = onUndoPhotoTimeCorrection
 				)
 				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload)
 			}
@@ -1610,8 +1613,14 @@ private fun PhotoScreen(
 	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onPreparePhotoCalibration: (String) -> Unit,
-    onRequestPointingTerrain: (Double, Double) -> Unit, onRetryTerrain: () -> Unit
+    onRequestPointingTerrain: (Double, Double) -> Unit, onRetryTerrain: () -> Unit,
+    onCorrectPhotoTimes: (Set<String>, Int, Int) -> Unit, onUndoPhotoTimeCorrection: () -> Unit
 ) {
+    var timeDialog by rememberSaveable(state.journeyId) { mutableStateOf(false) }
+    if (timeDialog) FlightPhotoTimeDialog(state.photos + state.pendingPhotos,
+        onDismiss = { timeDialog = false }, onApply = { previous, target, ids ->
+            onCorrectPhotoTimes(ids, previous, target); timeDialog = false
+        })
 	var editorId by remember { mutableStateOf<String?>(null) }
 	var editorPointingMode by remember { mutableStateOf(false) }
 	var fullScreenPhotoId by remember { mutableStateOf<String?>(null) }
@@ -1633,6 +1642,10 @@ private fun PhotoScreen(
 			}
 			CompactAction(stringResource(R.string.flight_mode_add_gallery_photos), FlightBlue, onImportPhotos)
 		}
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (all.isNotEmpty()) TextButton(onClick = { timeDialog = true }) { Text(stringResource(R.string.flight_photo_time_batch)) }
+            if (state.photoTimeUndoAvailable) TextButton(onClick = onUndoPhotoTimeCorrection) { Text(stringResource(R.string.flight_photo_time_undo)) }
+        }
 		LazyColumn(Modifier.weight(1f)) {
 			state.journeyMessage?.let { message ->
 				item { Text(message, color = FlightGreen, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp)) }

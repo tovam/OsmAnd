@@ -384,6 +384,9 @@ data class FlightPhotoAttachment(
 	/** Zero-based, continuous point position. The UI displays this value plus one. */
 	val matchedSamplePosition: Double?,
 	val timestampSource: FlightPhotoTimestampSource? = null,
+    val captureUtcOffsetMinutes: Int? = null,
+    /** Local clock encoded in UTC solely to preserve its fields for timezone corrections. */
+    val captureLocalTimestampMillis: Long? = null,
 	/** Vertical camera field of view inferred from EXIF, after applying EXIF orientation. */
 	val cameraVerticalFieldOfViewDegrees: Float? = null,
 	val rotationDegrees: Float = 0f,
@@ -853,6 +856,7 @@ data class FlightRecordingPolicy(
 }
 
 data class FlightUiState(
+    val photoTimeUndoAvailable: Boolean = false,
 	val activeRecording: FlightLiveState = FlightLiveState(),
 	val liveTimeline: FlightTrip? = null,
 	val browsingLiveTimeline: Boolean = false,

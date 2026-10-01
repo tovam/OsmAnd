@@ -1,5 +1,6 @@
 package net.osmand.plus.plugins.flightmode
 
+import androidx.exifinterface.media.ExifInterface
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -26,7 +27,8 @@ import java.util.zip.ZipOutputStream
 class FlightJourneyStore(private val context: Context) {
 	private data class DetectedPhotoTimestamp(
 		val timestampMillis: Long,
-		val source: FlightPhotoTimestampSource
+		val source: FlightPhotoTimestampSource,
+        val utcOffsetMinutes: Int? = null, val localTimestampMillis: Long? = null
 	)
 
 	private val journeysDirectory = File(context.filesDir, JOURNEYS_DIRECTORY).also { it.mkdirs() }
@@ -424,7 +426,7 @@ class FlightJourneyStore(private val context: Context) {
 		} ?: throw IOException("Impossible de créer l’archive")
 	}
 
-	fun importPhotos(uris: List<Uri>, trip: FlightTrip?): List<FlightPhotoAttachment> = uris.mapNotNull { uri ->
+	fun importPhotos(uris: List<Uri>, trip: FlightTrip?, confirmedUtcOffsetMinutes: Int): List<FlightPhotoAttachment> = uris.mapNotNull { uri ->
 		var ownedCopy: File? = null
 		runCatching {
 			val originalName = displayName(uri) ?: "photo.jpg"
@@ -438,7 +440,7 @@ class FlightJourneyStore(private val context: Context) {
 			context.contentResolver.openInputStream(uri)?.buffered()?.use { input ->
 				destination.outputStream().buffered().use { output -> input.copyTo(output) }
 			} ?: throw IOException("Photo inaccessible")
-			val detectedTimestamp = photoTimestamp(uri, destination, originalName)
+			val detectedTimestamp = photoTimestamp(uri, destination, originalName, confirmedUtcOffsetMinutes)
 			val timestamp = detectedTimestamp?.timestampMillis
 			FlightPhotoAttachment(
 				id = UUID.randomUUID().toString(),
@@ -447,6 +449,8 @@ class FlightJourneyStore(private val context: Context) {
 				timestampMillis = timestamp,
 				matchedSamplePosition = matchPhotoPosition(trip, timestamp),
 				timestampSource = detectedTimestamp?.source,
+                captureUtcOffsetMinutes = detectedTimestamp?.utcOffsetMinutes,
+                captureLocalTimestampMillis = detectedTimestamp?.localTimestampMillis,
 				cameraVerticalFieldOfViewDegrees = FlightPhotoPerspective.detectVerticalFieldOfViewDegrees(destination)
 			)
 		}.onFailure { ownedCopy?.delete() }.getOrNull()
@@ -554,6 +558,8 @@ class FlightJourneyStore(private val context: Context) {
 					put("storageName", photoStorageNames[photo.id] ?: File(photo.localPath).name)
 					putOptional("timestampMillis", photo.timestampMillis)
 					putOptional("timestampSource", photo.timestampSource?.name)
+                    putOptional("captureUtcOffsetMinutes", photo.captureUtcOffsetMinutes)
+                    putOptional("captureLocalTimestampMillis", photo.captureLocalTimestampMillis)
 					putOptional("matchedSamplePosition", photo.matchedSamplePosition)
 					putOptional("cameraVerticalFieldOfViewDegrees", photo.cameraVerticalFieldOfViewDegrees)
 					put("rotationDegrees", normalizePhotoRotation(photo.rotationDegrees))
@@ -594,7 +600,9 @@ class FlightJourneyStore(private val context: Context) {
 					timestampSource = json.optString("timestampSource").takeIf(String::isNotBlank)?.let { value ->
 						runCatching { FlightPhotoTimestampSource.valueOf(value) }.getOrNull()
 					},
-					cameraVerticalFieldOfViewDegrees = json.optNullableDouble("cameraVerticalFieldOfViewDegrees")
+					captureUtcOffsetMinutes = json.optNullableLong("captureUtcOffsetMinutes")?.toInt()?.takeIf { it in -720..840 },
+                    captureLocalTimestampMillis = json.optNullableLong("captureLocalTimestampMillis"),
+                    cameraVerticalFieldOfViewDegrees = json.optNullableDouble("cameraVerticalFieldOfViewDegrees")
 						?.toFloat()
 						?.takeIf { it.isFinite() }
 						?.coerceIn(
@@ -969,11 +977,18 @@ class FlightJourneyStore(private val context: Context) {
 			?.takeIf(String::isNotBlank)
 	}
 
-	private fun photoTimestamp(uri: Uri, copiedFile: File, originalName: String): DetectedPhotoTimestamp? {
-		runCatching { MediaMetadataUtils.getPhotoCreationTime(copiedFile) }
-			.getOrNull()?.takeIf { it > 0L }?.let {
-				return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.EXIF)
-			}
+    private fun photoExifTimestamp(file: File, confirmedOffset: Int?): DetectedPhotoTimestamp? = runCatching {
+        val exif = ExifInterface(file.absolutePath)
+        val tag = listOf("DateTimeOriginal" to "OffsetTimeOriginal", "DateTimeDigitized" to "OffsetTimeDigitized", "DateTime" to "OffsetTime")
+            .firstOrNull { exif.getAttribute(it.first) != null } ?: return@runCatching null
+        val raw = exif.getAttribute(tag.first) ?: return@runCatching null
+        val wall = FlightPhotoTimestampParser.parseLocal(raw.replaceFirst(Regex("^(\\d{4}):(\\d{2}):(\\d{2})"), "$1-$2-$3")) ?: return@runCatching null
+        val offset = exif.getAttribute(tag.second)?.let(FlightPhotoTime::parseOffset) ?: confirmedOffset ?: return@runCatching null
+        DetectedPhotoTimestamp(wall - offset * 60_000L, FlightPhotoTimestampSource.EXIF, offset, wall)
+    }.getOrNull()
+
+	private fun photoTimestamp(uri: Uri, copiedFile: File, originalName: String, confirmedUtcOffsetMinutes: Int): DetectedPhotoTimestamp? {
+        photoExifTimestamp(copiedFile, confirmedUtcOffsetMinutes)?.let { return it }
 		val mediaDates = runCatching {
 			context.contentResolver.query(
 				uri,
@@ -999,8 +1014,8 @@ class FlightJourneyStore(private val context: Context) {
 		mediaDates?.first?.takeIf { it > 0L }?.let {
 			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.MEDIA_CAPTURE)
 		}
-		FlightPhotoTimestampParser.parse(originalName)?.let {
-			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_NAME)
+		FlightPhotoTimestampParser.parse(originalName, confirmedUtcOffsetMinutes)?.let {
+			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_NAME, confirmedUtcOffsetMinutes, FlightPhotoTimestampParser.parseLocal(originalName))
 		}
 		val documentModified = runCatching {
 			context.contentResolver.query(
@@ -1027,10 +1042,7 @@ class FlightJourneyStore(private val context: Context) {
 		originalName: String,
 		trip: FlightTrip?
 	): DetectedPhotoTimestamp? {
-		runCatching { MediaMetadataUtils.getPhotoCreationTime(file) }
-			.getOrNull()?.takeIf { it > 0L }?.let {
-				return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.EXIF)
-			}
+        photoExifTimestamp(file, null)?.let { return it }
 		FlightPhotoTimestampParser.parse(originalName)?.let {
 			return DetectedPhotoTimestamp(it, FlightPhotoTimestampSource.FILE_NAME)
 		}

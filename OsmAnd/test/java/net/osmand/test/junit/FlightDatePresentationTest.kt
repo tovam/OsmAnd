@@ -1,5 +1,8 @@
 package net.osmand.test.junit
 
+import net.osmand.plus.plugins.flightmode.FlightPhotoTime
+import net.osmand.plus.plugins.flightmode.FlightPhotoTimestampParser
+import net.osmand.plus.plugins.flightmode.FlightPhotoAttachment
 import java.time.Instant
 import java.util.Locale
 import java.util.TimeZone
@@ -17,6 +20,32 @@ class FlightDatePresentationTest {
     private val departure = time("2026-09-29T22:00:00Z")
     private val arrival = time("2026-09-30T02:00:00Z")
     private val schedule = FlightPreparation(departureMillis = departure, arrivalMillis = arrival)
+
+    @Test
+    fun confirmedPhotoOffsetsDoNotDependOnThePhoneTimezoneAndCorrectionsNeverCompound() {
+        val old = java.util.TimeZone.getDefault()
+        try {
+            val filename = "IMG_20260930_123000.jpg"
+            assertNull(FlightPhotoTimestampParser.parse(filename))
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Pacific/Honolulu"))
+            val first = FlightPhotoTimestampParser.parse(filename, 330)!!
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Tokyo"))
+            assertEquals(first, FlightPhotoTimestampParser.parse(filename, 330)!!)
+            assertEquals(345, FlightPhotoTime.parseOffset("+05:45")!!)
+            assertEquals(-210, FlightPhotoTime.parseOffset("-03:30")!!)
+            assertNull(FlightPhotoTime.parseOffset("+14:15"))
+            assertNull(FlightPhotoTime.parseOffset("-05:60"))
+            assertNull(FlightPhotoTimestampParser.parse("IMG_20260230_123000.jpg", 0))
+            val photo = FlightPhotoAttachment("p", filename, "synthetic", first, null,
+                captureUtcOffsetMinutes = 330, captureLocalTimestampMillis = FlightPhotoTimestampParser.parseLocal(filename))
+            val corrected = FlightPhotoTime.correctedTimestamp(photo, 0, 120)!!
+            assertEquals(first + 210 * 60_000L, corrected)
+            assertEquals(corrected, FlightPhotoTime.correctedTimestamp(photo.copy(timestampMillis = corrected,
+                captureUtcOffsetMinutes = 120), 0, 120)!!)
+            assertEquals(first, FlightPhotoTime.correctedTimestamp(photo.copy(timestampMillis = corrected,
+                captureUtcOffsetMinutes = 120), 0, 330)!!)
+        } finally { java.util.TimeZone.setDefault(old) }
+    }
 
     @Test
     fun recordedFlightUsesActualTimesInsteadOfSchedule() {

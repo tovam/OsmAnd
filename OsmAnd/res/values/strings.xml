@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_photo_time_confirm">Confirm photo capture UTC offset</string>
+    <string name="flight_photo_time_batch">Correct photo UTC offsets</string>
+    <string name="flight_photo_time_import_help">Choose the offset used when the photos were taken. The phone’s current offset is only a suggested value. Dates with an explicit metadata offset remain unchanged.</string>
+    <string name="flight_photo_time_batch_help">Select photos and check their new UTC times. Saved capture offsets are used; for older photos, enter the previous offset. GPS associations will be recalculated.</string>
+    <string name="flight_photo_time_previous_offset">Previous UTC offset for older photos</string>
+    <string name="flight_photo_time_capture_offset">Capture UTC offset</string>
+    <string name="flight_photo_time_offset_help">Numeric offset, for example +02:00, -05:00 or +05:30</string>
+    <string name="flight_photo_time_unavailable">Live capture or no recoverable photo date</string>
+    <string name="flight_photo_time_apply">Confirm and apply</string>
+    <string name="flight_photo_time_applied">UTC offset corrected for %1$d photos. GPS associations updated.</string>
+    <string name="flight_photo_time_undo">Undo time correction</string>
     <string name="flight_pointing_blocked">Terrain unavailable. Last click retained.</string>
     <string name="flight_pointing_retry">Retry</string>
     <string name="flight_photo_alignment_approximate">Manual alignment · approximate position</string>
