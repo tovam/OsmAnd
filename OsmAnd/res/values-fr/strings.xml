@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+	<string name="fork_app_update_status_title">Version</string>
+	<string name="fork_app_updates_title">Mises à jour</string>
+	<string name="fork_app_updates_summary">Vérifier les releases de ton fork : tovam/OsmAnd.</string>
+	<string name="fork_app_update_check">Vérifier les mises à jour</string>
+	<string name="fork_app_update_open">Ouvrir la release sur GitHub</string>
+	<string name="fork_app_update_installed">Version installée : %1$s</string>
+	<string name="fork_app_update_checking">Vérification de ton fork…</string>
+	<string name="fork_app_update_available">%1$s est disponible. Version installée : %2$s.</string>
+	<string name="fork_app_update_current">Ton fork est à jour. Version installée : %1$s.</string>
+	<string name="fork_app_update_error">Impossible de vérifier les releases : %1$s</string>
+	<string name="fork_app_update_notes">Nouveautés</string>
+	<string name="fork_app_update_source">Source des releases</string>
+	<string name="fork_app_update_rate_limit">Limite de requêtes GitHub atteinte. Réessaie plus tard.</string>
+	<string name="fork_app_update_http_error">GitHub a répondu HTTP %1$d.</string>
+	<string name="fork_app_update_version_error">Impossible de lire la version installée.</string>
+	<string name="fork_app_update_response_error">Impossible de lire la liste des releases.</string>
+	<string name="fork_app_update_network_error">Impossible de joindre GitHub. Vérifie ta connexion et réessaie.</string>
+
 	<string name="flight_pointing_preparing">Préparation du pointage sur le relief visible…</string>
 	<string name="flight_pointing_ready">Pointage prêt</string>
 	<string name="flight_pointing_selecting">Localisation du point…</string>

@@ -1,3 +1,2 @@
-- Automatically detect flights including taxiing; compress ground time with small timeline separators.
-- Schedule several flights in one journey, use sparse GPS during layovers and stop after the final stable arrival.
-- Keep original GPS and photos; preserve manual ignored periods and allow restoring automatically hidden time.
+- Dedicated update settings check releases from tovam/OsmAnd and compare them with the installed build.
+- Show release notes and open the newer release directly on GitHub.

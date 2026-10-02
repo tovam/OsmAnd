@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+	<string name="fork_app_update_status_title">Version</string>
+	<string name="fork_app_updates_title">Application updates</string>
+	<string name="fork_app_updates_summary">Check releases from your fork: tovam/OsmAnd.</string>
+	<string name="fork_app_update_check">Check for updates</string>
+	<string name="fork_app_update_open">Open release on GitHub</string>
+	<string name="fork_app_update_installed">Installed version: %1$s</string>
+	<string name="fork_app_update_checking">Checking your fork…</string>
+	<string name="fork_app_update_available">%1$s is available. Installed: %2$s.</string>
+	<string name="fork_app_update_current">Your fork is up to date. Installed: %1$s.</string>
+	<string name="fork_app_update_error">Unable to check releases: %1$s</string>
+	<string name="fork_app_update_notes">Release notes</string>
+	<string name="fork_app_update_source">Release source</string>
+	<string name="fork_app_update_rate_limit">GitHub request limit reached. Try again later.</string>
+	<string name="fork_app_update_http_error">GitHub returned HTTP %1$d.</string>
+	<string name="fork_app_update_version_error">Unable to read the installed version.</string>
+	<string name="fork_app_update_response_error">Unable to read the release list.</string>
+	<string name="fork_app_update_network_error">Could not reach GitHub. Check your connection and try again.</string>
+
     <string name="flight_automatic_times">Detect flights automatically</string>
     <string name="flight_automatic_times_help">Flights include taxiing, from departure at rest to the final stop. Ground time is compressed. Uncertain recordings stay visible. Manual ignored periods take priority.</string>
     <string name="flight_automatic_hidden">Hidden automatically</string>

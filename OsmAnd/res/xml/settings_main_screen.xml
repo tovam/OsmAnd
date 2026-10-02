@@ -23,6 +23,15 @@
 		tools:icon="@drawable/ic_action_stars" />
 
 	<Preference
+		android:key="app_updates_settings"
+		android:layout="@layout/preference_with_descr"
+		android:persistent="false"
+		android:title="@string/fork_app_updates_title"
+		android:summary="@string/fork_app_updates_summary"
+		app:fragment="net.osmand.plus.settings.fragments.AppUpdatesSettingsFragment"
+		tools:icon="@drawable/ic_action_update" />
+
+	<Preference
 		android:layout="@layout/divider_half_item_with_background"
 		android:selectable="false" />
 
