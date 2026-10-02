@@ -41,6 +41,7 @@ internal fun FlightIgnoredTimesDialog(
             state.plan.preparation,
             state.automaticFlightTimes,
             state.restoredTimeRanges,
+            state.ignoredTimeRanges,
         ) {
             if (state.automaticFlightTimes)
                 subtractFlightTimeRanges(
@@ -48,7 +49,7 @@ internal fun FlightIgnoredTimesDialog(
                         source,
                         state.plan.preparation ?: FlightPreparation(),
                     ),
-                    state.restoredTimeRanges,
+                    state.restoredTimeRanges + state.ignoredTimeRanges,
                 )
             else emptyList()
         }
@@ -229,7 +230,12 @@ internal fun FlightIgnoredTimesDialog(
                         TextButton(
                             enabled = !busy,
                             onClick = {
-                                change(state.ignoredTimeRanges.filterIndexed { i, _ -> i != index })
+                                onChange(
+                                    state.ignoredTimeRanges.filterIndexed { i, _ -> i != index },
+                                    state.automaticFlightTimes,
+                                    if (state.automaticFlightTimes) state.restoredTimeRanges + range
+                                    else state.restoredTimeRanges,
+                                )
                             },
                         ) {
                             Text(
