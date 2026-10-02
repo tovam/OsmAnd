@@ -1,6 +1,8 @@
 package net.osmand.test.junit
 
 import kotlin.math.abs
+import net.osmand.plus.plugins.flightmode.FlightScheduledLeg
+import net.osmand.plus.plugins.flightmode.replayFlightTrip
 import net.osmand.plus.plugins.flightmode.FlightLiveTimeline
 import net.osmand.plus.plugins.flightmode.FlightOfflinePreparation
 import net.osmand.plus.plugins.flightmode.FlightPlan
@@ -163,6 +165,26 @@ class FlightWaypointPlanTest {
             assertNull(it.horizontalAccuracyMeters)
             assertNull(it.satellitesUsed)
         }
+    }
+
+    @Test
+    fun explicitFlightsKeepTheirRealDepartureArrivalAndLayoverInCompressedFuture() {
+        val start = 1800000000000L
+        val fix = sample(time = start, longitude = 0.0)
+        val plan = FlightPlan(listOf(FlightStop("A", 0.0, 0.0), FlightStop("B", 0.0, 10.0), FlightStop("C", 0.0, 15.0)),
+            preparation = FlightPreparation(departureMillis = start, arrivalMillis = start + 3600000,
+                additionalFlights = listOf(FlightScheduledLeg(start + 18000000, start + 21600000))))
+        val raw = FlightLiveTimeline.build(plan, recordedFlightTrip("Synthetic", listOf(fix)), fix)
+        val dwell = raw.samples.filter { it.speedMetersPerSecond == 0f && kotlin.math.abs(it.longitude - 10.0) < .001 }
+        assertTrue(dwell.last().timestampMillis - dwell.first().timestampMillis >= 14340000)
+        assertEquals(start + 21600000, raw.samples.last().timestampMillis)
+        val compressed = replayFlightTrip(raw, emptyList())
+        assertTrue(compressed.durationMillis!! < 7500000)
+        assertEquals(2, compressed.legs.size)
+        val duringLayover = fix.copy(timestampMillis = start + 10800000, longitude = 10.0, speedMetersPerSecond = 0f)
+        val continuation = FlightLiveTimeline.build(plan, recordedFlightTrip("Synthetic", listOf(duringLayover)), duringLayover)
+        assertTrue(continuation.samples.any { it.timestampMillis == start + 18000000 && it.speedMetersPerSecond == 0f })
+        assertEquals(start + 21600000, continuation.samples.last().timestampMillis)
     }
 
     private fun sample(time: Long = 1_000_000L, longitude: Double): FlightSample =

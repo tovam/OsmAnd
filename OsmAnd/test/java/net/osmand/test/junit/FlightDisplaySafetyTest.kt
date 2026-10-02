@@ -149,8 +149,8 @@ class FlightDisplaySafetyTest {
         assertEquals(FlightTrackingPhase.WAITING, waiting.phase)
         var confirmed = waiting.confirmAirborne(firstFix, firstFix.timestampMillis, config)
         assertEquals(FlightTrackingPhase.AIRBORNE, confirmed.phase)
-        for (second in 1..301) {
-            val fix = sample(firstFix.timestampMillis + second * 1000, speed = 5f)
+        for (second in 1..330) {
+            val fix = sample(firstFix.timestampMillis + second * 1000, speed = 0f)
             confirmed = confirmed.accept(fix, fix.timestampMillis, config)
         }
         assertEquals(FlightTrackingPhase.LANDED, confirmed.phase)

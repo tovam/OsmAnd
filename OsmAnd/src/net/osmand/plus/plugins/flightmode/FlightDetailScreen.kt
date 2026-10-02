@@ -228,11 +228,15 @@ internal fun FlightDetailScreen(
         if (active != null)
             item {
                 DetailSection(R.string.flight_detail_recording)
+                TextButton(onClick = { onPlanSection(0) }) {
+                    Text(stringResource(R.string.flight_detail_schedule_manage), fontSize = 12.sp)
+                }
                 Text(
                     stringResource(
                         when (active.tracking.phase) {
                             FlightTrackingPhase.WAITING -> R.string.flight_live_waiting
                             FlightTrackingPhase.AIRBORNE -> R.string.flight_live_airborne
+                            FlightTrackingPhase.LAYOVER -> R.string.flight_layover
                             FlightTrackingPhase.LANDED -> R.string.flight_live_landed
                             FlightTrackingPhase.STOPPED -> R.string.flight_live_stopped
                         }
@@ -273,13 +277,11 @@ internal fun FlightDetailScreen(
                 DetailSection(R.string.flight_ignored_times_title)
                 TextButton(
                     onClick = { showIgnoredTimes = true },
-                    enabled = active == null && state.trip?.hasUsableTimestamps == true && !state.previewingPlan,
+                    enabled = (active?.trip ?: state.trip)?.hasUsableTimestamps == true && !state.previewingPlan,
                 ) {
-                    Text(stringResource(R.string.flight_ignored_times, state.ignoredTimeRanges.size), fontSize = 12.sp)
+                    Text(stringResource(R.string.flight_ignored_times, state.trip?.ignoredTimeRanges?.size ?: state.ignoredTimeRanges.size), fontSize = 12.sp)
                 }
-                if (active != null)
-                    Text(stringResource(R.string.flight_ignored_times_active), fontSize = 11.sp)
-                else if (state.trip?.hasUsableTimestamps != true)
+                if ((active?.trip ?: state.trip)?.hasUsableTimestamps != true)
                     Text(stringResource(R.string.flight_ignored_times_no_clock), fontSize = 11.sp)
                 if (state.trip?.samples.isNullOrEmpty() && state.ignoredTimeRanges.isNotEmpty())
                     Text(stringResource(R.string.flight_ignored_times_all_hidden), fontSize = 12.sp)

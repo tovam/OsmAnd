@@ -176,10 +176,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		private set
 
 	val displayState by derivedStateOf {
+        val spanTrip = if (uiState.sessionMode == FlightSessionMode.LIVE)
+            uiState.liveTimeline?.copy(recordedSource = uiState.trip?.recording()) ?: uiState.trip else uiState.trip
 		uiState.copy(
-			flightSpans = displayedFlightSpans(uiState.trip, uiState.flightSpans),
+			flightSpans = displayedFlightSpans(spanTrip, uiState.flightSpans),
 			pendingFlightStartProgress = uiState.pendingFlightStartProgress?.let { start ->
-				displayedFlightSpans(uiState.trip, listOf(FlightSpan(start, start))).firstOrNull()?.startProgress
+				displayedFlightSpans(spanTrip, listOf(FlightSpan(start, start))).firstOrNull()?.startProgress
 			}
 		)
 	}
@@ -265,7 +267,9 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 						simulatedJourney = live.simulation,
 						recordingPolicy=live.policy,
 						photos=newPhotos,journeyDirty=uiState.journeyDirty || photosChanged,
-						trip = live.trip ?: uiState.trip,
+						trip = if (live.running && uiState.sessionMode == FlightSessionMode.LIVE && uiState.trip?.recordedSource != null)
+                            live.trip?.let { uiState.trip?.copy(recordedSource = it) } ?: uiState.trip
+                            else live.trip ?: uiState.trip,
 						sessionMode = if (live.running) FlightSessionMode.LIVE else FlightSessionMode.REPLAY,
 						journeyMessage = live.error ?: uiState.journeyMessage)
 					if(photosChanged)schedulePhotoPersistence()
@@ -273,7 +277,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 					if (!live.running && live.trip?.samples?.isNotEmpty()==true) {
 						val visible = replayFlightTrip(live.trip, uiState.ignoredTimeRanges, uiState.automaticFlightTimes, uiState.restoredTimeRanges, uiState.plan.preparation ?: FlightPreparation())
 						replayEngine = visible.takeIf { it.samples.isNotEmpty() }?.let { FlightReplayEngine(it) }
-						uiState=uiState.copy(trip=visible,snapshot=replayEngine?.snapshotAt(1f),replayProgress=1f,
+						uiState=uiState.copy(plan = uiState.plan.copy(preparation = uiState.plan.preparation?.copy(automatic = false)), trip=visible,snapshot=replayEngine?.snapshotAt(1f),replayProgress=1f,
 							liveTimeline=null,browsingLiveTimeline=false,replayPlaying=false,
 							profile=FlightProfilePlanner.fromTrip(visible),
 							page=if(uiState.page==FlightPage.LIVE) FlightPage.MAP else uiState.page)
@@ -373,16 +377,22 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
         lastTimelineBuildElapsed = now
         lastTimelineBuildPlan = plan
         liveTimelineJob = viewModelScope.launch {
-            val (timeline, profile, engine) = withContext(Dispatchers.Default) {
-                val timeline = FlightLiveTimeline.build(plan, live.trip, fix)
-                Triple(timeline, FlightProfilePlanner.fromTrip(timeline), FlightReplayEngine(timeline,
-                    recordedSampleCount = timeline.samples.indexOfLast { it.timestampMillis <= fix.timestampMillis } + 1))
+            val automatic = uiState.automaticFlightTimes
+            val ignored = uiState.ignoredTimeRanges
+            val restored = uiState.restoredTimeRanges
+            val (recorded, result) = withContext(Dispatchers.Default) {
+                val recorded = live.trip?.let { replayFlightTrip(it, ignored, automatic, restored, plan.preparation ?: FlightPreparation()) }
+                val timeline = replayFlightTrip(FlightLiveTimeline.build(plan, live.trip, fix, live.tracking.completedFlights), ignored, automatic, restored, plan.preparation ?: FlightPreparation())
+                recorded to Triple(timeline, FlightProfilePlanner.fromTrip(timeline),
+                    timeline.takeIf { it.samples.isNotEmpty() }?.let { FlightReplayEngine(it,
+                        recordedSampleCount = timeline.samples.indexOfLast { it.timestampMillis <= fix.timestampMillis } + 1) })
             }
-			if (uiState.journeyId != live.journeyId || uiState.sessionMode != FlightSessionMode.LIVE || uiState.plan != plan) return@launch
+            val (timeline, profile, engine) = result
+			if (uiState.journeyId != live.journeyId || uiState.sessionMode != FlightSessionMode.LIVE || uiState.plan != plan || uiState.automaticFlightTimes != automatic || uiState.ignoredTimeRanges != ignored || uiState.restoredTimeRanges != restored) return@launch
             replayEngine = engine
 			val time = liveCursorMillis.takeIf { uiState.browsingLiveTimeline } ?: fix.timestampMillis
 			val progress = FlightLiveTimeline.progress(timeline, time)
-			uiState = uiState.copy(liveTimeline=timeline, profile=profile,
+			uiState = uiState.copy(trip = recorded ?: uiState.trip, liveTimeline=timeline, profile=profile,
 				replayProgress=progress,
 				snapshot=if(uiState.browsingLiveTimeline) replayEngine?.snapshotAt(progress)?.let {
 					FlightLiveTimeline.withoutFutureMeasurements(it, fix.timestampMillis)
@@ -479,7 +489,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	fun savePreparation(arm: Boolean) {
-		if(uiState.savingPreparation || uiState.loadingTrip)return
+		if(uiState.savingPreparation || uiState.loadingTrip || (arm && uiState.recordingForSelectedFlight().running))return
 		val sourceId=uiState.journeyId
 		val operation = journalOperations.capture()
 		uiState=uiState.copy(savingPreparation=true,scheduleError=null)
@@ -531,7 +541,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			FlightNetworkAccess.release(offlineOwner)
 			val previous = uiState.plan
 			val plan = if (repeatRoute) previous.copy(preparation = (previous.preparation ?: FlightPreparation()).copy(
-				departureMillis = 0, arrivalMillis = 0, automatic = false))
+				departureMillis = 0, arrivalMillis = 0, automatic = false, additionalFlights = emptyList()))
 			else FlightPlan(listOf(FlightStop(app.getString(net.osmand.plus.R.string.flight_plan_departure)),
 				FlightStop(app.getString(net.osmand.plus.R.string.flight_plan_arrival))), preparation = FlightPreparation())
 			simulationJob?.cancel()
@@ -769,12 +779,12 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun updatePlan(plan: FlightPlan) {
 		if(plan==uiState.plan)return
-		val liveRouteChanged = uiState.sessionMode == FlightSessionMode.LIVE && plan.stops != uiState.plan.stops
+		val liveRouteChanged = uiState.sessionMode == FlightSessionMode.LIVE && (plan.stops != uiState.plan.stops || plan.preparation != uiState.plan.preparation)
 		if (liveRouteChanged) {
 			if (!FlightOfflinePreparation.canSimulate(plan)) return
-			// Route edits must never re-arm departure or change the live stop detector.
-			val safePlan = uiState.plan.copy(stops = plan.stops)
-			try { FlightRecordingService.route(getApplication(), uiState.journeyId, safePlan.stops) }
+			// Update the active journey on the serial recorder; do not re-arm its original departure.
+			val safePlan = uiState.plan.copy(stops = plan.stops, preparation = plan.preparation)
+			try { FlightRecordingService.route(getApplication(), uiState.journeyId, safePlan.stops, safePlan.preparation) }
 			catch (error: Exception) { uiState = uiState.copy(journeyMessage = error.message); return }
 			liveTimelineJob?.cancel()
 			uiState = uiState.copy(plan = safePlan, journeyDirty = true)
@@ -1494,9 +1504,8 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	} ?: uiState.replayProgress
 
 	fun setIgnoredTimeRanges(ranges: List<FlightTimeRange>, automatic: Boolean = uiState.automaticFlightTimes, restored: List<FlightTimeRange> = uiState.restoredTimeRanges) {
-		if (uiState.ignoredTimeRangesBusy || uiState.sessionMode != FlightSessionMode.REPLAY || uiState.previewingPlan ||
-			uiState.activeRecording.let { it.running && it.journeyId == uiState.journeyId }) return
-		val source = uiState.trip?.recording()?.takeIf { it.hasUsableTimestamps && it.samples.isNotEmpty() } ?: return
+		if (uiState.ignoredTimeRangesBusy || uiState.sessionMode == FlightSessionMode.PREPARE || uiState.previewingPlan) return
+		val source = (uiState.recordingForSelectedFlight().trip ?: uiState.trip?.recording())?.takeIf { it.hasUsableTimestamps && it.samples.isNotEmpty() } ?: return
 		val first = source.samples.first().timestampMillis
 		val last = source.samples.last().timestampMillis
 		val normalized = normalizedFlightTimeRanges(ranges).mapNotNull { range ->
@@ -1506,6 +1515,15 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		}
 		if (normalized == uiState.ignoredTimeRanges && automatic == uiState.automaticFlightTimes && restored == uiState.restoredTimeRanges) return
 		val preparation = uiState.plan.preparation ?: FlightPreparation()
+        if (uiState.sessionMode == FlightSessionMode.LIVE) {
+            uiState = uiState.copy(ignoredTimeRanges = normalized, automaticFlightTimes = automatic,
+                restoredTimeRanges = normalizedFlightTimeRanges(restored), journeyDirty = true)
+            liveTimelineJob?.cancel()
+            lastTimelineBuildElapsed = 0L
+            rebuildLiveTimeline(uiState.recordingForSelectedFlight())
+            schedulePhotoPersistence()
+            return
+        }
 		val operation = journalOperations.capture()
 		val cursor = uiState.snapshot?.sample?.timestampMillis
 		uiState = uiState.copy(ignoredTimeRangesBusy = true, ignoredTimeRangesError = null, replayPlaying = false)

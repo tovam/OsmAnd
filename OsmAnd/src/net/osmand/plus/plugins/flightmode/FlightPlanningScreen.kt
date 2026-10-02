@@ -114,11 +114,31 @@ internal fun FlightPlanningScreen(
         dispatcher?.addCallback(callback)
         onDispose { callback.remove() }
     }
-    if (readiness) FlightReadinessDialog(state, { readiness = false },
-        { readiness = false; section = 0 }, onPermissions,
-        { readiness = false; section = 1; showTileFiles = true },
-        { readiness = false; section = 2 }, { readiness = false; onStorage() })
-    if (showTileFiles) FlightTileFilesDialog(state, { showTileFiles = false }, onPreload, onCancelPreload)
+    if (readiness)
+        FlightReadinessDialog(
+            state,
+            { readiness = false },
+            {
+                readiness = false
+                section = 0
+            },
+            onPermissions,
+            {
+                readiness = false
+                section = 1
+                showTileFiles = true
+            },
+            {
+                readiness = false
+                section = 2
+            },
+            {
+                readiness = false
+                onStorage()
+            },
+        )
+    if (showTileFiles)
+        FlightTileFilesDialog(state, { showTileFiles = false }, onPreload, onCancelPreload)
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth()) {
             PlanAction(stringResource(R.string.flight_workspace_future), onJournals)
@@ -362,156 +382,244 @@ internal fun FlightPlanningScreen(
                         ) { millis, offset ->
                             change(prep.copy(arrivalMillis = millis, arrivalOffsetMinutes = offset))
                         }
+                        prep.additionalFlights.forEachIndexed { index, leg ->
+                            Text(
+                                stringResource(R.string.flight_schedule_leg, index + 2),
+                                color = Color.White,
+                                fontSize = 13.sp,
+                            )
+                            fun update(next: FlightScheduledLeg) =
+                                change(
+                                    prep.copy(
+                                        additionalFlights =
+                                            prep.additionalFlights.mapIndexed { i, old ->
+                                                if (i == index) next else old
+                                            }
+                                    )
+                                )
+                            FlightDateField(
+                                stringResource(R.string.flight_plan_departure),
+                                leg.departureMillis,
+                                leg.departureOffsetMinutes,
+                            ) { millis, offset ->
+                                update(
+                                    leg.copy(
+                                        departureMillis = millis,
+                                        departureOffsetMinutes = offset,
+                                    )
+                                )
+                            }
+                            FlightDateField(
+                                stringResource(R.string.flight_plan_arrival),
+                                leg.arrivalMillis,
+                                leg.arrivalOffsetMinutes,
+                            ) { millis, offset ->
+                                update(
+                                    leg.copy(arrivalMillis = millis, arrivalOffsetMinutes = offset)
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    change(
+                                        prep.copy(
+                                            additionalFlights =
+                                                prep.additionalFlights.filterIndexed { i, _ ->
+                                                    i != index
+                                                }
+                                        )
+                                    )
+                                }
+                            ) {
+                                Text(
+                                    stringResource(R.string.shared_string_remove),
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+                        if (prep.additionalFlights.size < 19)
+                            PlanAction(
+                                stringResource(R.string.flight_schedule_add_leg),
+                                {
+                                    change(
+                                        prep.copy(
+                                            additionalFlights =
+                                                prep.additionalFlights +
+                                                    FlightScheduledLeg(
+                                                        0,
+                                                        0,
+                                                        prep.arrivalOffsetMinutes,
+                                                        prep.arrivalOffsetMinutes,
+                                                    )
+                                        )
+                                    )
+                                },
+                            )
+                        if (
+                            (prep.departureMillis > 0 || prep.additionalFlights.isNotEmpty()) &&
+                                !prep.validSchedule()
+                        )
+                            Text(
+                                stringResource(R.string.flight_schedule_invalid),
+                                color = Color(0xFFFFCC66),
+                                fontSize = 11.sp,
+                            )
                     }
                 }
             if (section == 1)
                 item {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                        FlightPrecisionSelector(state.plan, onUpdate, advancedPrecision, { advancedPrecision = it })
+                        FlightPrecisionSelector(
+                            state.plan,
+                            onUpdate,
+                            advancedPrecision,
+                            { advancedPrecision = it },
+                        )
                         if (advancedPrecision) {
-                        Text(
-                            stringResource(R.string.flight_plan_display_quality),
-                            color = Color.White,
-                            fontSize = 14.sp,
-                        )
-                        SatelliteQualitySelector(
-                            state.plan.satelliteQuality,
-                            state.plan.terrainCorridorKm,
-                            state.terrainScene?.zoom,
-                            state.plan.stops.firstOrNull()?.latitude,
-                            { onUpdate(state.plan.copy(satelliteQuality = it)) },
-                        )
-                        Row {
-                            PlanNumber(
-                                stringResource(R.string.flight_plan_display_fine),
-                                state.plan.terrainFineZoom,
-                                9..14,
-                                Modifier.weight(1f),
-                            ) { z ->
-                                onUpdate(
-                                    state.plan.copy(
-                                        terrainFineZoom = z,
-                                        terrainMiddleZoom = minOf(z, state.plan.terrainMiddleZoom),
-                                    )
-                                )
-                            }
-                            PlanNumber(
-                                stringResource(R.string.flight_plan_display_middle),
-                                state.plan.terrainMiddleZoom,
-                                9..14,
-                                Modifier.weight(1f),
-                            ) { z ->
-                                onUpdate(
-                                    state.plan.copy(
-                                        terrainMiddleZoom = z,
-                                        terrainFineZoom = maxOf(z, state.plan.terrainFineZoom),
-                                    )
-                                )
-                            }
-                        }
-                        Text(
-                            stringResource(R.string.flight_plan_display_quality_hint),
-                            color = Color.LightGray,
-                            fontSize = 11.sp,
-                        )
-                        Text(
-                            stringResource(R.string.flight_plan_bands),
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                        Text(
-                            stringResource(R.string.flight_plan_quality_hint),
-                            color = Color.LightGray,
-                            fontSize = 10.sp,
-                        )
-                        prep.bands.forEachIndexed { i, band ->
-                            val color = Color(palette[i % palette.size]).copy(alpha = 1f)
                             Text(
-                                stringResource(
-                                    R.string.flight_plan_band_label,
-                                    i + 1,
-                                    band.radiusKm,
-                                ),
-                                color = color,
-                                fontSize = 12.sp,
+                                stringResource(R.string.flight_plan_display_quality),
+                                color = Color.White,
+                                fontSize = 14.sp,
+                            )
+                            SatelliteQualitySelector(
+                                state.plan.satelliteQuality,
+                                state.plan.terrainCorridorKm,
+                                state.terrainScene?.zoom,
+                                state.plan.stops.firstOrNull()?.latitude,
+                                { onUpdate(state.plan.copy(satelliteQuality = it)) },
                             )
                             Row {
                                 PlanNumber(
-                                    "km",
-                                    band.radiusKm,
-                                    ((prep.bands.getOrNull(i - 1)?.radiusKm ?: 0) + 1)..((prep.bands
-                                            .getOrNull(i + 1)
-                                            ?.radiusKm ?: 601) - 1),
+                                    stringResource(R.string.flight_plan_display_fine),
+                                    state.plan.terrainFineZoom,
+                                    9..14,
                                     Modifier.weight(1f),
-                                ) { n ->
-                                    change(
-                                        prep.copy(
-                                            bands =
-                                                prep.bands.mapIndexed { k, b ->
-                                                    if (k == i) b.copy(radiusKm = n) else b
-                                                }
+                                ) { z ->
+                                    onUpdate(
+                                        state.plan.copy(
+                                            terrainFineZoom = z,
+                                            terrainMiddleZoom =
+                                                minOf(z, state.plan.terrainMiddleZoom),
                                         )
                                     )
                                 }
                                 PlanNumber(
-                                    stringResource(R.string.flight_plan_satellite_z),
-                                    band.satelliteZoom,
-                                    3..14,
+                                    stringResource(R.string.flight_plan_display_middle),
+                                    state.plan.terrainMiddleZoom,
+                                    9..14,
                                     Modifier.weight(1f),
-                                ) { n ->
-                                    change(
-                                        prep.copy(
-                                            bands =
-                                                prep.bands.mapIndexed { k, b ->
-                                                    if (k == i) b.copy(satelliteZoom = n) else b
-                                                }
-                                        )
-                                    )
-                                }
-                                PlanNumber(
-                                    stringResource(R.string.flight_plan_terrain_z),
-                                    band.terrainZoom,
-                                    3..14,
-                                    Modifier.weight(1f),
-                                ) { n ->
-                                    change(
-                                        prep.copy(
-                                            bands =
-                                                prep.bands.mapIndexed { k, b ->
-                                                    if (k == i) b.copy(terrainZoom = n) else b
-                                                }
+                                ) { z ->
+                                    onUpdate(
+                                        state.plan.copy(
+                                            terrainMiddleZoom = z,
+                                            terrainFineZoom = maxOf(z, state.plan.terrainFineZoom),
                                         )
                                     )
                                 }
                             }
-                            val latitude = state.plan.stops.firstOrNull()?.latitude ?: 45.0
-                            quote
-                                ?.takeIf {
-                                    it.bands == prep.bands.sortedBy { band -> band.radiusKm }
-                                }
-                                ?.let { q ->
-                                    Text(
-                                        stringResource(
-                                            R.string.flight_offline_size_band,
-                                            flightOfflineGb(q.bandEstimatedBytes[i] ?: 0L),
-                                        ),
-                                        color = color,
-                                        fontSize = 12.sp,
-                                    )
-                                }
                             Text(
-                                stringResource(
-                                    R.string.flight_plan_resolution,
-                                    156543.03 * cos(Math.toRadians(latitude)) /
-                                        2.0.pow(band.satelliteZoom),
-                                    156543.03 * cos(Math.toRadians(latitude)) /
-                                        2.0.pow(band.terrainZoom),
-                                ),
+                                stringResource(R.string.flight_plan_display_quality_hint),
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
+                            )
+                            Text(
+                                stringResource(R.string.flight_plan_bands),
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(top = 12.dp),
+                            )
+                            Text(
+                                stringResource(R.string.flight_plan_quality_hint),
                                 color = Color.LightGray,
                                 fontSize = 10.sp,
                             )
-                        }
+                            prep.bands.forEachIndexed { i, band ->
+                                val color = Color(palette[i % palette.size]).copy(alpha = 1f)
+                                Text(
+                                    stringResource(
+                                        R.string.flight_plan_band_label,
+                                        i + 1,
+                                        band.radiusKm,
+                                    ),
+                                    color = color,
+                                    fontSize = 12.sp,
+                                )
+                                Row {
+                                    PlanNumber(
+                                        "km",
+                                        band.radiusKm,
+                                        ((prep.bands.getOrNull(i - 1)?.radiusKm ?: 0) + 1)..((prep
+                                                .bands
+                                                .getOrNull(i + 1)
+                                                ?.radiusKm ?: 601) - 1),
+                                        Modifier.weight(1f),
+                                    ) { n ->
+                                        change(
+                                            prep.copy(
+                                                bands =
+                                                    prep.bands.mapIndexed { k, b ->
+                                                        if (k == i) b.copy(radiusKm = n) else b
+                                                    }
+                                            )
+                                        )
+                                    }
+                                    PlanNumber(
+                                        stringResource(R.string.flight_plan_satellite_z),
+                                        band.satelliteZoom,
+                                        3..14,
+                                        Modifier.weight(1f),
+                                    ) { n ->
+                                        change(
+                                            prep.copy(
+                                                bands =
+                                                    prep.bands.mapIndexed { k, b ->
+                                                        if (k == i) b.copy(satelliteZoom = n) else b
+                                                    }
+                                            )
+                                        )
+                                    }
+                                    PlanNumber(
+                                        stringResource(R.string.flight_plan_terrain_z),
+                                        band.terrainZoom,
+                                        3..14,
+                                        Modifier.weight(1f),
+                                    ) { n ->
+                                        change(
+                                            prep.copy(
+                                                bands =
+                                                    prep.bands.mapIndexed { k, b ->
+                                                        if (k == i) b.copy(terrainZoom = n) else b
+                                                    }
+                                            )
+                                        )
+                                    }
+                                }
+                                val latitude = state.plan.stops.firstOrNull()?.latitude ?: 45.0
+                                quote
+                                    ?.takeIf {
+                                        it.bands == prep.bands.sortedBy { band -> band.radiusKm }
+                                    }
+                                    ?.let { q ->
+                                        Text(
+                                            stringResource(
+                                                R.string.flight_offline_size_band,
+                                                flightOfflineGb(q.bandEstimatedBytes[i] ?: 0L),
+                                            ),
+                                            color = color,
+                                            fontSize = 12.sp,
+                                        )
+                                    }
+                                Text(
+                                    stringResource(
+                                        R.string.flight_plan_resolution,
+                                        156543.03 * cos(Math.toRadians(latitude)) /
+                                            2.0.pow(band.satelliteZoom),
+                                        156543.03 * cos(Math.toRadians(latitude)) /
+                                            2.0.pow(band.terrainZoom),
+                                    ),
+                                    color = Color.LightGray,
+                                    fontSize = 10.sp,
+                                )
+                            }
                         }
                         quote?.bandEstimatedBytes?.get(-1)?.let { bytes ->
                             Text(
@@ -658,7 +766,7 @@ internal fun FlightPlanningScreen(
                             PlanNumber(
                                 stringResource(R.string.flight_plan_stop_speed),
                                 prep.stopSpeedKmh,
-                                5..100,
+                                1..10,
                                 Modifier.weight(1f),
                             ) {
                                 change(prep.copy(stopSpeedKmh = it))
@@ -666,12 +774,17 @@ internal fun FlightPlanningScreen(
                             PlanNumber(
                                 stringResource(R.string.flight_plan_stop_minutes),
                                 prep.stopMinutes,
-                                5..120,
+                                1..10,
                                 Modifier.weight(1f),
                             ) {
                                 change(prep.copy(stopMinutes = it))
                             }
                         }
+                        Text(
+                            stringResource(R.string.flight_arrival_still),
+                            color = Color.LightGray,
+                            fontSize = 11.sp,
+                        )
                         FlightPermissionChecklist()
                         PlanAction(stringResource(R.string.flight_plan_permissions), onPermissions)
                         if (state.scheduledPreparation != null)
@@ -684,9 +797,9 @@ internal fun FlightPlanningScreen(
                             Text(it, color = Color(0xFFFFBD39), fontSize = 12.sp)
                         }
                         val validSchedule =
-                            prep.departureMillis > 0 &&
-                                prep.arrivalMillis > prep.departureMillis &&
-                                prep.arrivalMillis > System.currentTimeMillis()
+                            prep.validSchedule() &&
+                                prep.scheduledFlights().last().arrivalMillis >
+                                    System.currentTimeMillis()
                         if (!validSchedule)
                             Text(
                                 stringResource(R.string.flight_plan_auto_dates_required),
@@ -697,7 +810,11 @@ internal fun FlightPlanningScreen(
                             PlanAction(
                                 stringResource(R.string.flight_plan_arm),
                                 { onSave(true) },
-                                enabled = !state.savingPreparation && validSchedule && canSimulate,
+                                enabled =
+                                    !state.activeRecording.running &&
+                                        !state.savingPreparation &&
+                                        validSchedule &&
+                                        canSimulate,
                             )
                         }
                         PlanAction(

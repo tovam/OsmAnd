@@ -10,7 +10,7 @@ internal data class FlightReadiness(
         fun evaluate(state: FlightUiState, permissionsReady: Boolean, freeBytes: Long, nowMillis: Long): FlightReadiness {
             val prep = state.plan.preparation
             val itinerary = FlightOfflinePreparation.canSimulate(state.plan) && prep != null &&
-                prep.departureMillis > 0 && prep.arrivalMillis > prep.departureMillis && prep.arrivalMillis > nowMillis
+                prep.validSchedule() && prep.scheduledFlights().last().arrivalMillis > nowMillis
             val verified = state.offlineQuote != null && state.offlinePreloadStatus.phase == FlightTerrainPhase.READY &&
                 state.offlinePreloadStatus.offlineFilesVerified
             val remaining = state.offlineCoverage?.takeIf { it.inventoried }?.estimatedRemainingBytes

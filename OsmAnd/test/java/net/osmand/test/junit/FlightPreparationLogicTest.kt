@@ -3,24 +3,47 @@ package net.osmand.test.junit
 import kotlin.math.*
 import kotlinx.coroutines.runBlocking
 import net.osmand.plus.plugins.flightmode.*
-import org.junit.Assert.*
-import org.junit.Test
 import net.osmand.plus.plugins.flightmode.FlightPrecisionProfile
 import net.osmand.plus.plugins.flightmode.FlightReadiness
+import org.junit.Assert.*
+import org.junit.Test
 
 /** Synthetic routes only; no files, devices, accounts or network are used by this suite. */
 class FlightPreparationLogicTest {
     @Test
     fun readinessRequiresRealVerificationAndDoesNotRequireAutomaticDeparture() {
-        val plan = FlightPlan(listOf(FlightStop("A", 0.0, 0.0), FlightStop("B", 1.0, 1.0)),
-            preparation = FlightPreparation(departureMillis = 1000, arrivalMillis = 3000))
-        val quote = FlightOfflineQuote(emptyList(), listOf(0.0 to 0.0, 1.0 to 1.0), plan.preparation!!.bands)
-        val state = FlightUiState(plan = plan, offlineQuote = quote, offlinePreloadStatus = FlightTerrainStatus(
-            phase = FlightTerrainPhase.READY, offlineFilesVerified = true))
+        val plan =
+            FlightPlan(
+                listOf(FlightStop("A", 0.0, 0.0), FlightStop("B", 1.0, 1.0)),
+                preparation = FlightPreparation(departureMillis = 1000, arrivalMillis = 3000),
+            )
+        val quote =
+            FlightOfflineQuote(
+                emptyList(),
+                listOf(0.0 to 0.0, 1.0 to 1.0),
+                plan.preparation!!.bands,
+            )
+        val state =
+            FlightUiState(
+                plan = plan,
+                offlineQuote = quote,
+                offlinePreloadStatus =
+                    FlightTerrainStatus(
+                        phase = FlightTerrainPhase.READY,
+                        offlineFilesVerified = true,
+                    ),
+            )
         assertTrue(FlightReadiness.evaluate(state, true, 1024L * 1024 * 1024, 2000).ready)
         assertFalse(FlightReadiness.evaluate(state, true, 1024L * 1024 * 1024, 2000).scheduled)
-        assertFalse(FlightReadiness.evaluate(state.copy(offlinePreloadStatus = FlightTerrainStatus()), true,
-            1024L * 1024 * 1024, 2000).ready)
+        assertFalse(
+            FlightReadiness.evaluate(
+                    state.copy(offlinePreloadStatus = FlightTerrainStatus()),
+                    true,
+                    1024L * 1024 * 1024,
+                    2000,
+                )
+                .ready
+        )
         assertFalse(FlightReadiness.evaluate(state, false, 1024L * 1024 * 1024, 2000).ready)
         assertFalse(FlightReadiness.evaluate(state, true, 10, 2000).ready)
         assertFalse(FlightReadiness.evaluate(state, true, 1024L * 1024 * 1024, 4000).ready)
@@ -28,9 +51,18 @@ class FlightPreparationLogicTest {
 
     @Test
     fun precisionPresetsPreserveRouteDatesAndCoverageAndRecognizeCustomSettings() {
-        val original = FlightPlan(emptyList(), terrainCorridorKm = 150,
-            preparation = FlightPreparation(departureMillis = 1234L, arrivalMillis = 5678L,
-                bands = listOf(FlightOfflineBand(20, 12, 12), FlightOfflineBand(150, 10, 10))))
+        val original =
+            FlightPlan(
+                emptyList(),
+                terrainCorridorKm = 150,
+                preparation =
+                    FlightPreparation(
+                        departureMillis = 1234L,
+                        arrivalMillis = 5678L,
+                        bands =
+                            listOf(FlightOfflineBand(20, 12, 12), FlightOfflineBand(150, 10, 10)),
+                    ),
+            )
         for (preset in FlightPrecisionProfile.entries) {
             val plan = preset.apply(original)
             assertEquals(original.stops, plan.stops)
@@ -40,7 +72,11 @@ class FlightPreparationLogicTest {
             assertEquals(preset, FlightPrecisionProfile.selected(plan))
             assertEquals(plan, preset.apply(plan))
         }
-        assertNull(FlightPrecisionProfile.selected(original.copy(satelliteQuality = FlightSatelliteQuality.ULTRA_PLUS_PLUS)))
+        assertNull(
+            FlightPrecisionProfile.selected(
+                original.copy(satelliteQuality = FlightSatelliteQuality.ULTRA_PLUS_PLUS)
+            )
+        )
     }
 
     @Test
@@ -149,57 +185,124 @@ class FlightPreparationLogicTest {
     }
 
     @Test
-    fun takeoffNeedsBothHeightAndSpeed() {
+    fun takeoffNeedsSustainedSpeedAndHeightWhenAvailable() {
         val ground = accept(FlightTrackingState(), sample())
-        assertEquals(FlightTrackingPhase.WAITING, accept(ground, sample(1, 1099.0, 100f)).phase)
-        assertEquals(FlightTrackingPhase.WAITING, accept(ground, sample(1, 1500.0, 50f)).phase)
-        assertEquals(FlightTrackingPhase.AIRBORNE, accept(ground, sample(1, 1100.0, 60f)).phase)
+        assertEquals(FlightTrackingPhase.WAITING, accept(ground, sample(1, 1100.0, 100f)).phase)
+        var low = ground
+        for (s in 1..45) low = accept(low, sample(s, 1099.0, 100f))
+        assertEquals(FlightTrackingPhase.WAITING, low.phase)
+        assertEquals(FlightTrackingPhase.AIRBORNE, airborne().phase)
         assertNull(accept(FlightTrackingState(), sample(0, null)).baselineAltitude)
     }
 
-    private fun airborne() = accept(accept(FlightTrackingState(), sample()), sample(1, 1100.0, 60f))
-
-    @Test
-    fun landingRequiresTheEntireContinuousInterval() {
-        var state = airborne()
-        for (s in 2..1801) state = accept(state, sample(s, 100.0, 10f))
-        assertEquals(FlightTrackingPhase.AIRBORNE, state.phase)
-        state = accept(state, sample(1802, 100.0, 10f))
-        assertEquals(FlightTrackingPhase.LANDED, state.phase)
-        assertEquals(state, accept(state, sample(1803, 12000.0, 200f)))
+    private fun airborne(): FlightTrackingState {
+        var state = accept(FlightTrackingState(), sample())
+        for (s in 1..45) state = accept(state, sample(s, 1100.0, 100f))
+        return state
     }
 
     @Test
-    fun missingGpsAndBadAccuracyNeverCountAsLanding() {
+    fun taxiIsRetainedAndFinalStableStopEndsAutomatically() {
         var state = airborne()
-        for (s in 2..1700) state = accept(state, sample(s))
-        val stale = sample(1701)
+        for (s in 46..180) state = accept(state, sample(s, 100.0, 10f))
+        assertEquals(FlightTrackingPhase.AIRBORNE, state.phase)
+        for (s in 181..295) state = accept(state, sample(s))
+        assertEquals(FlightTrackingPhase.AIRBORNE, state.phase)
+        for (s in 296..330) state = accept(state, sample(s))
+        assertEquals(FlightTrackingPhase.LANDED, state.phase)
+        assertEquals(state, accept(state, sample(331, 12000.0, 200f)))
+    }
+
+    @Test
+    fun missingGpsBadAccuracyAndClockReversalNeverCountAsLanding() {
+        var state = airborne()
+        for (s in 46..140) state = accept(state, sample(s))
+        val stale = sample(141)
         assertNull(
             state.accept(stale, stale.timestampMillis + 20_000, FlightPreparation()).slowSinceMillis
         )
-        assertNull(accept(state, sample(1701, accuracy = 500f)).slowSinceMillis)
-        assertNull(accept(state, sample(1701, speed = null)).slowSinceMillis)
+        assertNull(accept(state, sample(141, accuracy = 500f)).slowSinceMillis)
+        assertNull(accept(state, sample(141, speed = null).copy(latitude = 45.01)).slowSinceMillis)
         val afterGap = accept(state, sample(1900))
         assertEquals(base + 1_900_000, afterGap.slowSinceMillis)
         assertEquals(FlightTrackingPhase.AIRBORNE, afterGap.phase)
-        assertNull(accept(state, sample(1701, speed = 60f)).slowSinceMillis)
-        assertNull(accept(state, sample(1600)).slowSinceMillis)
+        assertNull(accept(state, sample(120)).slowSinceMillis)
+        // A stopped GPS fix with continued movement is not a stationary gate arrival.
+        val moved = sample(141).copy(latitude = 45.01)
+        assertNull(accept(state, moved).slowSinceMillis)
     }
 
     @Test
-    fun configurableThresholdsApply() {
+    fun configurableConfirmationDurationApplies() {
+        val config =
+            FlightPreparation(airborneGainMeters = 500, airborneSpeedKmh = 100, stopMinutes = 5)
+        var state = accept(FlightTrackingState(), sample(), config)
+        for (s in 1..45) state = accept(state, sample(s, 600.0, 30f), config)
+        assertEquals(FlightTrackingPhase.AIRBORNE, state.phase)
+        for (s in 46..340) state = accept(state, sample(s), config)
+        assertEquals(FlightTrackingPhase.AIRBORNE, state.phase)
+        for (s in 341..365) state = accept(state, sample(s), config)
+        assertEquals(FlightTrackingPhase.LANDED, state.phase)
+    }
+
+    @Test
+    fun layoverResumesBeforeNextDepartureAndFinalArrivalStops() {
         val config =
             FlightPreparation(
-                airborneGainMeters = 500,
-                airborneSpeedKmh = 100,
-                stopMinutes = 5,
-                stopSpeedKmh = 20,
+                departureMillis = base,
+                arrivalMillis = base + 300000,
+                additionalFlights = listOf(FlightScheduledLeg(base + 3600000, base + 7200000)),
             )
-        var s = accept(FlightTrackingState(), sample(), config)
-        s = accept(s, sample(1, 600.0, 30f), config)
-        assertEquals(FlightTrackingPhase.AIRBORNE, s.phase)
-        for (t in 2..302) s = accept(s, sample(t, 100.0, 1f), config)
-        assertEquals(FlightTrackingPhase.LANDED, s.phase)
+        var state = airborne()
+        for (s in 46..200) state = accept(state, sample(s), config)
+        assertEquals(FlightTrackingPhase.LAYOVER, state.phase)
+        assertEquals(1, state.completedFlights)
+        assertEquals(base + 2700000, state.resumeAtMillis)
+        assertEquals(FlightTrackingPhase.LAYOVER, state.resumeIfDue(base + 2600000, config).phase)
+        state = state.resumeIfDue(base + 2700000, config)
+        assertEquals(FlightTrackingPhase.WAITING, state.phase)
+        state = accept(state, sample(2700), config)
+        for (s in 2701..2745) state = accept(state, sample(s, 1100.0, 100f), config)
+        assertEquals(FlightTrackingPhase.AIRBORNE, state.phase)
+        for (s in 2746..2900) state = accept(state, sample(s), config)
+        assertEquals(FlightTrackingPhase.LANDED, state.phase)
+        assertEquals(2, state.completedFlights)
+    }
+
+    @Test
+    fun scheduleRoundTripValidationAndLegacyLandingMigration() {
+        val plan =
+            FlightPreparation(
+                departureMillis = base,
+                arrivalMillis = base + 600000,
+                additionalFlights =
+                    listOf(FlightScheduledLeg(base + 1200000, base + 1800000, 60, 120)),
+            )
+        assertTrue(plan.validSchedule())
+        assertEquals(plan, FlightPreparation.fromJson(plan.toJson()))
+        assertFalse(
+            plan
+                .copy(additionalFlights = listOf(FlightScheduledLeg(base + 100, base + 500)))
+                .validSchedule()
+        )
+        val legacy = org.json.JSONObject().put("stopSpeed", 50).put("stopMinutes", 30)
+        assertEquals(2, FlightPreparation.fromJson(legacy)!!.stopMinutes)
+        assertEquals(3, FlightPreparation.fromJson(legacy)!!.stopSpeedKmh)
+    }
+
+    @Test
+    fun layoverRespectsLivePostponementEarlyActivationAndRemovedNextFlight() {
+        val first = FlightPreparation(departureMillis = base, arrivalMillis = base + 300000,
+            additionalFlights = listOf(FlightScheduledLeg(base + 3600000, base + 7200000)))
+        val waiting = FlightTrackingState(phase = FlightTrackingPhase.LAYOVER, completedFlights = 1,
+            resumeAtMillis = base + 2700000)
+        val delayed = first.copy(additionalFlights = listOf(FlightScheduledLeg(base + 7200000, base + 10800000)))
+        val updated = waiting.resumeIfDue(base + 2700000, delayed)
+        assertEquals(FlightTrackingPhase.LAYOVER, updated.phase)
+        assertEquals(base + 6300000, updated.resumeAtMillis)
+        val advanced = first.copy(additionalFlights = listOf(FlightScheduledLeg(base + 2000000, base + 3600000)))
+        assertEquals(FlightTrackingPhase.WAITING, waiting.resumeIfDue(base + 2700000, advanced).phase)
+        assertNull(waiting.resumeIfDue(base + 2700000, first.copy(additionalFlights = emptyList())).resumeAtMillis)
     }
 
     @Test

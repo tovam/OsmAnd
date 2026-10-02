@@ -281,7 +281,8 @@ internal fun FlightLibraryGpsLabel(id: String?, state: FlightUiState, compact: B
                     when (active.tracking.phase) {
                         FlightTrackingPhase.WAITING -> R.string.flight_live_takeoff_undetected
                         FlightTrackingPhase.AIRBORNE -> R.string.flight_live_airborne
-                        FlightTrackingPhase.LANDED -> R.string.flight_live_landed
+                        FlightTrackingPhase.LAYOVER -> R.string.flight_layover
+                            FlightTrackingPhase.LANDED -> R.string.flight_live_landed
                         FlightTrackingPhase.STOPPED -> R.string.flight_live_stopped
                     }
                 ),

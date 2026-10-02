@@ -26,6 +26,8 @@ class FlightRecordingService : Service(), LocationListener {
     private var samples = FlightRecordedHistory()
     private var battery = mutableListOf<FlightBatteryPoint>()
     private var tracking = FlightTrackingState()
+    private var gpsActive = false
+    private var nextLayoverProbeMillis = 0L
     private var environment = FlightEnvironmentReading()
     private var recorder: FlightEnvironmentRecorder? = null
     private var used: Int? = null
@@ -73,24 +75,39 @@ class FlightRecordingService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action in listOf(STOP, MICROPHONE, SIMULATION_CONTROL, CONFIRM_AIRBORNE, POLICY, ROUTE) &&
-            (realHandoffPending || !targetsCurrentJourney(intent))) {
+        if (
+            intent?.action in
+                listOf(STOP, MICROPHONE, SIMULATION_CONTROL, CONFIRM_AIRBORNE, POLICY, ROUTE) &&
+                (realHandoffPending || !targetsCurrentJourney(intent))
+        ) {
             if (!startRequested && !updates.value.running) stopSelf()
+            return restartMode()
+        }
+        if (intent?.action == WAKE && updates.value.running) {
+            startForeground(NOTIFICATION, notification())
+            worker.post { if (targetsCurrentJourney(intent)) manageLayover() }
             return restartMode()
         }
         if (intent?.action == CONFIRM_AIRBORNE) {
             if (!startRequested && !updates.value.running) stopSelf()
             worker.post {
-                if (!updates.value.running || stopping || !targetsCurrentJourney(intent)) return@post
+                if (!updates.value.running || stopping || !targetsCurrentJourney(intent))
+                    return@post
                 val sample = updates.value.latest ?: return@post
-                val next = tracking.confirmAirborne(sample,
-                    if (simulatedStart) sample.timestampMillis else System.currentTimeMillis(),
-                    journey?.plan?.preparation ?: FlightPreparation())
-                if (next != tracking) try {
-                    store!!.writeState(next)
-                    tracking = next
-                    updates.value = updates.value.copy(tracking = next)
-                } catch (e: Exception) { fail(e) }
+                val next =
+                    tracking.confirmAirborne(
+                        sample,
+                        if (simulatedStart) sample.timestampMillis else System.currentTimeMillis(),
+                        journey?.plan?.preparation ?: FlightPreparation(),
+                    )
+                if (next != tracking)
+                    try {
+                        store!!.writeState(next)
+                        tracking = next
+                        updates.value = updates.value.copy(tracking = next)
+                    } catch (e: Exception) {
+                        fail(e)
+                    }
             }
             return restartMode()
         }
@@ -135,7 +152,11 @@ class FlightRecordingService : Service(), LocationListener {
                 worker.post {
                     if (!targetsCurrentJourney(intent)) return@post
                     recorder?.stop()
-                    if (!simulatedStart || simulationActive) recorder?.start(enabled)
+                    if (
+                        tracking.phase != FlightTrackingPhase.LAYOVER &&
+                            (!simulatedStart || simulationActive)
+                    )
+                        recorder?.start(enabled)
                     updates.value = updates.value.copy(microphone = enabled)
                 }
             } catch (e: Exception) {
@@ -144,27 +165,50 @@ class FlightRecordingService : Service(), LocationListener {
             return restartMode()
         }
         if (intent?.action == STOP) {
-            worker.post { if (targetsCurrentJourney(intent)) stopRecording(FlightTrackingPhase.STOPPED) }
+            worker.post {
+                if (targetsCurrentJourney(intent)) stopRecording(FlightTrackingPhase.STOPPED)
+            }
             return if (realHandoffPending) START_STICKY else START_NOT_STICKY
         }
         if (intent?.action == ROUTE) {
             worker.post {
-                if (!targetsCurrentJourney(intent) || !updates.value.running || stopping) return@post
+                if (!targetsCurrentJourney(intent) || !updates.value.running || stopping)
+                    return@post
                 val current = journey ?: return@post
                 val names = intent.getStringArrayExtra("routeNames") ?: return@post
                 val latitudes = intent.getDoubleArrayExtra("routeLatitudes") ?: return@post
                 val longitudes = intent.getDoubleArrayExtra("routeLongitudes") ?: return@post
                 val types = intent.getStringArrayExtra("routeTypes") ?: return@post
-                if (names.size !in 2..100 || latitudes.size != names.size ||
-                    longitudes.size != names.size || types.size != names.size) return@post
-                val stops = names.indices.map { i -> FlightStop(names[i].take(256), latitudes[i], longitudes[i],
-                    runCatching { FlightStopType.valueOf(types[i]) }.getOrDefault(FlightStopType.STOPOVER)) }
-                val plan = current.plan.copy(stops = stops)
+                if (
+                    names.size !in 2..100 ||
+                        latitudes.size != names.size ||
+                        longitudes.size != names.size ||
+                        types.size != names.size
+                )
+                    return@post
+                val stops =
+                    names.indices.map { i ->
+                        FlightStop(
+                            names[i].take(256),
+                            latitudes[i],
+                            longitudes[i],
+                            runCatching { FlightStopType.valueOf(types[i]) }
+                                .getOrDefault(FlightStopType.STOPOVER),
+                        )
+                    }
+                val preparation =
+                    intent.getStringExtra("preparation")?.let {
+                        FlightPreparation.fromJson(org.json.JSONObject(it))
+                    } ?: current.plan.preparation
+                val plan = current.plan.copy(stops = stops, preparation = preparation)
                 if (FlightOfflinePreparation.canSimulate(plan)) {
                     journey = current.copy(plan = plan)
-                    if (updates.value.simulation) updates.value = updates.value.copy(simulationPlan = plan)
+                    if (updates.value.simulation)
+                        updates.value = updates.value.copy(simulationPlan = plan)
+                    manageLayover()
                 }
-                // Persistence is the UI metadata save. Never rewrite measured samples or detector state.
+                // Persistence is the UI metadata save. Never rewrite measured samples or detector
+                // state.
             }
             return restartMode()
         }
@@ -172,28 +216,36 @@ class FlightRecordingService : Service(), LocationListener {
             worker.post {
                 if (!targetsCurrentJourney(intent)) return@post
                 val current = recordingPolicy
-                recordingPolicy = FlightRecordingPolicy(
-                    cruisePointDistanceMeters = intent.getFloatExtra(
-                        POLICY_DISTANCE,
-                        current.cruisePointDistanceMeters
-                    ),
-                    maximumStraightIntervalSeconds = intent.getFloatExtra(
-                        POLICY_INTERVAL,
-                        current.maximumStraightIntervalSeconds
-                    ),
-                    turnAcceleration = intent.getFloatExtra(POLICY_TURN, current.turnAcceleration),
-                    routeDeviationAcceleration = intent.getFloatExtra(
-                        POLICY_DEVIATION,
-                        current.routeDeviationAcceleration
-                    ),
-                    mode = intent.getStringExtra(POLICY_MODE)?.let { raw ->
-                        runCatching { FlightRecordingMode.valueOf(raw) }.getOrNull()
-                    } ?: current.mode,
-                    fixedIntervalSeconds = intent.getFloatExtra(
-                        POLICY_FIXED_INTERVAL,
-                        current.fixedIntervalSeconds
-                    )
-                ).clamped()
+                recordingPolicy =
+                    FlightRecordingPolicy(
+                            cruisePointDistanceMeters =
+                                intent.getFloatExtra(
+                                    POLICY_DISTANCE,
+                                    current.cruisePointDistanceMeters,
+                                ),
+                            maximumStraightIntervalSeconds =
+                                intent.getFloatExtra(
+                                    POLICY_INTERVAL,
+                                    current.maximumStraightIntervalSeconds,
+                                ),
+                            turnAcceleration =
+                                intent.getFloatExtra(POLICY_TURN, current.turnAcceleration),
+                            routeDeviationAcceleration =
+                                intent.getFloatExtra(
+                                    POLICY_DEVIATION,
+                                    current.routeDeviationAcceleration,
+                                ),
+                            mode =
+                                intent.getStringExtra(POLICY_MODE)?.let { raw ->
+                                    runCatching { FlightRecordingMode.valueOf(raw) }.getOrNull()
+                                } ?: current.mode,
+                            fixedIntervalSeconds =
+                                intent.getFloatExtra(
+                                    POLICY_FIXED_INTERVAL,
+                                    current.fixedIntervalSeconds,
+                                ),
+                        )
+                        .clamped()
                 saveRecordingPolicy(recordingPolicy)
                 updates.value = updates.value.copy(policy = recordingPolicy)
                 if (!updates.value.running) stopSelf()
@@ -207,11 +259,12 @@ class FlightRecordingService : Service(), LocationListener {
             return if (simulatedStart || !startRequested) START_NOT_STICKY else START_STICKY
         }
         val requestedSimulation = intent?.getBooleanExtra("simulation", false) == true
-        val activeSimulation = when {
-            realHandoffPending -> false
-            startRequested || updates.value.running -> simulatedStart
-            else -> null
-        }
+        val activeSimulation =
+            when {
+                realHandoffPending -> false
+                startRequested || updates.value.running -> simulatedStart
+                else -> null
+            }
         val disposition = FlightWorkPolicy.startDisposition(activeSimulation, requestedSimulation)
         if (disposition == FlightStartDisposition.KEEP_CURRENT)
             return if (activeSimulation == true) START_NOT_STICKY else START_STICKY
@@ -231,7 +284,8 @@ class FlightRecordingService : Service(), LocationListener {
         } catch (e: Exception) {
             val message = e.message ?: e.javaClass.simpleName
             // Never label the previous simulation's measurements with the new real journal ID.
-            updates.value = FlightLiveState(journeyId = id, error = message, simulation = requestedSimulation)
+            updates.value =
+                FlightLiveState(journeyId = id, error = message, simulation = requestedSimulation)
             prefs.edit().putString("error", message).remove("active").apply()
             stopSelf()
             return START_NOT_STICKY
@@ -311,7 +365,11 @@ class FlightRecordingService : Service(), LocationListener {
                 updates.value =
                     FlightLiveState(
                         id,
-                        recordedFlightTrip(journey!!.name, samples.snapshot(), samples.distanceMeters),
+                        recordedFlightTrip(
+                            journey!!.name,
+                            samples.snapshot(),
+                            samples.distanceMeters,
+                        ),
                         samples.lastOrNull(),
                         tracking,
                         battery.toList(),
@@ -320,16 +378,20 @@ class FlightRecordingService : Service(), LocationListener {
                         simulation = simulatedStart,
                         simulationPlan = simulation?.activePlan,
                     )
-                if (!simulatedStart) requestGps()
+                if (!simulatedStart && tracking.phase != FlightTrackingPhase.LAYOVER) requestGps()
                 recorder =
                     FlightEnvironmentRecorder(this, worker) { reading ->
                         worker.post { environment = reading }
                     }
                 if (simulatedStart) updateSimulationActivity()
                 else {
-                    recorder?.start(false)
+                    if (tracking.phase != FlightTrackingPhase.LAYOVER) recorder?.start(false)
+                    else manageLayover()
                     worker.post(batteryTick)
-                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION, notification())
+                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(
+                        NOTIFICATION,
+                        notification(),
+                    )
                 }
             } catch (e: Exception) {
                 fail(e, id)
@@ -338,7 +400,9 @@ class FlightRecordingService : Service(), LocationListener {
         return if (requestedSimulation) START_NOT_STICKY else START_STICKY
     }
 
-    private fun restartMode() = if (realHandoffPending || (startRequested && !simulatedStart)) START_STICKY else START_NOT_STICKY
+    private fun restartMode() =
+        if (realHandoffPending || (startRequested && !simulatedStart)) START_STICKY
+        else START_NOT_STICKY
 
     private fun readRecordingPolicy(prefs: SharedPreferences): FlightRecordingPolicy =
         Companion.readPolicyFromPrefs(prefs)
@@ -352,6 +416,7 @@ class FlightRecordingService : Service(), LocationListener {
 
     @SuppressLint("MissingPermission")
     private fun requestGps() {
+        if (gpsActive) return
         check(
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
@@ -362,6 +427,7 @@ class FlightRecordingService : Service(), LocationListener {
             updates.value = updates.value.copy(error = getString(R.string.flight_live_gps_disabled))
         manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, thread.looper)
         manager.registerGnssStatusCallback(satellites, worker)
+        gpsActive = true
     }
 
     override fun onLocationChanged(location: android.location.Location) {
@@ -403,14 +469,22 @@ class FlightRecordingService : Service(), LocationListener {
                     soundSpectrum = environment.soundSpectrum.takeIf { updates.value.microphone },
                     vibrationHz = environment.vibrationHz,
                 )
-            acceptSample(sample, System.currentTimeMillis(), location.elapsedRealtimeNanos / 1_000_000)
+            acceptSample(
+                sample,
+                System.currentTimeMillis(),
+                location.elapsedRealtimeNanos / 1_000_000,
+            )
         } catch (e: Exception) {
             fail(e)
         }
     }
 
     /** Both GPS and the simulator use this exact persistence, sampling and phase-detection path. */
-    private fun acceptSample(sample: FlightSample, nowMillis: Long, fixReceivedAt: Long = SystemClock.elapsedRealtime()) {
+    private fun acceptSample(
+        sample: FlightSample,
+        nowMillis: Long,
+        fixReceivedAt: Long = SystemClock.elapsedRealtime(),
+    ) {
         if (stopping) return
         try {
             val previousState = tracking
@@ -432,10 +506,42 @@ class FlightRecordingService : Service(), LocationListener {
             }
             val previous = samples.lastOrNull()
             val plan = journey!!.plan
-            val decision = FlightRecordingDecisions.decide(recordingPolicy, previous, sample,
-                landed = tracking.phase == FlightTrackingPhase.LANDED,
-                previousRouteDeviationMeters = previous?.let { FlightRouteHypothesis.distanceToPlanKm(plan, it)?.times(1000)?.toFloat() },
-                routeDeviationMeters = FlightRouteHypothesis.distanceToPlanKm(plan, sample)?.times(1000)?.toFloat())
+            val normalDecision =
+                FlightRecordingDecisions.decide(
+                    recordingPolicy,
+                    previous,
+                    sample,
+                    landed =
+                        tracking.phase == FlightTrackingPhase.LANDED ||
+                            (tracking.phase == FlightTrackingPhase.LAYOVER &&
+                                previousState.phase != tracking.phase),
+                    previousRouteDeviationMeters =
+                        previous?.let {
+                            FlightRouteHypothesis.distanceToPlanKm(plan, it)?.times(1000)?.toFloat()
+                        },
+                    routeDeviationMeters =
+                        FlightRouteHypothesis.distanceToPlanKm(plan, sample)?.times(1000)?.toFloat(),
+                )
+            val layover = tracking.phase == FlightTrackingPhase.LAYOVER
+            val moved =
+                previous == null ||
+                    FlightTerrainTilePlanner.distanceKm(
+                        previous.latitude,
+                        previous.longitude,
+                        sample.latitude,
+                        sample.longitude,
+                    ) > .1
+            val decision =
+                if (layover)
+                    normalDecision.copy(
+                        shouldRecord = moved || previousState.phase != tracking.phase,
+                        intervalSeconds = 900f,
+                        reason =
+                            if (moved || previousState.phase != tracking.phase)
+                                FlightRecordingSaveReason.CADENCE_DUE
+                            else FlightRecordingSaveReason.WAITING_FOR_CADENCE,
+                    )
+                else normalDecision
             val record = decision.shouldRecord
             if (record) {
                 store!!.append(sample)
@@ -444,21 +550,109 @@ class FlightRecordingService : Service(), LocationListener {
             updates.value =
                 updates.value.copy(
                     trip =
-                        if (record) recordedFlightTrip(journey!!.name, samples.snapshot(), samples.distanceMeters)
+                        if (record)
+                            recordedFlightTrip(
+                                journey!!.name,
+                                samples.snapshot(),
+                                samples.distanceMeters,
+                            )
                         else updates.value.trip,
                     latest = sample,
                     receivedFixesThisSession = updates.value.receivedFixesThisSession + 1L,
                     recordingDecision = decision,
-                    lastSavedReason = if (record) decision.reason else updates.value.lastSavedReason,
+                    lastSavedReason =
+                        if (record) decision.reason else updates.value.lastSavedReason,
                     tracking = tracking,
                     lastFixElapsed = fixReceivedAt,
                     error = null,
                 )
             if (tracking.phase == FlightTrackingPhase.LANDED)
                 stopRecording(FlightTrackingPhase.LANDED)
+            else if (tracking.phase == FlightTrackingPhase.LAYOVER && !simulatedStart) {
+                releaseGps()
+                recorder?.stop()
+                environment = FlightEnvironmentReading()
+                manageLayover()
+            }
         } catch (e: Exception) {
             fail(e)
         }
+    }
+
+    private fun releaseGps() {
+        if (!gpsActive) return
+        manager.removeUpdates(this)
+        manager.unregisterGnssStatusCallback(satellites)
+        gpsActive = false
+        used = null
+        found = null
+    }
+
+    private val endLayoverProbe = Runnable {
+        if (tracking.phase == FlightTrackingPhase.LAYOVER) releaseGps()
+    }
+    private val layoverTick = Runnable { manageLayover() }
+
+    private fun layoverAlarm(): PendingIntent {
+        val intent =
+            Intent(this, FlightRecordingService::class.java)
+                .setAction(WAKE)
+                .putExtra("journey", journey?.id)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return if (Build.VERSION.SDK_INT >= 26)
+            PendingIntent.getForegroundService(this, 1, intent, flags)
+        else PendingIntent.getService(this, 1, intent, flags)
+    }
+
+    /**
+     * Stop GPS hardware between bounded probes; a slow stored-point cadence alone saves no GPS
+     * power.
+     */
+    private fun manageLayover() {
+        try {
+            updateLayover()
+        } catch (error: Exception) {
+            fail(error)
+        }
+    }
+
+    private fun updateLayover() {
+        if (simulatedStart || stopping || !updates.value.running) return
+        worker.removeCallbacks(layoverTick)
+        val alarm = getSystemService(ALARM_SERVICE) as AlarmManager
+        alarm.cancel(layoverAlarm())
+        if (tracking.phase != FlightTrackingPhase.LAYOVER) return
+        val now = System.currentTimeMillis()
+        val next = tracking.resumeIfDue(now, journey?.plan?.preparation ?: FlightPreparation())
+        if (next != tracking) {
+            tracking = next
+            store?.writeState(next)
+            updates.value = updates.value.copy(tracking = next)
+        }
+        if (tracking.phase != FlightTrackingPhase.LAYOVER) {
+            worker.removeCallbacks(endLayoverProbe)
+            requestGps()
+            recorder?.start(updates.value.microphone)
+            nextLayoverProbeMillis = 0L
+            return
+        }
+        if (tracking.resumeAtMillis == null) {
+            stopRecording(FlightTrackingPhase.LANDED)
+            return
+        }
+        if (nextLayoverProbeMillis == 0L) nextLayoverProbeMillis = now + 15 * 60_000L
+        if (now >= nextLayoverProbeMillis) {
+            nextLayoverProbeMillis = now + 15 * 60_000L
+            requestGps()
+            worker.removeCallbacks(endLayoverProbe)
+            worker.postDelayed(endLayoverProbe, 30_000)
+        }
+        val wake =
+            minOf(nextLayoverProbeMillis, tracking.resumeAtMillis!!).coerceAtLeast(now + 1000)
+        worker.postDelayed(layoverTick, wake - now)
+        if (Build.VERSION.SDK_INT < 31 || alarm.canScheduleExactAlarms())
+            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wake, layoverAlarm())
+        else alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wake, layoverAlarm())
     }
 
     /** Real recording outlives the UI; a rehearsal runs only while its flight is being viewed. */
@@ -563,15 +757,30 @@ class FlightRecordingService : Service(), LocationListener {
     private fun stopRecording(phase: FlightTrackingPhase, endService: Boolean = true) {
         if (stopping) return
         stopping = true
+        worker.removeCallbacks(layoverTick)
+        worker.removeCallbacks(endLayoverProbe)
+        runCatching { (getSystemService(ALARM_SERVICE) as AlarmManager).cancel(layoverAlarm()) }
+        runCatching { releaseGps() }
+        runCatching { recorder?.stop() }
         runCatching {
-            FlightLiveSafety.finalFix(samples.lastOrNull(), updates.value.latest)?.let { sample ->
-                store?.append(sample)
-                samples.append(sample)
-                journey?.let { j ->
-                    updates.value = updates.value.copy(trip = recordedFlightTrip(j.name, samples.snapshot(), samples.distanceMeters))
+                FlightLiveSafety.finalFix(samples.lastOrNull(), updates.value.latest)?.let { sample
+                    ->
+                    store?.append(sample)
+                    samples.append(sample)
+                    journey?.let { j ->
+                        updates.value =
+                            updates.value.copy(
+                                trip =
+                                    recordedFlightTrip(
+                                        j.name,
+                                        samples.snapshot(),
+                                        samples.distanceMeters,
+                                    )
+                            )
+                    }
                 }
             }
-        }.onFailure { updates.value = updates.value.copy(error = it.message) }
+            .onFailure { updates.value = updates.value.copy(error = it.message) }
         tracking = tracking.copy(phase = phase, slowSinceMillis = null)
         runCatching { store?.writeState(tracking) }
             .onFailure { updates.value = updates.value.copy(error = it.message) }
@@ -593,22 +802,27 @@ class FlightRecordingService : Service(), LocationListener {
         }
         updates.value = updates.value.copy(running = false, tracking = tracking)
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("active").apply()
-        journey?.let { j -> runCatching { FlightScheduleManager.cancel(this, j.id) }
-            .onFailure { updates.value = updates.value.copy(error = it.message) } }
+        journey?.let { j ->
+            runCatching { FlightScheduleManager.cancel(this, j.id) }
+                .onFailure { updates.value = updates.value.copy(error = it.message) }
+        }
         if (endService && !realHandoffPending) stopSelf()
     }
 
     private fun fail(e: Exception, journeyId: String? = updates.value.journeyId) {
-        val failed = updates.value.takeIf { it.journeyId == journeyId }
-            ?: FlightLiveState(journeyId = journeyId, simulation = simulatedStart)
-        updates.value =
-            failed.copy(error = e.message ?: e.javaClass.simpleName, running = false)
+        val failed =
+            updates.value.takeIf { it.journeyId == journeyId }
+                ?: FlightLiveState(journeyId = journeyId, simulation = simulatedStart)
+        updates.value = failed.copy(error = e.message ?: e.javaClass.simpleName, running = false)
         getSharedPreferences(PREFS, MODE_PRIVATE)
             .edit()
             .putString("error", e.message ?: e.javaClass.simpleName)
             .remove("active")
             .apply()
         stopping = true
+        worker.removeCallbacks(layoverTick)
+        worker.removeCallbacks(endLayoverProbe)
+        runCatching { (getSystemService(ALARM_SERVICE) as AlarmManager).cancel(layoverAlarm()) }
         stopSelf()
     }
 
@@ -685,6 +899,7 @@ class FlightRecordingService : Service(), LocationListener {
         const val PREFS = "flight-recording-service"
         const val STOP = "flight.stop"
         const val POLICY = "flight.policy"
+        private const val WAKE = "flight.layover.wake"
         const val ROUTE = "flight.route"
         const val MICROPHONE = "flight.microphone"
         const val CONFIRM_AIRBORNE = "flight.confirm.airborne"
@@ -707,7 +922,9 @@ class FlightRecordingService : Service(), LocationListener {
         /** Stores the global next-flight policy without starting or touching the recorder. */
         internal fun savePolicy(context: Context, policy: FlightRecordingPolicy) {
             val safe = policy.clamped()
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            context
+                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
                 .putFloat(POLICY_DISTANCE, safe.cruisePointDistanceMeters)
                 .putFloat(POLICY_INTERVAL, safe.maximumStraightIntervalSeconds)
                 .putFloat(POLICY_TURN, safe.turnAcceleration)
@@ -718,32 +935,39 @@ class FlightRecordingService : Service(), LocationListener {
         }
 
         private fun readPolicyFromPrefs(prefs: SharedPreferences): FlightRecordingPolicy {
-            val mode = prefs.getString(POLICY_MODE, FlightRecordingMode.ADAPTIVE.name)
-                ?.let { raw -> runCatching { FlightRecordingMode.valueOf(raw) }.getOrNull() }
-                ?: FlightRecordingMode.ADAPTIVE
+            val mode =
+                prefs.getString(POLICY_MODE, FlightRecordingMode.ADAPTIVE.name)?.let { raw ->
+                    runCatching { FlightRecordingMode.valueOf(raw) }.getOrNull()
+                } ?: FlightRecordingMode.ADAPTIVE
             return FlightRecordingPolicy(
-                cruisePointDistanceMeters = prefs.getFloat(
-                    POLICY_DISTANCE,
-                    FlightRecordingPolicy.DEFAULT_CRUISE_DISTANCE_METERS
-                ),
-                maximumStraightIntervalSeconds = prefs.getFloat(
-                    POLICY_INTERVAL,
-                    FlightRecordingPolicy.DEFAULT_MAXIMUM_INTERVAL_SECONDS
-                ),
-                turnAcceleration = prefs.getFloat(
-                    POLICY_TURN,
-                    FlightRecordingPolicy.DEFAULT_TURN_ACCELERATION
-                ),
-                routeDeviationAcceleration = prefs.getFloat(
-                    POLICY_DEVIATION,
-                    FlightRecordingPolicy.DEFAULT_ROUTE_DEVIATION_ACCELERATION
-                ),
-                mode = mode,
-                fixedIntervalSeconds = prefs.getFloat(
-                    POLICY_FIXED_INTERVAL,
-                    FlightRecordingPolicy.DEFAULT_FIXED_INTERVAL_SECONDS
+                    cruisePointDistanceMeters =
+                        prefs.getFloat(
+                            POLICY_DISTANCE,
+                            FlightRecordingPolicy.DEFAULT_CRUISE_DISTANCE_METERS,
+                        ),
+                    maximumStraightIntervalSeconds =
+                        prefs.getFloat(
+                            POLICY_INTERVAL,
+                            FlightRecordingPolicy.DEFAULT_MAXIMUM_INTERVAL_SECONDS,
+                        ),
+                    turnAcceleration =
+                        prefs.getFloat(
+                            POLICY_TURN,
+                            FlightRecordingPolicy.DEFAULT_TURN_ACCELERATION,
+                        ),
+                    routeDeviationAcceleration =
+                        prefs.getFloat(
+                            POLICY_DEVIATION,
+                            FlightRecordingPolicy.DEFAULT_ROUTE_DEVIATION_ACCELERATION,
+                        ),
+                    mode = mode,
+                    fixedIntervalSeconds =
+                        prefs.getFloat(
+                            POLICY_FIXED_INTERVAL,
+                            FlightRecordingPolicy.DEFAULT_FIXED_INTERVAL_SECONDS,
+                        ),
                 )
-            ).clamped()
+                .clamped()
         }
 
         fun start(context: Context, id: String) =
@@ -771,12 +995,17 @@ class FlightRecordingService : Service(), LocationListener {
 
         fun stop(context: Context, journeyId: String?) =
             context.startService(
-                Intent(context, FlightRecordingService::class.java).setAction(STOP).putExtra("journey", journeyId)
+                Intent(context, FlightRecordingService::class.java)
+                    .setAction(STOP)
+                    .putExtra("journey", journeyId)
             )
 
-        fun confirmAirborne(context: Context, journeyId: String?) = context.startService(
-            Intent(context, FlightRecordingService::class.java).setAction(CONFIRM_AIRBORNE).putExtra("journey", journeyId)
-        )
+        fun confirmAirborne(context: Context, journeyId: String?) =
+            context.startService(
+                Intent(context, FlightRecordingService::class.java)
+                    .setAction(CONFIRM_AIRBORNE)
+                    .putExtra("journey", journeyId)
+            )
 
         fun microphone(context: Context, enabled: Boolean, journeyId: String?) =
             context.startService(
@@ -801,15 +1030,29 @@ class FlightRecordingService : Service(), LocationListener {
             )
         }
 
-        fun route(context: Context, journeyId: String?, stops: List<FlightStop>) {
+        fun route(
+            context: Context,
+            journeyId: String?,
+            stops: List<FlightStop>,
+            preparation: FlightPreparation? = null,
+        ) {
             require(stops.size in 2..100 && FlightOfflinePreparation.canSimulate(FlightPlan(stops)))
-            context.startService(Intent(context, FlightRecordingService::class.java).setAction(ROUTE)
-                .putExtra("journey", journeyId)
-                .putExtra("routeNames", stops.map { it.name.take(256) }.toTypedArray())
-                .putExtra("routeLatitudes", stops.map { requireNotNull(it.latitude) }.toDoubleArray())
-                .putExtra("routeLongitudes", stops.map { requireNotNull(it.longitude) }.toDoubleArray())
-                .putExtra("routeTypes", stops.map { it.type.name }.toTypedArray()))
+            context.startService(
+                Intent(context, FlightRecordingService::class.java)
+                    .setAction(ROUTE)
+                    .putExtra("journey", journeyId)
+                    .putExtra("preparation", preparation?.toJson()?.toString())
+                    .putExtra("routeNames", stops.map { it.name.take(256) }.toTypedArray())
+                    .putExtra(
+                        "routeLatitudes",
+                        stops.map { requireNotNull(it.latitude) }.toDoubleArray(),
+                    )
+                    .putExtra(
+                        "routeLongitudes",
+                        stops.map { requireNotNull(it.longitude) }.toDoubleArray(),
+                    )
+                    .putExtra("routeTypes", stops.map { it.type.name }.toTypedArray())
+            )
         }
-
     }
 }

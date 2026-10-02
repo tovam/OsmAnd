@@ -25,7 +25,7 @@ internal fun FlightIgnoredTimesDialog(
     onChange: (List<FlightTimeRange>, Boolean, List<FlightTimeRange>) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val source = state.trip?.recording() ?: return
+    val source = state.recordingForSelectedFlight().trip ?: state.trip?.recording() ?: return
     val first = source.samples.firstOrNull()?.timestampMillis ?: return
     val last = source.samples.last().timestampMillis
     val cursor = state.snapshot?.sample?.timestampMillis?.coerceIn(first, last)

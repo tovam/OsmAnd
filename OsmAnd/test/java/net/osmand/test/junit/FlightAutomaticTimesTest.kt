@@ -136,6 +136,21 @@ class FlightAutomaticTimesTest {
     }
 
     @Test
+    fun gpsJitterAndIsolatedSpeedSpikesDoNotMoveGateBoundaries() {
+        val raw = journey(600 to 0f, 180 to 20f, 600 to 700f, 180 to 20f, 600 to 0f)
+        val noisy = raw.copy(samples = raw.samples.map { sample ->
+            if (sample.speedMetersPerSecond == 0f) sample.copy(
+                latitude = if (sample.index % 2 == 0) .00002 else -.00002,
+                speedMetersPerSecond = if (sample.index % 17 == 0) 250f else .1f)
+            else sample
+        })
+        val expected = FlightAutomaticTimes.flights(raw).single()
+        val detected = FlightAutomaticTimes.flights(noisy).single()
+        assertTrue(kotlin.math.abs(expected.startMillis - detected.startMillis) <= 20000)
+        assertTrue(kotlin.math.abs(expected.endMillis - detected.endMillis) <= 20000)
+    }
+
+    @Test
     fun compressedStepsSkipOnlySeparatorsInBothDirections() {
         val raw = journey(600 to 700f)
         val visible =

@@ -36,6 +36,7 @@ internal fun FlightLiveFixNotice(live: FlightLiveState) {
     val message = when {
         live.error != null -> live.error
         live.simulation -> null
+        live.tracking.phase == FlightTrackingPhase.LAYOVER -> stringResource(R.string.flight_layover_gps)
         health == FlightFixHealth.WAITING -> stringResource(R.string.flight_live_waiting_fix_notice)
         health == FlightFixHealth.STALE -> stringResource(R.string.flight_live_stale_fix_notice)
         accuracy != null && accuracy > 100f -> stringResource(R.string.flight_live_inaccurate_fix_notice, accuracy)
@@ -43,7 +44,7 @@ internal fun FlightLiveFixNotice(live: FlightLiveState) {
         else -> stringResource(R.string.flight_live_gps_receiving)
     }
     if (message != null) Text(message,
-        color = if (health == FlightFixHealth.FRESH && live.error == null && accuracy != null && accuracy <= 100f && live.latest?.altitudeMeters != null)
+        color = if (live.tracking.phase == FlightTrackingPhase.LAYOVER || (health == FlightFixHealth.FRESH && live.error == null && accuracy != null && accuracy <= 100f && live.latest?.altitudeMeters != null))
             Color.LightGray else Color(0xFFFFBD39), fontSize = 11.sp,
         modifier = Modifier.heightIn(min = 18.dp).padding(horizontal = 6.dp, vertical = 2.dp))
 }
@@ -75,7 +76,8 @@ internal fun FlightLiveScreen(
         when (live.tracking.phase) {
             FlightTrackingPhase.WAITING -> R.string.flight_live_takeoff_undetected
             FlightTrackingPhase.AIRBORNE -> R.string.flight_live_airborne
-            FlightTrackingPhase.LANDED -> R.string.flight_live_landed
+            FlightTrackingPhase.LAYOVER -> R.string.flight_layover
+                            FlightTrackingPhase.LANDED -> R.string.flight_live_landed
             FlightTrackingPhase.STOPPED -> R.string.flight_live_stopped
         }
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13)).padding(horizontal = 8.dp)) {
@@ -116,7 +118,7 @@ internal fun FlightLiveScreen(
             LiveRow(
                 stringResource(R.string.flight_live_fix_age),
                 age?.let { "$it s" } ?: "—",
-                age == null || age > 15,
+                live.tracking.phase != FlightTrackingPhase.LAYOVER && (age == null || age > 15),
             )
             LiveRow(
                 stringResource(R.string.flight_live_satellites),

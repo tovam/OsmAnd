@@ -8,10 +8,11 @@
     <string name="flight_schedule_leg">Flight %1$d</string>
     <string name="flight_schedule_invalid">Each flight needs an arrival after its departure. The next departure must follow the previous arrival.</string>
     <string name="flight_layover">Layover</string>
+    <string name="flight_layover_gps">Layover · GPS check every 15 min</string>
     <string name="flight_arrival_still">Automatic arrival after a stable stop; taxiing is included.</string>
 
-    <string name="flight_ignored_times">Ignored periods (%1$d)</string>
-    <string name="flight_ignored_times_title">Ignored recording periods</string>
+    <string name="flight_ignored_times">Flight periods (%1$d)</string>
+    <string name="flight_ignored_times_title">Flight periods</string>
     <string name="flight_ignored_times_help">Hidden in map, 3D and replay views. The original GPS recording and photo associations are kept. Remove a period to show it again.</string>
     <string name="flight_ignored_times_zone">Times use your device time zone; each date shows its UTC offset.</string>
     <string name="flight_ignored_times_before">Ignore before cursor</string>
@@ -725,8 +726,8 @@
 	<string name="flight_plan_save">Save preparation on phone</string>
 	<string name="flight_plan_saved">Préparation enregistrée sur ce téléphone, accessible dans Vols prévus.</string>
 	<string name="flight_plan_simulation">SIMULATION · trajet et altitudes hypothétiques, jamais enregistrés comme mesures.</string>
-	<string name="flight_plan_stop_minutes">Durée lente (min)</string>
-	<string name="flight_plan_stop_speed">Vitesse lente (km/h)</string>
+	<string name="flight_plan_stop_minutes">Stable stop (min)</string>
+	<string name="flight_plan_stop_speed">Near-zero speed (km/h)</string>
 	<string name="flight_plan_takeoff_speed">Décollage (km/h)</string>
 	<string name="flight_plan_terrain_z">Relief Z</string>
 	<string name="flight_plan_time_hint">Date : année-mois-jour heure:minute. UTC +02:00 = heure locale en avance de 2 heures sur UTC. Indique le décalage applicable à cette date pour chaque aéroport, y compris l’heure d’été.</string>

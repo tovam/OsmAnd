@@ -17,6 +17,8 @@ internal class FlightLiveSimulation(plan: FlightPlan, source: FlightTrip?, start
     val departure = beginning + lead
     val arrival = departure + flightDuration
     val end = arrival + ((plan.preparation ?: FlightPreparation()).stopMinutes + 1) * 60_000L
+    private val originalPreparation = plan.preparation ?: FlightPreparation()
+    private val shift = departure - originalPreparation.departureMillis
     val activePlan =
         plan.copy(
             stops =
@@ -37,7 +39,10 @@ internal class FlightLiveSimulation(plan: FlightPlan, source: FlightTrip?, start
             preparation =
                 (plan.preparation ?: FlightPreparation()).copy(
                     departureMillis = departure,
-                    arrivalMillis = arrival,
+                    arrivalMillis = if (originalPreparation.validSchedule() && originalPreparation.additionalFlights.isNotEmpty()) originalPreparation.arrivalMillis + shift else arrival,
+                    additionalFlights = if (originalPreparation.validSchedule()) originalPreparation.additionalFlights.map { leg ->
+                        leg.copy(departureMillis = leg.departureMillis + shift, arrivalMillis = leg.arrivalMillis + shift)
+                    } else emptyList(),
                     automatic = false,
                 ),
         )

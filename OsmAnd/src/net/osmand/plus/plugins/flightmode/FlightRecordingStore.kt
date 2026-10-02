@@ -100,6 +100,8 @@ internal class FlightRecordingStore(context: Context, id: String) {
             j.optDouble("baseline").takeIf(Double::isFinite),
             j.optLong("slow").takeIf { it > 0 },
             j.optLong("fix").takeIf { it > 0 },
+            completedFlights = j.optInt("completedFlights").coerceAtLeast(0),
+            resumeAtMillis = j.optLong("resumeAt").takeIf { it > 0 },
         )
     }
 
@@ -110,6 +112,8 @@ internal class FlightRecordingStore(context: Context, id: String) {
                 .put("baseline", state.baselineAltitude)
                 .put("slow", state.slowSinceMillis)
                 .put("fix", state.lastFixMillis)
+                .put("completedFlights", state.completedFlights)
+                .put("resumeAt", state.resumeAtMillis)
         val stream = stateFile.startWrite()
         try {
             stream.write(j.toString().toByteArray())

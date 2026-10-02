@@ -197,6 +197,8 @@ class FlightIgnoredTimesTest {
                 state.copy(ignoredTimeRanges = listOf(FlightTimeRange(time(2), time(3))))
             )
         )
+        assertFalse(state.hasSameJournalContentAs(state.copy(automaticFlightTimes = false)))
+        assertFalse(state.hasSameJournalContentAs(state.copy(restoredTimeRanges = listOf(FlightTimeRange(time(2), time(3))))))
         val journey =
             FlightJourney(
                 "synthetic",
@@ -208,6 +210,8 @@ class FlightIgnoredTimesTest {
                 emptyList(),
                 emptyList(),
             )
+        assertFalse(journey.hasSameCloudContentAs(journey.copy(automaticFlightTimes = false)))
+        assertFalse(journey.hasSameCloudContentAs(journey.copy(restoredTimeRanges = listOf(FlightTimeRange(time(2), time(3))))))
         assertFalse(
             journey.hasSameCloudContentAs(
                 journey.copy(ignoredTimeRanges = listOf(FlightTimeRange(time(2), time(3))))

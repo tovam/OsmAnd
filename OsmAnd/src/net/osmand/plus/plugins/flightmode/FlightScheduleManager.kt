@@ -131,9 +131,8 @@ internal object FlightScheduleManager {
     fun arm(context: Context, journey: FlightJourney): Long {
         val p = requireNotNull(journey.plan.preparation)
         require(
-            p.departureMillis > 0 &&
-                p.arrivalMillis > p.departureMillis &&
-                p.arrivalMillis > System.currentTimeMillis()
+            p.validSchedule() &&
+                p.scheduledFlights().last().arrivalMillis > System.currentTimeMillis()
         ) {
             context.getString(R.string.flight_plan_dates_invalid)
         }

@@ -15,8 +15,8 @@ internal object FlightAutomaticTimes {
     fun evidence(sample: FlightSample, previous: FlightSample?): Evidence {
         val reliable =
             sample.timestampMillis > 0 &&
-                sample.latitude.isFinite() &&
-                sample.longitude.isFinite() &&
+                sample.latitude in -90.0..90.0 &&
+                sample.longitude in -180.0..180.0 &&
                 sample.horizontalAccuracyMeters?.let { it.isFinite() && it in 0f..100f } != false
         if (!reliable) return Evidence(null, false)
         val measured = sample.speedMetersPerSecond?.takeIf { it.isFinite() && it >= 0 }?.times(3.6)
@@ -69,6 +69,7 @@ internal object FlightAutomaticTimes {
             }
             while (speeds.isNotEmpty() && now - speeds.first().first > 20_000) speeds.removeFirst()
             speeds.addLast(now to evidence.speedKmh)
+            while (speeds.size > 21) speeds.removeFirst()
             // Median rejects isolated speed spikes without extrapolating acceleration backwards.
             val sorted = speeds.map { it.second }.sorted()
             val speed = sorted[sorted.size / 2]
@@ -96,7 +97,10 @@ internal object FlightAutomaticTimes {
                     stillAnchor = sample
                 }
             } else {
-                if (stillSince != null && now - stillSince!! >= STILL_MILLIS)
+                if (
+                    stillSince != null &&
+                        now - stillSince!! >= plan.stopMinutes.coerceIn(1, 10) * 60_000L
+                )
                     stops +=
                         FlightTimeRange(
                             stillSince!!,
@@ -128,7 +132,11 @@ internal object FlightAutomaticTimes {
                 highSince = null
                 highCount = 0
             }
-            if (start != null && stillSince != null && now - stillSince!! >= STILL_MILLIS) {
+            if (
+                start != null &&
+                    stillSince != null &&
+                    now - stillSince!! >= plan.stopMinutes.coerceIn(1, 10) * 60_000L
+            ) {
                 result += FlightTimeRange(start!!, stillSince!!)
                 start = null
                 stops.clear()

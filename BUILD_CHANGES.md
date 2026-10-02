@@ -1,3 +1,3 @@
-- Added ignored recording periods per flight, with before/after cursor shortcuts.
-- Map, 3D, altitude and replay views hide ignored portions; removing a period restores them.
-- Saved and exported flights keep the original GPS recording and photo associations.
+- Automatically detect flights including taxiing; compress ground time with small timeline separators.
+- Schedule several flights in one journey, use sparse GPS during layovers and stop after the final stable arrival.
+- Keep original GPS and photos; preserve manual ignored periods and allow restoring automatically hidden time.

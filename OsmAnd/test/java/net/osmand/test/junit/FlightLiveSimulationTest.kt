@@ -8,11 +8,11 @@ class FlightLiveSimulationTest {
     private val plan =
         FlightPlan(
             listOf(FlightStop("A", 48.0, 2.0), FlightStop("B", 43.0, 10.0)),
-            preparation = FlightPreparation(startMinutesBefore = 15, stopMinutes = 30),
+            preparation = FlightPreparation(startMinutesBefore = 15, stopMinutes = 2),
         )
 
     @Test
-    fun realDetectorRunsThroughAirportTakeoffAndThirtyMinutesAfterLanding() {
+    fun realDetectorRunsThroughAirportTakeoffAndFinalStableStop() {
         val source = FlightLiveSimulation(plan, null, 1_800_000_000_000)
         var tracking = FlightTrackingState()
         val phases = linkedSetOf<FlightTrackingPhase>()
@@ -22,7 +22,7 @@ class FlightLiveSimulationTest {
             tracking = tracking.accept(fix, time, source.activePlan.preparation!!)
             phases += tracking.phase
             if (time < source.departure) assertEquals(FlightTrackingPhase.WAITING, tracking.phase)
-            if (time >= source.arrival && time < source.arrival + 30 * 60_000L)
+            if (time >= source.arrival && time < source.arrival + 2 * 60_000L)
                 assertNotEquals(FlightTrackingPhase.LANDED, tracking.phase)
             time += 1000
         }
@@ -36,6 +36,28 @@ class FlightLiveSimulationTest {
         )
         assertEquals(FlightTrackingPhase.LANDED, tracking.phase)
         assertFalse(source.activePlan.preparation!!.automatic)
+    }
+
+    @Test
+    fun rehearsalUsesTwoScheduledFlightsAndResumesThroughLayover() {
+        val departure = 1800000000000L
+        val multi = FlightPlan(listOf(FlightStop("A", 0.0, 0.0), FlightStop("B", 0.0, 10.0), FlightStop("C", 0.0, 15.0)),
+            preparation = FlightPreparation(departureMillis = departure, arrivalMillis = departure + 3600000,
+                additionalFlights = listOf(FlightScheduledLeg(departure + 18000000, departure + 21600000))))
+        val scenario = FlightLiveSimulation(multi, null, 1900000000000L)
+        assertTrue(scenario.activePlan.preparation!!.validSchedule())
+        var tracking = FlightTrackingState()
+        val phases = mutableSetOf<FlightTrackingPhase>()
+        var time = scenario.beginning
+        while (time <= scenario.end) {
+            val fix = scenario.sampleAt(time)
+            tracking = tracking.accept(fix, time, scenario.activePlan.preparation!!)
+            phases += tracking.phase
+            time += 10000
+        }
+        assertTrue(FlightTrackingPhase.LAYOVER in phases)
+        assertEquals(FlightTrackingPhase.LANDED, tracking.phase)
+        assertEquals(2, tracking.completedFlights)
     }
 
     @Test

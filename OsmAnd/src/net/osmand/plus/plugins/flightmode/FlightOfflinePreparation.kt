@@ -116,7 +116,7 @@ object FlightOfflinePreparation {
         Triple(
             plan.stops.map { Triple(it.latitude, it.longitude, it.type) },
             plan.preparation?.departureMillis ?: 0L,
-            plan.preparation?.arrivalMillis ?: 0L,
+            plan.preparation?.scheduledFlights().orEmpty(),
         )
 
     suspend fun quote(plan: FlightPlan): FlightOfflineQuote {
@@ -249,6 +249,10 @@ object FlightOfflinePreparation {
         val prep = plan.preparation ?: FlightPreparation()
         val start = prep.departureMillis.takeIf { it > 0 } ?: System.currentTimeMillis()
         val stopoverCount = (1 until plan.stops.lastIndex).count(plan::isIntermediateStopover)
+        if (prep.validSchedule() && prep.additionalFlights.isNotEmpty() && prep.scheduledFlights().size == stopoverCount + 1) {
+            return FlightLiveTimeline.build(plan, null, FlightSample(0, 0, start, coordinates.first().first,
+                coordinates.first().second, 0.0, 0f, null, null), completedFlights = 0)
+        }
         val duration =
             (prep.arrivalMillis - start).takeIf { it > 0 }
                 ?: (total / 750 * 3_600_000).toLong().coerceAtLeast(600_000) +

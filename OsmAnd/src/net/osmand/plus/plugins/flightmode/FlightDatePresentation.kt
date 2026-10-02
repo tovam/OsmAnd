@@ -34,9 +34,9 @@ internal fun flightDateRange(
         val p = preparation?.takeIf { it.departureMillis > 0L } ?: return null
         return FlightDateRange(
             p.departureMillis,
-            p.arrivalMillis.takeIf { it >= p.departureMillis },
+            p.scheduledFlights().last().arrivalMillis.takeIf { it >= p.departureMillis },
             p.departureOffsetMinutes,
-            p.arrivalOffsetMinutes,
+            p.scheduledFlights().last().arrivalOffsetMinutes,
             if (simulated) FlightDateSource.SIMULATED else FlightDateSource.PLANNED,
         )
     }
@@ -59,7 +59,7 @@ internal fun flightDateRange(
             it,
             end?.takeUnless { ongoing || it == start },
             preparation?.departureOffsetMinutes ?: 0,
-            preparation?.arrivalOffsetMinutes ?: 0,
+            preparation?.scheduledFlights()?.lastOrNull()?.arrivalOffsetMinutes ?: 0,
             if (simulated) FlightDateSource.SIMULATED else FlightDateSource.RECORDED,
             ongoing,
         )
