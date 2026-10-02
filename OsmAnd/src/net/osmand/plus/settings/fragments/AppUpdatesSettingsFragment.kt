@@ -13,8 +13,8 @@ class AppUpdatesSettingsFragment : BaseSettingsFragment(), GitHubAppUpdateManage
 
     override fun setupPreferences() {
         updateManager = GitHubAppUpdateManager.get(app)
-        setPreferenceIcon(CHECK, getContentIcon(R.drawable.ic_action_update))
-        setPreferenceIcon(OPEN, getContentIcon(R.drawable.ic_action_external_link))
+        getContentIcon(R.drawable.ic_action_update)?.let { setPreferenceIcon(CHECK, it) }
+        getContentIcon(R.drawable.ic_action_external_link)?.let { setPreferenceIcon(OPEN, it) }
         requirePreference<Preference>(SOURCE).summary = GitHubAppRelease.RELEASES_PAGE
         render(updateManager.snapshot)
     }
