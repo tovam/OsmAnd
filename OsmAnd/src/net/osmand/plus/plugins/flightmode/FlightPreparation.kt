@@ -287,7 +287,8 @@ data class FlightTrackingState(
             if (evidence.speedKmh == null) null
             else if (speeds.isNotEmpty()) speeds[speeds.size / 2] else evidence.speedKmh
         val baseline = baselineAltitude ?: sample.altitudeMeters
-        if (phase == FlightTrackingPhase.WAITING) {
+        val waitingForPlannedFlight = completedFlights == 0 || plan.scheduledFlights().size > completedFlights
+        if (phase == FlightTrackingPhase.WAITING && (waitingForPlannedFlight || speed == null || speed >= plan.airborneSpeedKmh)) {
             val fast =
                 if (speed != null && speed >= plan.airborneSpeedKmh)
                     if (continuous) fastSinceMillis ?: sample.timestampMillis
@@ -329,7 +330,7 @@ data class FlightTrackingState(
         val landed =
             since != null &&
                 sample.timestampMillis - since >= plan.stopMinutes.coerceIn(1, 10) * 60_000L
-        val completed = completedFlights + if (landed) 1 else 0
+        val completed = completedFlights + if (landed && phase == FlightTrackingPhase.AIRBORNE) 1 else 0
         val next =
             if (landed)
                 plan.scheduledFlights().getOrNull(completed)?.takeIf { it.departureMillis > 0 }
@@ -340,6 +341,8 @@ data class FlightTrackingState(
                     if (next != null) FlightTrackingPhase.LAYOVER else FlightTrackingPhase.LANDED
                 else phase,
             completedFlights = completed,
+            baselineAltitude = baseline,
+            fastSinceMillis = null,
             resumeAtMillis = next?.departureMillis?.minus(plan.startMinutesBefore * 60_000L),
             slowSinceMillis = since,
             lastFixMillis = sample.timestampMillis,

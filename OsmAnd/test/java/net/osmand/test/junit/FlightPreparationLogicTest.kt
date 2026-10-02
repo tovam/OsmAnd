@@ -306,6 +306,27 @@ class FlightPreparationLogicTest {
     }
 
     @Test
+    fun cancellingNextFlightAfterGpsResumesStopsAtRestWithoutCountingAnotherFlight() {
+        val config = FlightPreparation(departureMillis = base, arrivalMillis = base + 600000)
+        var state = FlightTrackingState(phase = FlightTrackingPhase.WAITING, completedFlights = 1)
+        for (s in 1000..1130) state = accept(state, sample(s), config)
+        assertEquals(FlightTrackingPhase.LANDED, state.phase)
+        assertEquals(1, state.completedFlights)
+    }
+
+    @Test
+    fun cancelledConnectionClearsOldFastEvidenceBeforeAnotherTakeoff() {
+        val config = FlightPreparation(departureMillis = base, arrivalMillis = base + 600000)
+        var state = FlightTrackingState(phase = FlightTrackingPhase.WAITING, completedFlights = 1,
+            baselineAltitude = 100.0, fastSinceMillis = base, lastFixMillis = base + 999000)
+        state = accept(state, sample(1000), config)
+        assertNull(state.fastSinceMillis)
+        for (s in 1001..1050) state = accept(state, sample(s), config)
+        for (s in 1051..1070) state = accept(state, sample(s, 1100.0, 100f), config)
+        assertEquals(FlightTrackingPhase.WAITING, state.phase)
+    }
+
+    @Test
     fun offsetsAndDatesRoundTripWithoutPhoneTimezone() {
         for (offset in listOf(-720, -30, 0, 60, 345, 840)) {
             assertEquals(
