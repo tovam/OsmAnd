@@ -286,7 +286,9 @@ data class FlightTrackingState(
         val speed =
             if (evidence.speedKmh == null) null
             else if (speeds.isNotEmpty()) speeds[speeds.size / 2] else evidence.speedKmh
-        val baseline = baselineAltitude ?: sample.altitudeMeters
+        val baseline = baselineAltitude ?: sample.altitudeMeters?.takeIf {
+            speed != null && speed <= plan.stopSpeedKmh.coerceIn(1, 10)
+        }
         val waitingForPlannedFlight = completedFlights == 0 || plan.scheduledFlights().size > completedFlights
         if (phase == FlightTrackingPhase.WAITING && (waitingForPlannedFlight || speed == null || speed >= plan.airborneSpeedKmh)) {
             val fast =

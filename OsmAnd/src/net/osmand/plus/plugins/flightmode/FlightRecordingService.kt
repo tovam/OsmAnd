@@ -358,7 +358,11 @@ class FlightRecordingService : Service(), LocationListener {
                 if (tracking.baselineAltitude == null)
                     tracking =
                         tracking.copy(
-                            baselineAltitude = samples.firstNotNullOfOrNull { it.altitudeMeters }
+                            baselineAltitude = samples.firstOrNull { sample ->
+                                sample.horizontalAccuracyMeters?.let { it in 0f..100f } == true &&
+                                    sample.speedMetersPerSecond?.let { it.isFinite() && it >= 0f && it * 3.6 <= (journey!!.plan.preparation ?: FlightPreparation()).stopSpeedKmh } == true &&
+                                    sample.altitudeMeters != null
+                            }?.altitudeMeters
                         )
                 if (!simulatedStart) prefs.edit().putString("active", id).apply()
                 recordingPolicy = readRecordingPolicy(prefs)

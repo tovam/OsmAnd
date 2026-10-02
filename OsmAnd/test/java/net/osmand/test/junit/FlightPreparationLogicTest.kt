@@ -327,6 +327,16 @@ class FlightPreparationLogicTest {
     }
 
     @Test
+    fun firstFixAtCruiseConfirmsAutomaticallyWithoutInventingAGroundAltitude() {
+        var state = FlightTrackingState()
+        for (s in 1000..1045) state = accept(state, sample(s, 11000.0, 220f))
+        assertNull(state.baselineAltitude)
+        assertEquals(FlightTrackingPhase.AIRBORNE, state.phase)
+        for (s in 1046..1220) state = accept(state, sample(s, 100.0, 0f))
+        assertEquals(FlightTrackingPhase.LANDED, state.phase)
+    }
+
+    @Test
     fun offsetsAndDatesRoundTripWithoutPhoneTimezone() {
         for (offset in listOf(-720, -30, 0, 60, 345, 840)) {
             assertEquals(
