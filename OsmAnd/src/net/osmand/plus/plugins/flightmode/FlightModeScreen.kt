@@ -203,7 +203,7 @@ fun FlightModeScreen(
 	onMarkFlightEnd: () -> Unit,
 	onCancelFlightStart: () -> Unit,
 	onRemoveFlightSpan: (Int) -> Unit,
-	onSetIgnoredTimeRanges: (List<FlightTimeRange>) -> Unit = {},
+	onSetIgnoredTimeRanges: (List<FlightTimeRange>, Boolean, List<FlightTimeRange>) -> Unit = { _, _, _ -> },
 	onSetSatelliteQuality: (FlightSatelliteQuality) -> Unit,
 	onSetTerrainFineZoom: (Int) -> Unit,
 	onSetTerrainMiddleZoom: (Int) -> Unit,
@@ -2315,6 +2315,14 @@ private fun ReplayBar(
 						drawLine(FlightBlue.copy(alpha = 0.55f), Offset(startX, mainY), Offset(endX, mainY), 5.dp.toPx(), StrokeCap.Round)
 					}
 				}
+				trip?.samples?.filter { it.excludedBefore }?.forEach { point ->
+                    val boundary = trip.progressFor(point)
+                    if (boundary in timelineWindow.startProgress..timelineWindow.endProgress) {
+                        val x = (boundary - timelineWindow.startProgress) / timelineWindow.fraction * size.width
+                        drawLine(Color(0xFF0A0F13), Offset(x - 2.dp.toPx(), mainY - 5.dp.toPx()), Offset(x + 2.dp.toPx(), mainY + 5.dp.toPx()), 3.dp.toPx())
+                        drawLine(FlightMuted, Offset(x - 2.dp.toPx(), mainY - 5.dp.toPx()), Offset(x + 2.dp.toPx(), mainY + 5.dp.toPx()), 1.dp.toPx())
+                    }
+                }
 				val localProgress = if (timelineWindow.fraction > 0f) {
 					((state.replayProgress - timelineWindow.startProgress) / timelineWindow.fraction).coerceIn(0f, 1f)
 				} else 0f

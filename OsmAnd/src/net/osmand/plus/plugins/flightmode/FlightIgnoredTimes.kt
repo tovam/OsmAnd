@@ -104,9 +104,7 @@ internal fun flightProgressOutsideIgnoredTime(
     forward: Boolean,
 ): Float {
     if (trip.samples.isEmpty() || trip.ignoredTimeRanges.isEmpty()) return progress
-    val start = trip.samples.first().timestampMillis
-    val end = trip.samples.last().timestampMillis
-    val target = start + ((end - start).toDouble() * progress).toLong()
+    val target = trip.timestampAtProgress(progress, forward)
     var low = 0
     var high = trip.samples.lastIndex
     while (low <= high) {
@@ -115,6 +113,7 @@ internal fun flightProgressOutsideIgnoredTime(
     }
     val upper = trip.samples[low.coerceIn(0, trip.samples.lastIndex)]
     val lower = trip.samples[(low - 1).coerceIn(0, trip.samples.lastIndex)]
+    if (trip.timeProjection != null) return trip.progressFor(upper.copy(timestampMillis = target))
     if (!upper.excludedBefore || target <= lower.timestampMillis || target >= upper.timestampMillis)
         return progress
     val point = if (forward) upper else lower
@@ -143,13 +142,8 @@ internal fun displayedFlightSpanEntries(
         else
             index to
                 FlightSpan(
-                    ((from - visibleStart).toDouble() /
-                            (visibleEnd - visibleStart).coerceAtLeast(1L))
-                        .toFloat()
-                        .coerceIn(0f, 1f),
-                    ((to - visibleStart).toDouble() / (visibleEnd - visibleStart).coerceAtLeast(1L))
-                        .toFloat()
-                        .coerceIn(0f, 1f),
+                    trip.progressFor(trip.samples.first().copy(timestampMillis = from)),
+                    trip.progressFor(trip.samples.first().copy(timestampMillis = to)),
                 )
     }
 }

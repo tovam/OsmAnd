@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_automatic_times">Detect flights automatically</string>
+    <string name="flight_automatic_times_help">Flights include taxiing, from departure at rest to the final stop. Ground time is compressed. Uncertain recordings stay visible. Manual ignored periods take priority.</string>
+    <string name="flight_automatic_hidden">Hidden automatically</string>
+    <string name="flight_automatic_reset">Reset automatic corrections</string>
+    <string name="flight_schedule_add_leg">Add another flight</string>
+    <string name="flight_schedule_leg">Flight %1$d</string>
+    <string name="flight_schedule_invalid">Each flight needs an arrival after its departure. The next departure must follow the previous arrival.</string>
+    <string name="flight_layover">Layover</string>
+    <string name="flight_arrival_still">Automatic arrival after a stable stop; taxiing is included.</string>
+
     <string name="flight_ignored_times">Ignored periods (%1$d)</string>
     <string name="flight_ignored_times_title">Ignored recording periods</string>
     <string name="flight_ignored_times_help">Hidden in map, 3D and replay views. The original GPS recording and photo associations are kept. Remove a period to show it again.</string>

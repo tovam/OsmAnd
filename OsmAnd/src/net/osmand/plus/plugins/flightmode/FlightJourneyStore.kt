@@ -580,6 +580,8 @@ class FlightJourneyStore(private val context: Context) {
 			}
 		})
 		put("ignoredTimeRanges", flightTimeRangesToJson(journey.ignoredTimeRanges))
+		put("automaticFlightTimes", journey.automaticFlightTimes)
+		put("restoredTimeRanges", flightTimeRangesToJson(journey.restoredTimeRanges))
 		put("photos", JSONArray().apply {
 			journey.photos.forEach { photo ->
 				put(JSONObject().apply {
@@ -667,6 +669,8 @@ class FlightJourneyStore(private val context: Context) {
 			trip = trip,
 			flightSpans = spans,
 			ignoredTimeRanges = flightTimeRangesFromJson(root.optJSONArray("ignoredTimeRanges")),
+			automaticFlightTimes = root.optBoolean("automaticFlightTimes", true),
+			restoredTimeRanges = flightTimeRangesFromJson(root.optJSONArray("restoredTimeRanges")),
 			photos = photos,
 			offlineAssets = offlineAssetsFromJson(root.optJSONObject("offlineAssets")),
 			offlineRequest = offlineAssetsFromJson(root.optJSONObject("offlineRequest")),

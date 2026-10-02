@@ -22,7 +22,7 @@ import net.osmand.plus.R
 @Composable
 internal fun FlightIgnoredTimesDialog(
     state: FlightUiState,
-    onChange: (List<FlightTimeRange>) -> Unit,
+    onChange: (List<FlightTimeRange>, Boolean, List<FlightTimeRange>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val source = state.trip?.recording() ?: return
@@ -35,6 +35,25 @@ internal fun FlightIgnoredTimesDialog(
     val context = LocalContext.current
     val zone = remember { TimeZone.getDefault() }
     val busy = state.ignoredTimeRangesBusy
+    val automaticRanges =
+        remember(
+            source,
+            state.plan.preparation,
+            state.automaticFlightTimes,
+            state.restoredTimeRanges,
+        ) {
+            if (state.automaticFlightTimes)
+                subtractFlightTimeRanges(
+                    FlightAutomaticTimes.excluded(
+                        source,
+                        state.plan.preparation ?: FlightPreparation(),
+                    ),
+                    state.restoredTimeRanges,
+                )
+            else emptyList()
+        }
+    fun change(ranges: List<FlightTimeRange>) =
+        onChange(ranges, state.automaticFlightTimes, state.restoredTimeRanges)
     val valid = from <= to && from in first..last && to in first..last
     fun pick(time: Long, end: Boolean, apply: (Long) -> Unit) {
         val calendar = Calendar.getInstance(zone).apply { timeInMillis = time }
@@ -78,6 +97,21 @@ internal fun FlightIgnoredTimesDialog(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 item {
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(
+                            stringResource(R.string.flight_automatic_times),
+                            Modifier.weight(1f),
+                            fontSize = 12.sp,
+                        )
+                        Switch(
+                            checked = state.automaticFlightTimes,
+                            enabled = !busy,
+                            onCheckedChange = {
+                                onChange(state.ignoredTimeRanges, it, state.restoredTimeRanges)
+                            },
+                        )
+                    }
+                    Text(stringResource(R.string.flight_automatic_times_help), fontSize = 12.sp)
                     Text(stringResource(R.string.flight_ignored_times_help), fontSize = 12.sp)
                     Text(stringResource(R.string.flight_ignored_times_zone), fontSize = 11.sp)
                     Text(
@@ -100,7 +134,7 @@ internal fun FlightIgnoredTimesDialog(
                     TextButton(
                         enabled = !busy && cursor != null && cursor > first,
                         onClick = {
-                            onChange(state.ignoredTimeRanges + FlightTimeRange(first, cursor!! - 1))
+                            change(state.ignoredTimeRanges + FlightTimeRange(first, cursor!! - 1))
                         },
                     ) {
                         Text(stringResource(R.string.flight_ignored_times_before), fontSize = 12.sp)
@@ -108,7 +142,7 @@ internal fun FlightIgnoredTimesDialog(
                     TextButton(
                         enabled = !busy && cursor != null && cursor < last,
                         onClick = {
-                            onChange(state.ignoredTimeRanges + FlightTimeRange(cursor!! + 1, last))
+                            change(state.ignoredTimeRanges + FlightTimeRange(cursor!! + 1, last))
                         },
                     ) {
                         Text(stringResource(R.string.flight_ignored_times_after), fontSize = 12.sp)
@@ -133,7 +167,7 @@ internal fun FlightIgnoredTimesDialog(
                         )
                     TextButton(
                         enabled = !busy && valid,
-                        onClick = { onChange(state.ignoredTimeRanges + FlightTimeRange(from, to)) },
+                        onClick = { change(state.ignoredTimeRanges + FlightTimeRange(from, to)) },
                     ) {
                         Text(stringResource(R.string.flight_ignored_times_add), fontSize = 12.sp)
                     }
@@ -147,6 +181,45 @@ internal fun FlightIgnoredTimesDialog(
                     if (state.ignoredTimeRanges.isEmpty())
                         Text(stringResource(R.string.flight_ignored_times_none), fontSize = 12.sp)
                 }
+                itemsIndexed(automaticRanges) { _, range ->
+                    Column {
+                        Text(stringResource(R.string.flight_automatic_hidden), fontSize = 11.sp)
+                        Text(
+                            "${format.format(Date(range.startMillis))} → ${format.format(Date(range.endMillis))}",
+                            fontSize = 12.sp,
+                        )
+                        TextButton(
+                            enabled = !busy,
+                            onClick = {
+                                onChange(
+                                    state.ignoredTimeRanges,
+                                    true,
+                                    state.restoredTimeRanges + range,
+                                )
+                            },
+                        ) {
+                            Text(
+                                stringResource(R.string.flight_ignored_times_restore),
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+                item {
+                    if (state.restoredTimeRanges.isNotEmpty())
+                        TextButton(
+                            enabled = !busy,
+                            onClick = {
+                                onChange(
+                                    state.ignoredTimeRanges,
+                                    state.automaticFlightTimes,
+                                    emptyList(),
+                                )
+                            },
+                        ) {
+                            Text(stringResource(R.string.flight_automatic_reset), fontSize = 12.sp)
+                        }
+                }
                 itemsIndexed(state.ignoredTimeRanges) { index, range ->
                     Column {
                         Text(
@@ -156,9 +229,7 @@ internal fun FlightIgnoredTimesDialog(
                         TextButton(
                             enabled = !busy,
                             onClick = {
-                                onChange(
-                                    state.ignoredTimeRanges.filterIndexed { i, _ -> i != index }
-                                )
+                                change(state.ignoredTimeRanges.filterIndexed { i, _ -> i != index })
                             },
                         ) {
                             Text(

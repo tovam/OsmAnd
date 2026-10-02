@@ -244,15 +244,17 @@ data class FlightTrip(
 	val recordedSource: FlightTrip? = null,
 	val ignoredTimeRanges: List<FlightTimeRange> = emptyList()
 ) {
+	internal val timeProjection = if (hasUsableTimestamps && samples.any { it.excludedBefore }) FlightTimeProjection(samples) else null
 	val durationMillis: Long?
 		get() {
 			if (!hasUsableTimestamps || samples.size < 2) return null
-			return samples.last().timestampMillis - samples.first().timestampMillis
+			return timeProjection?.durationMillis ?: (samples.last().timestampMillis - samples.first().timestampMillis)
 		}
 
 	fun progressFor(sample: FlightSample): Float {
 		if (samples.size < 2) return 0f
 		if (hasUsableTimestamps) {
+			timeProjection?.let { return it.progress(sample.timestampMillis) }
 			val start = samples.first().timestampMillis
 			val duration = samples.last().timestampMillis - start
 			if (duration > 0L) {
@@ -769,7 +771,9 @@ data class FlightJourney(
 	val batteryHistory: List<FlightBatteryPoint> = emptyList(),
 	val offlineRequest: FlightOfflineAssets = FlightOfflineAssets(),
 	val simulation: Boolean = false,
-	val ignoredTimeRanges: List<FlightTimeRange> = emptyList()
+	val ignoredTimeRanges: List<FlightTimeRange> = emptyList(),
+	val automaticFlightTimes: Boolean = true,
+	val restoredTimeRanges: List<FlightTimeRange> = emptyList()
 )
 
 /** Ground point receiving an additional satellite-detail ring. */
@@ -923,6 +927,8 @@ data class FlightUiState(
 	val showTrackPoints: Boolean = false,
 	val flightSpans: List<FlightSpan> = emptyList(),
 	val ignoredTimeRanges: List<FlightTimeRange> = emptyList(),
+	val automaticFlightTimes: Boolean = true,
+	val restoredTimeRanges: List<FlightTimeRange> = emptyList(),
 	val ignoredTimeRangesBusy: Boolean = false,
 	val ignoredTimeRangesError: String? = null,
 	val pendingFlightStartProgress: Float? = null,

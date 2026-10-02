@@ -29,7 +29,7 @@ internal fun FlightDetailScreen(
     onOffline: (Boolean) -> Unit,
     onPolicy: (FlightRecordingPolicy) -> Unit,
     onClone: () -> Unit,
-    onIgnoredTimes: (List<FlightTimeRange>) -> Unit,
+    onIgnoredTimes: (List<FlightTimeRange>, Boolean, List<FlightTimeRange>) -> Unit,
 ) {
     val prepared = state.sessionMode == FlightSessionMode.PREPARE && !state.simulatedJourney
     val active = state.activeRecording.takeIf { it.journeyId == state.journeyId && it.running }

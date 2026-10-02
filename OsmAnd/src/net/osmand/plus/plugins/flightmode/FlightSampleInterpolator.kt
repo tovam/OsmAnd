@@ -58,8 +58,7 @@ object FlightSampleInterpolator {
 		if (!resolvedTrip.hasUsableTimestamps) return (progress * samples.lastIndex).toDouble()
 		if (resolvedTrip.recordedSource != null) {
 			val visibleProgress = flightProgressOutsideIgnoredTime(resolvedTrip, progress, true)
-			val start = samples.first().timestampMillis
-			val target = start + ((samples.last().timestampMillis - start).toDouble() * visibleProgress).toLong()
+			val target = resolvedTrip.timestampAtProgress(visibleProgress)
 			return positionAtTimestamp(resolvedTrip, target, 0L)
 		}
 

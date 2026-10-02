@@ -125,11 +125,8 @@ internal object FlightLiveTimeline {
     private const val STOPOVER_MILLIS = 45 * 60_000L
 
     fun progress(trip: FlightTrip, time: Long): Float {
-        val start = trip.samples.firstOrNull()?.timestampMillis ?: return 0f
-        val end = trip.samples.lastOrNull()?.timestampMillis ?: return 0f
-        return ((time - start).toDouble() / (end - start).coerceAtLeast(1L))
-            .toFloat()
-            .coerceIn(0f, 1f)
+        val point = trip.samples.firstOrNull() ?: return 0f
+        return trip.progressFor(point.copy(timestampMillis = time))
     }
 
     fun withoutFutureMeasurements(snapshot: FlightSnapshot, lastFixMillis: Long): FlightSnapshot =

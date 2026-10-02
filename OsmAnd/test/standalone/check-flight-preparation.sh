@@ -55,7 +55,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightCalibrationTerrain.kt" \
   "$sources/FlightAltitudeProfile.kt" \
   "$sources/FlightGpsGaps.kt" "$sources/FlightOverviewTiles.kt" "$sources/FlightVisibilityLease.kt" \
-  "$sources/FlightIgnoredTimes.kt" \
+  "$sources/FlightIgnoredTimes.kt" "$sources/FlightAutomaticTimes.kt" "$sources/FlightTimeProjection.kt" \
   "$sources/FlightProfileSegments.kt" \
   "$sources/FlightLiveDisplayState.kt" \
   "$sources/FlightRecordingDecision.kt" \
@@ -94,7 +94,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightCalibrationTerrainTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightAltitudeProfileTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightGpsGapsTest.kt" \
-  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightIgnoredTimesTest.kt" \
+  "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightIgnoredTimesTest.kt" "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightAutomaticTimesTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightReplayGapTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightDatePresentationTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightGapTrajectoryTest.kt" \
@@ -132,7 +132,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore
   net.osmand.test.junit.FlightVisibilityLeaseTest \
   net.osmand.test.junit.FlightOverviewTilesTest \
   net.osmand.test.junit.FlightGpsGapsTest \
-  net.osmand.test.junit.FlightIgnoredTimesTest \
+  net.osmand.test.junit.FlightIgnoredTimesTest net.osmand.test.junit.FlightAutomaticTimesTest \
   net.osmand.test.junit.FlightReplayGapTest \
   net.osmand.test.junit.FlightDatePresentationTest \
   net.osmand.test.junit.FlightGapTrajectoryTest \

@@ -40,9 +40,7 @@ class FlightReplayEngine(private val trip: FlightTrip, recordedSampleCount: Int 
 
 	private fun byTimestamp(progress: Float): FlightSnapshot {
 		val samples = trip.samples
-		val start = samples.first().timestampMillis
-		val end = samples.last().timestampMillis
-		val target = start + ((end - start).toDouble() * progress).toLong()
+		val target = trip.timestampAtProgress(progress)
 		var low = 0
 		var high = samples.lastIndex
 		while (low <= high) {
