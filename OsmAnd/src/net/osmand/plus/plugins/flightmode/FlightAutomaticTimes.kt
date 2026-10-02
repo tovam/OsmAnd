@@ -44,6 +44,7 @@ internal object FlightAutomaticTimes {
     ): List<FlightTimeRange> {
         val samples = trip.recording().samples
         if (!trip.hasUsableTimestamps || samples.size < 3) return emptyList()
+        val stillKmh = plan.stopSpeedKmh.coerceIn(1, 10).toDouble()
         val result = mutableListOf<FlightTimeRange>()
         val speeds = ArrayDeque<Pair<Long, Double>>()
         var highSince: Long? = null
@@ -73,10 +74,10 @@ internal object FlightAutomaticTimes {
             // Median rejects isolated speed spikes without extrapolating acceleration backwards.
             val sorted = speeds.map { it.second }.sorted()
             val speed = sorted[sorted.size / 2]
-            if (evidence.speedKmh <= STILL_KMH) lastRawStill = now
+            if (evidence.speedKmh <= stillKmh) lastRawStill = now
             val anchor = stillAnchor
             val stationary =
-                speed <= STILL_KMH &&
+                speed <= stillKmh &&
                     (anchor == null ||
                         FlightTerrainTilePlanner.distanceKm(
                             anchor.latitude,
@@ -90,7 +91,7 @@ internal object FlightAutomaticTimes {
                         previous
                             ?.takeIf {
                                 it.speedMetersPerSecond?.times(3.6)?.let { speed ->
-                                    speed <= STILL_KMH
+                                    speed <= stillKmh
                                 } == true
                             }
                             ?.timestampMillis ?: now

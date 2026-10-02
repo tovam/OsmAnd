@@ -136,6 +136,22 @@ class FlightAutomaticTimesTest {
     }
 
     @Test
+    fun configuredStillSpeedAppliesEquallyToLiveAndReplayWithPositionNoise() {
+        val source = journey(600 to 0f, 180 to 20f, 600 to 700f, 180 to 20f, 600 to 0f)
+        val noisy = source.copy(samples = source.samples.map { sample ->
+            if (sample.timestampMillis >= epoch + 1560000) sample.copy(speedMetersPerSecond = 4f / 3.6f) else sample
+        })
+        val config = FlightPreparation(stopSpeedKmh = 5)
+        assertEquals(noisy.samples.last().timestampMillis, FlightAutomaticTimes.flights(noisy).single().endMillis)
+        assertTrue(FlightAutomaticTimes.flights(noisy, config).single().endMillis < epoch + 1600000)
+        var live = FlightTrackingState(phase = FlightTrackingPhase.AIRBORNE)
+        noisy.samples.filter { it.timestampMillis >= epoch + 1560000 }.forEach { sample ->
+            live = live.accept(sample, sample.timestampMillis, config)
+        }
+        assertEquals(FlightTrackingPhase.LANDED, live.phase)
+    }
+
+    @Test
     fun gpsJitterAndIsolatedSpeedSpikesDoNotMoveGateBoundaries() {
         val raw = journey(600 to 0f, 180 to 20f, 600 to 700f, 180 to 20f, 600 to 0f)
         val noisy = raw.copy(samples = raw.samples.map { sample ->

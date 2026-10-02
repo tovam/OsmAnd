@@ -319,7 +319,7 @@ data class FlightTrackingState(
                 ) <= .02
         val still =
             speed != null &&
-                speed <= minOf(plan.stopSpeedKmh.toDouble(), FlightAutomaticTimes.STILL_KMH) &&
+                speed <= plan.stopSpeedKmh.coerceIn(1, 10).toDouble() &&
                 nearAnchor
         val since =
             if (still)
