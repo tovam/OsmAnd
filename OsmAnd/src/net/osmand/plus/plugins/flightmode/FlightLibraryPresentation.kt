@@ -82,5 +82,5 @@ internal fun FlightLibraryRow.isActiveRecording(live: FlightLiveState, bindings:
     val id = live.journeyId ?: return false
     if (!live.running && live.error == null) return false
     val remoteId = bindings.firstOrNull { it.localId == id }?.remoteId ?: id
-    return local?.id == id || logicalCloudId == remoteId
+    return local?.id == id || (local == null && remote?.id == remoteId)
 }

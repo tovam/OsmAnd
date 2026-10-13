@@ -21,6 +21,8 @@ class FlightLibraryPresentationTest {
         val serverRow = FlightLibraryRow(null, remote, null)
         assertTrue(localRow.isActiveRecording(live, listOf(binding)))
         assertTrue(serverRow.isActiveRecording(live, listOf(binding)))
+        val savedCopy = localRow.copy(local = summary.copy(id = "saved-copy"))
+        assertFalse(savedCopy.isActiveRecording(live, listOf(binding)))
         assertFalse(serverRow.isActiveRecording(live.copy(running = false), listOf(binding)))
         assertTrue(serverRow.isActiveRecording(live.copy(running = false, error = "failure"), listOf(binding)))
         assertFalse(serverRow.isActiveRecording(live.copy(journeyId = "another"), listOf(binding)))
