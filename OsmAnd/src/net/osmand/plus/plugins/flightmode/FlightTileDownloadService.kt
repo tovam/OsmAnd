@@ -26,7 +26,7 @@ class FlightTileDownloadService : Service() {
     private var task: Job? = null
     private var activeId: String? = null
     private val wakeLock by lazy {
-        getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "OsmAnd:FlightTileDownload").apply {
+        requireNotNull(getSystemService(PowerManager::class.java)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "OsmAnd:FlightTileDownload").apply {
             setReferenceCounted(false)
         }
     }
@@ -40,7 +40,7 @@ class FlightTileDownloadService : Service() {
         super.onCreate()
         queue.addAll(preferences.getStringSet("pending", emptySet()).orEmpty())
         if (Build.VERSION.SDK_INT >= 26) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
+            requireNotNull(getSystemService(NotificationManager::class.java)).createNotificationChannel(
                 NotificationChannel(CHANNEL, getString(R.string.flight_download_background), NotificationManager.IMPORTANCE_LOW)
             )
         }
@@ -144,13 +144,13 @@ class FlightTileDownloadService : Service() {
     }
 
     private fun connected(): Boolean {
-        val manager = getSystemService(ConnectivityManager::class.java)
+        val manager = requireNotNull(getSystemService(ConnectivityManager::class.java))
         return manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
     }
 
     private fun publish(id: String, status: FlightTerrainStatus) {
         mutableUpdates.value = mutableUpdates.value + (id to status)
-        if (activeId == id) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification(id, status))
+        if (activeId == id) requireNotNull(getSystemService(NotificationManager::class.java)).notify(NOTIFICATION, notification(id, status))
     }
 
     private fun notification(id: String?, status: FlightTerrainStatus): android.app.Notification {
