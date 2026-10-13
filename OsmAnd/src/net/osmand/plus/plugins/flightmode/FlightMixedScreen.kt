@@ -137,6 +137,5 @@ internal fun FlightMixedScreen(
                     }
                 else null,
         )
-        FlightBottomNavigation(state, onPage, minimalChrome = true)
     }
 }

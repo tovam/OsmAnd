@@ -262,9 +262,9 @@ internal fun FlightTilesScreen(
                     color = FlightTileColors.accent,
                     trackColor = FlightTileColors.border,
                 )
+            FlightDownloadMetrics(state)
             FlightTileDownloadBar(state, onPreload, onPausePreload)
         }
-        FlightBottomNavigation(state, onPageChange, minimalChrome = true)
     }
     if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload, onPrecision)
     selectedCell?.let { cell ->

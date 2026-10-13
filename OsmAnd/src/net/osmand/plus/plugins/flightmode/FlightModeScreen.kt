@@ -400,7 +400,6 @@ fun FlightModeScreen(
 				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
 					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, { editLiveRoute = true })
 					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction,onSetRecordingPolicy) }
-					FlightBottomNavigation(state, onPageChange)
 				}
 				FlightPage.PREPARE -> key(state.journeyId) { FlightPlanningScreen(state,onUpdatePlan,
 					onSavePreparation,onPreloadPreparation,onCancelPreparationDownload,onRehearsePreparation,
@@ -530,9 +529,13 @@ fun FlightModeScreen(
 				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload, onInspectStorageCleanup, onCleanUnusedStorage)
 			}
 
-			}
-			}
-			if (state.loadingTrip) {
+            }
+            if (state.page in FlightWorkspaceNavigation.pages(state.sessionMode)) {
+                FlightBottomNavigation(state, onPageChange,
+                    overlay = state.page in listOf(FlightPage.MAP, FlightPage.MIXED), minimalChrome = true)
+            }
+            }
+            if (state.loadingTrip) {
 				Box(
 					modifier = Modifier.fillMaxSize().background(Color(0xD900000000)).clickable { },
 					contentAlignment = Alignment.Center
@@ -877,7 +880,6 @@ private fun MapScreen(
 			}
 			if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty())
 				ReplayBar(state.copy(trip = state.liveTimeline ?: state.trip), onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
-			FlightBottomNavigation(state, onPageChange, overlay = true)
 		}
 	}
 }
@@ -1151,7 +1153,6 @@ private fun WindowScreen(
 				}
 			}
 		}
-		FlightBottomNavigation(state, onPageChange)
 		}
 	}
 }
@@ -1620,7 +1621,6 @@ private fun SensorsScreen(
 				}
 			}
 		}
-		FlightBottomNavigation(state, onPageChange)
 	}
 }
 
@@ -1712,7 +1712,6 @@ private fun PhotoScreen(
 				PhotoLibraryEntry(photo, state.trip) { editorPointingMode = false; editorId = photo.id; onSelectPhoto(photo.id) }
 			}
 		}
-		FlightBottomNavigation(state, onPageChange)
 	}
 	all.firstOrNull { it.id == editorId }?.let { photo ->
 		if (fullScreenPhoto == null) FlightPhotoEditor(photo, state, { editorId = null },
