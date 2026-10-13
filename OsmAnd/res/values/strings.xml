@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_route_undo">Undo route edit</string>
+    <string name="flight_route_edit_effects">Edit the remaining destinations and waypoints. Apply updates the predicted route and arrival planning; recorded GPS points stay unchanged and recording continues. Downloaded tiles are kept, but the new route may need additional tiles. Cancel discards this draft. You can undo the last edit from Map.</string>
+
+    <string name="flight_files_target_precision">Target resolution for all corridor bands (saved files are kept)</string>
+    <string name="flight_files_saved_count">%1$d saved</string>
+    <string name="flight_files_missing_count">%1$d missing</string>
+
     <string name="flight_download_background">Downloading flight tiles</string>
     <string name="flight_download_waiting_network">Waiting for a connection — automatic retry</string>
     <string name="flight_download_system_paused">Android paused background work. Resume from Tiles.</string>

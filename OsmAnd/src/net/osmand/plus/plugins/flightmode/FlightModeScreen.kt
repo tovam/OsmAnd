@@ -299,8 +299,12 @@ fun FlightModeScreen(
 		val safeDrawingInsets = WindowInsets.safeDrawing
 		var includeFutureProfile by rememberSaveable(state.journeyId) { mutableStateOf(true) }
 		var editLiveRoute by remember(state.journeyId) { mutableStateOf(false) }
+        var previousLiveStops by remember(state.journeyId) { mutableStateOf<List<FlightStop>?>(null) }
 		if (editLiveRoute && state.sessionMode == FlightSessionMode.LIVE)
-			FlightLiveRouteEditor(state, onUpdatePlan, { editLiveRoute = false })
+			FlightLiveRouteEditor(state, { draft ->
+                previousLiveStops = state.plan.stops
+                onUpdatePlan(draft)
+            }, { editLiveRoute = false })
 		if (showCloudLibrary) FlightCloudScreen(state, { showCloudLibrary = false }, onOpenJourney, onSaveJourney,
 			cloud, cloudSelectedKey, when (state.page) { FlightPage.PLANS -> 1; FlightPage.JOURNEYS -> 2; else -> 0 }, onLocalJourneyRemoved,
 			initialSettings = cloudSelectedKey == null)
@@ -411,6 +415,9 @@ fun FlightModeScreen(
 					includeFutureProfile = includeFutureProfile,
 					onIncludeFutureProfile = { includeFutureProfile = it },
 					onEditLiveRoute = { editLiveRoute = true },
+                    onUndoLiveRoute = previousLiveStops?.let { stops -> {
+                        onUpdatePlan(state.plan.copy(stops = stops)); previousLiveStops = null
+                    } },
 					mapView = mapView,
 					onClose = onClose,
 					onPageChange = onPageChange,
@@ -482,7 +489,14 @@ fun FlightModeScreen(
 					state = state,
 					onPageChange = onPageChange,
 					onPreload = onPreloadPreparation,
-					onPausePreload = onCancelPreparationDownload
+					onPausePreload = onCancelPreparationDownload,
+                    onPrecision = { satellite, zoom ->
+                        val preparation = state.plan.preparation ?: FlightPreparation()
+                        val bands = preparation.bands.map { band ->
+                            if (satellite) band.copy(satelliteZoom = zoom) else band.copy(terrainZoom = zoom)
+                        }
+                        onUpdatePlan(state.plan.copy(preparation = preparation.copy(bands = bands)))
+                    }
 				)
 				FlightPage.SENSORS -> SensorsScreen(
 					state = state,
@@ -793,6 +807,7 @@ private fun MapScreen(
 	includeFutureProfile: Boolean,
 	onIncludeFutureProfile: (Boolean) -> Unit,
 	onEditLiveRoute: () -> Unit,
+    onUndoLiveRoute: (() -> Unit)?,
 	mapView: OsmandMapTileView?,
 	onClose: () -> Unit,
 	onMapBounds: (android.graphics.Rect?) -> Unit,
@@ -827,6 +842,7 @@ private fun MapScreen(
 					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
 				if (state.sessionMode == FlightSessionMode.LIVE) {
 					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, onEditLiveRoute)
+                    onUndoLiveRoute?.let { CompactAction(stringResource(R.string.flight_route_undo), FlightMuted, it) }
 					AltitudeProfileSelector(includeFutureProfile, onIncludeFutureProfile)
 				}
 			}

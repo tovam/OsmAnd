@@ -29,6 +29,7 @@ internal fun FlightTilesScreen(
     onPageChange: (FlightPage) -> Unit,
     onPreload: (FlightOfflineQuote) -> Unit,
     onPausePreload: () -> Unit,
+    onPrecision: (Boolean, Int) -> Unit,
 ) {
     var tileView by remember { mutableStateOf<FlightSatelliteCacheView?>(null) }
     var tileLayer by rememberSaveable(state.journeyId) { mutableIntStateOf(0) }
@@ -265,7 +266,7 @@ internal fun FlightTilesScreen(
         }
         FlightBottomNavigation(state, onPageChange, minimalChrome = true)
     }
-    if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload)
+    if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload, onPrecision)
     selectedCell?.let { cell ->
         FlightTileCellDialog(
             cell,
