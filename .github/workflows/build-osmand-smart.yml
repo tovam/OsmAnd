@@ -50,6 +50,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: osmandapp/OsmAnd-core-legacy
+          # Keep the checked dependency synchronizer stable.
+          ref: 2d46e11ff329e53eb89dca2856ecb5fbb7856b4f
           path: core-legacy
 
       - name: Checkout OsmAnd build scripts
@@ -79,6 +81,12 @@ jobs:
           cache-dependency-path: |
             android/**/*.gradle*
             android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Prepare reliable legacy dependency downloads
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s android/.github/scripts -p 'test_prepare_legacy_core.py'
+          python3 android/.github/scripts/prepare-legacy-core.py prepare core-legacy
 
       - name: Apply flight altitude and volumetric geometry to OsmAnd core
         run: |
