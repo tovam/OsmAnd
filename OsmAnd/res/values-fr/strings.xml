@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_window_motion">Visée capteurs</string>
+    <string name="flight_window_motion_align">Aligner ici</string>
+    <string name="flight_window_motion_unavailable">Capteur d’orientation indisponible</string>
+
     <string name="flight_route_undo">Annuler la modification</string>
     <string name="flight_route_edit_effects">Modifie les destinations et étapes restantes. Appliquer met à jour la trajectoire estimée et la planification des arrivées ; les points GPS enregistrés restent inchangés et le suivi continue. Les tuiles sont conservées, mais le nouveau trajet peut en demander davantage. Annuler abandonne ce brouillon. La dernière modification peut être annulée depuis Carte.</string>
 

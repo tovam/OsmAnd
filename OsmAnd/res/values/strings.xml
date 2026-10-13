@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_window_motion">Phone aiming</string>
+    <string name="flight_window_motion_align">Align here</string>
+    <string name="flight_window_motion_unavailable">Orientation sensor unavailable</string>
+
     <string name="flight_route_undo">Undo route edit</string>
     <string name="flight_route_edit_effects">Edit the remaining destinations and waypoints. Apply updates the predicted route and arrival planning; recorded GPS points stay unchanged and recording continues. Downloaded tiles are kept, but the new route may need additional tiles. Cancel discards this draft. You can undo the last edit from Map.</string>
 
