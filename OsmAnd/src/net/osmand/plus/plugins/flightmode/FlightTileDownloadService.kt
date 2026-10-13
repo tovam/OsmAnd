@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
@@ -24,6 +25,11 @@ class FlightTileDownloadService : Service() {
     private val queue = linkedSetOf<String>()
     private var task: Job? = null
     private var activeId: String? = null
+    private val wakeLock by lazy {
+        getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "OsmAnd:FlightTileDownload").apply {
+            setReferenceCounted(false)
+        }
+    }
     private val preferences by lazy { getSharedPreferences("flight-tile-downloads", MODE_PRIVATE) }
     private val store by lazy { FlightJourneyStore(this) }
     private val repository by lazy { FlightTerrainRepository(application as OsmandApplication) }
@@ -48,6 +54,11 @@ class FlightTileDownloadService : Service() {
                 publish(id, (updates.value[id] ?: FlightTerrainStatus()).copy(phase = FlightTerrainPhase.PAUSED, bytesPerSecond = 0))
                 persist()
                 if (activeId == id) task?.cancel()
+            }
+            if (queue.isNotEmpty()) {
+                val notification = notification(queue.first(), updates.value[queue.first()] ?: FlightTerrainStatus())
+                if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                else startForeground(NOTIFICATION, notification)
             }
             if (activeId == null) startNext()
         } else {
@@ -92,7 +103,15 @@ class FlightTileDownloadService : Service() {
                         delay(30_000)
                         continue
                     }
-                    val result = repository.preloadPrepared(quote) { publish(id, it) }
+                    val result = try {
+                        wakeLock.acquire(10 * 60 * 1000L)
+                        repository.preloadPrepared(quote) { status ->
+                            if (!wakeLock.isHeld) wakeLock.acquire(10 * 60 * 1000L)
+                            publish(id, status)
+                        }
+                    } finally {
+                        if (wakeLock.isHeld) wakeLock.release()
+                    }
                     withContext(Dispatchers.IO) { store.updateVerifiedOfflineAssets(id, assets, result.assets) }
                     publish(id, result.status)
                     if (result.status.phase == FlightTerrainPhase.READY) break
@@ -150,6 +169,7 @@ class FlightTileDownloadService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        if (wakeLock.isHeld) wakeLock.release()
         super.onDestroy()
     }
 
