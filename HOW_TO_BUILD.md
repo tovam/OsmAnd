@@ -1,6 +1,6 @@
-# Build on GitHub — use Git, NOT gh
+# Build on GitHub — push first
 
-- Do not run `gh`, request `gh auth login`, inspect credentials, or build locally: the existing `git push` works.
+- Use `git push` to launch builds by default. The user has now installed and authorized `gh` for scoped Actions diagnosis, re-enabling workflows and dispatch when needed. Use existing authentication without inspecting credentials or running `gh auth login`; do not build locally.
 - Work in `cd /Users/tommy/dev/osmand-fork/OsmAnd`; check `git status --short` and `git branch --show-current` (must be `master`).
 - Before building application changes, update `BUILD_CHANGES.md` with 1–3 short bullets describing the features added, changed, or fixed since the previous published APK. Keep unchanged notes when rebuilding the same application code. Releases publish this file from the exact built revision instead of technical build boilerplate.
 - Stage only the intended changes: `git add <actual-file-paths>`; review with `git diff --cached`.
