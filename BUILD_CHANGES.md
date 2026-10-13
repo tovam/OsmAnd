@@ -1,2 +1,1 @@
-- Dedicated update settings check releases from tovam/OsmAnd and compare them with the installed build.
-- Show release notes and open the newer release directly on GitHub.
+- Repair Photo+ headers, keep tabs accessible and simplify live timeline controls.

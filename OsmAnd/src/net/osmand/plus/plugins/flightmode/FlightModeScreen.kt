@@ -3,6 +3,9 @@ package net.osmand.plus.plugins.flightmode
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Paint
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -819,15 +822,15 @@ private fun MapScreen(
 			onSetHeadingLocked = onSetMapHeadingLocked,
 			controlsVisible = controlsVisible, onToggleControls = { controlsVisible = !controlsVisible })
 		if (controlsVisible) Column(Modifier.fillMaxWidth()) {
-			Row(Modifier.fillMaxWidth().background(FlightHudPanel)) {
+			Row(Modifier.fillMaxWidth().background(FlightHudPanel).horizontalScroll(rememberScrollState())) {
 				CompactAction(stringResource(R.string.flight_map_points_short),
 					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
 				if (state.sessionMode == FlightSessionMode.LIVE) {
 					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, onEditLiveRoute)
 					AltitudeProfileSelector(includeFutureProfile, onIncludeFutureProfile)
-					LiveTimelineAction(state, onReturnLive)
 				}
 			}
+			if (state.sessionMode == FlightSessionMode.LIVE) LiveTimelineAction(state, onReturnLive)
 			if (state.snapshot?.dataGap == true) {
 				Text(
 					stringResource(R.string.flight_replay_estimated_position),
@@ -923,22 +926,23 @@ private fun CompactAction(text: String, color: Color, onClick: () -> Unit, modif
 
 @Composable
 private fun LiveTimelineAction(state: FlightUiState, onReturnLive: () -> Unit) {
-	Column(Modifier.fillMaxWidth().background(FlightPanelStrong)) {
-	FlightLiveFixNotice(state.liveState)
-	Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-		val future = (state.snapshot?.sample?.timestampMillis ?: 0L) >
-			(state.liveState.latest?.timestampMillis ?: Long.MAX_VALUE)
-		Text(stringResource(if (!state.browsingLiveTimeline) R.string.flight_mode_live
-			else if (future) R.string.flight_timeline_hypothesis else R.string.flight_timeline_actual),
-			color = if (future) FlightWarning else FlightGreen, fontSize = 10.sp,
-			modifier = Modifier.weight(1f).padding(horizontal = 6.dp))
-		CompactAction(
-			stringResource(if (state.browsingLiveTimeline) R.string.flight_return_live else R.string.flight_mode_live),
-			if (state.browsingLiveTimeline) FlightMuted else FlightGreen,
-			onReturnLive
-		)
-	}
-	}
+    Column(Modifier.fillMaxWidth().background(FlightPanelStrong)) {
+        FlightLiveFixNotice(state.liveState)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val future = (state.snapshot?.sample?.timestampMillis ?: 0L) >
+                (state.liveState.latest?.timestampMillis ?: Long.MAX_VALUE)
+            Text(
+                stringResource(if (!state.browsingLiveTimeline) R.string.flight_mode_live
+                    else if (future) R.string.flight_timeline_hypothesis else R.string.flight_timeline_actual),
+                color = if (!state.browsingLiveTimeline) FlightGreen else FlightMuted,
+                fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (state.browsingLiveTimeline) TextButton(onClick = onReturnLive) {
+                Text(stringResource(R.string.flight_return_live), color = FlightGreen, fontSize = 12.sp, maxLines = 1)
+            }
+        }
+    }
 }
 
 @Composable
@@ -1643,15 +1647,18 @@ private fun PhotoScreen(
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
 		FlightStorageStatusStrip(state)
-		Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-			Text(stringResource(R.string.flight_mode_attached_photos, state.photos.size), color = FlightMuted,
-				fontSize = 11.sp, modifier = Modifier.weight(1f))
-			FlightFavoriteButton(favoritesOnly, favorites.ready, { favoritesOnly = !favoritesOnly }, filter = true)
-			if (state.sessionMode == FlightSessionMode.LIVE) {
-				CompactAction(stringResource(R.string.flight_mode_take_photo), FlightBlue, onPhotoAction)
-			}
-			CompactAction(stringResource(R.string.flight_mode_add_gallery_photos), FlightBlue, onImportPhotos)
-		}
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.flight_mode_attached_photos, state.photos.size), color = FlightMuted,
+                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            FlightFavoriteButton(favoritesOnly, favorites.ready, { favoritesOnly = !favoritesOnly }, filter = true)
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.sessionMode == FlightSessionMode.LIVE) {
+                CompactAction(stringResource(R.string.flight_mode_take_photo), FlightBlue, onPhotoAction)
+            }
+            CompactAction(stringResource(R.string.flight_mode_add_gallery_photos), FlightBlue, onImportPhotos)
+        }
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (all.isNotEmpty()) TextButton(onClick = { timeDialog = true }) { Text(stringResource(R.string.flight_photo_time_batch)) }
             if (state.photoTimeUndoAvailable) TextButton(onClick = onUndoPhotoTimeCorrection) { Text(stringResource(R.string.flight_photo_time_undo)) }
@@ -2355,6 +2362,7 @@ private fun ReplayStepButton(text: String, onClick: () -> Unit) {
 	}
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPage) -> Unit, overlay: Boolean = false, minimalChrome: Boolean = false) {
 	val selected = state.page
@@ -2397,9 +2405,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 					{ FlightRecordingService.microphone(context, false, live.journeyId) })
 			}
 		}
-		if (selected != FlightPage.SATELLITE && selected != FlightPage.LIVE)
-			FlightOfflineProgressPanel(state, compact = true,
-				modifier = Modifier.background(FlightPanelStrong).clickable { onSelected(FlightPage.SATELLITE) })
+
 	}
 	if (!minimalChrome && state.offlineSimulation && !live.simulation) {
 		val offlineAction=LocalFlightOfflineAction.current
@@ -2417,13 +2423,20 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 		}
 	}
 	Row(
-		Modifier.fillMaxWidth().height(48.dp)
+		Modifier.fillMaxWidth().height(48.dp).horizontalScroll(rememberScrollState())
 			.background(if (overlay) FlightHudPanel else FlightPanelStrong)
 			.border(1.dp, FlightLine)
 	) {
 		pages.forEach { (page, label) ->
+            val requester = remember { BringIntoViewRequester() }
+            LaunchedEffect(selected) {
+                if (selected == page) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    requester.bringIntoView()
+                }
+            }
 			Box(
-				modifier = Modifier.weight(1f).fillMaxHeight().clickable(
+				modifier = Modifier.widthIn(min = 64.dp).fillMaxHeight().bringIntoViewRequester(requester).clickable(
 					enabled = page !in listOf(FlightPage.MAP, FlightPage.WINDOW, FlightPage.MIXED) || state.snapshot != null ||
 						(state.sessionMode==FlightSessionMode.PREPARE && FlightOfflinePreparation.canSimulate(state.plan))
 				) { onSelected(page) },
@@ -2435,7 +2448,7 @@ internal fun FlightBottomNavigation(state: FlightUiState, onSelected: (FlightPag
 					color = if (selected == page) FlightText else FlightMuted,
 					fontSize = 12.sp,
 					fontWeight = if (selected == page) FontWeight.Bold else FontWeight.Normal,
-					maxLines = 1
+					maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp)
 				)
 			}
 		}

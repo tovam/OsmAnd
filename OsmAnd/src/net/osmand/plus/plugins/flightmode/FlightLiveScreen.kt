@@ -41,7 +41,7 @@ internal fun FlightLiveFixNotice(live: FlightLiveState) {
         health == FlightFixHealth.STALE -> stringResource(R.string.flight_live_stale_fix_notice)
         accuracy != null && accuracy > 100f -> stringResource(R.string.flight_live_inaccurate_fix_notice, accuracy)
         live.latest?.altitudeMeters == null -> stringResource(R.string.flight_live_altitude_missing_notice)
-        else -> stringResource(R.string.flight_live_gps_receiving)
+        else -> null
     }
     if (message != null) Text(message,
         color = if (live.tracking.phase == FlightTrackingPhase.LAYOVER || (health == FlightFixHealth.FRESH && live.error == null && accuracy != null && accuracy <= 100f && live.latest?.altitudeMeters != null))
