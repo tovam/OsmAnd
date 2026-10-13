@@ -191,29 +191,15 @@ internal fun FlightTileFilesDialog(
                             )
                         }
                     items(levels, key = { it.zoom }) { level ->
-                        FlightTileCard(Modifier.fillMaxWidth()) {
-                            Text(
-                                stringResource(R.string.flight_tiles_source_level, level.zoom),
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Row(Modifier.fillMaxWidth()) {
-                                FlightTileValue(
-                                    stringResource(R.string.flight_files_present),
-                                    level.files.toString(),
-                                    Modifier.weight(1f),
-                                    FlightTileColors.complete,
-                                )
-                                FlightTileValue(
-                                    stringResource(R.string.flight_tiles_saved_size),
-                                    flightTileSize(level.bytes),
-                                    Modifier.weight(1f),
-                                )
-                            }
+                        Row(Modifier.fillMaxWidth().background(FlightTileColors.background).padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("z${level.zoom}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.flight_files_saved_count, level.files), color = FlightTileColors.complete, fontSize = 11.sp)
+                            Text(flightTileSize(level.bytes), color = FlightTileColors.muted, fontSize = 11.sp)
                         }
                     }
                 }
+
             }
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
