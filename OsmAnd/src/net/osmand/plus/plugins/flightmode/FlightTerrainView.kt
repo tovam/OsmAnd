@@ -455,9 +455,8 @@ class FlightTerrainView @JvmOverloads constructor(
 				groundFocus[1],
 				groundFocus[2]
 			)
-			val shadowStrength = if (shadingEnabled && shadowAvailable) {
-				((sun.up - MINIMUM_SHADOW_SUN_UP) / SHADOW_FADE_SUN_RANGE).coerceIn(0f, 1f) *
-					shadowIntensity
+			val shadowStrength = if (shadingEnabled && shadowAvailable && sun.up > MINIMUM_SHADOW_SUN_UP) {
+				shadowIntensity
 			} else 0f
 			val shadowsActive = shadowStrength > 0f
 			if (shadowsActive && shouldUpdateShadowMap(
@@ -1125,6 +1124,11 @@ class FlightTerrainView @JvmOverloads constructor(
 			transaction.commit()
 			// A different origin is only made visible after all its candidate meshes are ready.
 			if (!compatibleOrigin(scene, displayedScene) && !complete) return false
+			// Staged uploads can add occluders without changing the CPU scene revision.
+			// Rebuild the shadow map when the actual GPU geometry changes as well.
+			if (renderMeshes.size != replacements.size || renderMeshes.indices.any {
+					renderMeshes[it].geometry !== replacements[it].geometry
+				}) shadowSceneGeneration = Long.MIN_VALUE
 			renderMeshes = replacements
 			displayedScene = scene
 			evictGeometryCache(renderMeshes.mapTo(hashSetOf()) { it.geometry })
@@ -1356,7 +1360,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			val scene: FlightTerrainScene? = null,
 			val sample: FlightSample? = null,
 			val shadingEnabled: Boolean = true,
-			val shadowIntensity: Float = 0.85f,
+			val shadowIntensity: Float = 1f,
 			val satelliteOpacity: Float = 0.92f,
 			val showSatelliteQualityOverlay: Boolean = false,
 			val terrainOpacity: Float = 0.70f,
@@ -1405,7 +1409,6 @@ class FlightTerrainView @JvmOverloads constructor(
 			private const val REFINEMENT_DEPTH_BIAS = 0.00002f
 			private const val RELIEF_LIGHTING_STRENGTH = 0.18f
 			private const val MINIMUM_SHADOW_SUN_UP = 0.015f
-			private const val SHADOW_FADE_SUN_RANGE = 0.10f
 			private const val SHADOW_DIRECTION_EPSILON_SQUARED = 1e-7f
 			private const val SHADOW_FOCUS_UPDATE_DISTANCE_SQUARED = 4_000f * 4_000f
 			private const val DEFAULT_FLIGHT_ALTITUDE_METERS = 10_000f
@@ -1519,9 +1522,8 @@ class FlightTerrainView @JvmOverloads constructor(
 							visible += step(currentDepth, storedDepth);
 						}
 					}
-					// Preserve enough ambient light inside a cast shadow to keep satellite
-					// imagery readable; only shadow-map occlusion receives this attenuation.
-					float realShadow = mix(0.52, 1.0, visible / 9.0);
+					// Full occlusion is black at full intensity; PCF only softens its boundary.
+					float realShadow = visible / 9.0;
 					float edgeDistance = min(
 						min(
 							min(projected.x, 1.0 - projected.x),
@@ -1557,9 +1559,10 @@ class FlightTerrainView @JvmOverloads constructor(
 					vec3 nativeMap = texture2D(uNativeMapTexture, vTexCoord).rgb;
 					base = mix(base, nativeMap, uHasNativeMapTexture * uNativeMapOpacity);
 					float castShadow = shadowVisibility();
-					vec3 naturalLit = base * vLight * castShadow * mix(0.08, 1.0, uDaylight);
+					vec3 naturalLit = base * vLight * mix(0.08, 1.0, uDaylight);
 					float fogAmount = smoothstep(0.68, 1.0, vFog);
-					vec3 natural = mix(naturalLit, uSkyColor, fogAmount);
+					// Apply the shadow after atmospheric blending so fog cannot wash it out.
+					vec3 natural = mix(naturalLit, uSkyColor, fogAmount) * castShadow;
 					// Diagnostic colours describe what is actually bound on the GPU and must
 					// remain readable at night and through distant fog. A tiny normal term
 					// preserves the terrain shape.

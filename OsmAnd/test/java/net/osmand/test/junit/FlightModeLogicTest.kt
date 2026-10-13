@@ -192,7 +192,7 @@ class FlightModeLogicTest {
 	fun sunShadowsRemainEnabledByDefaultWithVisibleIntensity() {
 		val plan = FlightPlan(listOf(FlightStop("A"), FlightStop("B")))
 		assertTrue(plan.shadowsEnabled)
-		assertEquals(0.85f, plan.shadowIntensity, 0f)
+		assertEquals(1f, plan.shadowIntensity, 0f)
 	}
 
 	@Test

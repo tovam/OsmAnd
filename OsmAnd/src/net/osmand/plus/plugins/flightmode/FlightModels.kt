@@ -179,7 +179,7 @@ data class FlightPlan(
 	val terrainMiddleZoom: Int = DEFAULT_TERRAIN_MIDDLE_ZOOM,
 	val satelliteQuality: FlightSatelliteQuality = FlightSatelliteQuality.HIGH,
 	val shadowsEnabled: Boolean = true,
-	val shadowIntensity: Float = 0.85f,
+	val shadowIntensity: Float = 1f,
 	val resumeAfterRestart: Boolean = true,
 	val preparation: FlightPreparation? = null
 ) {

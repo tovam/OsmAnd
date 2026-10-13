@@ -854,7 +854,7 @@ class FlightJourneyStore(private val context: Context) {
 				FlightSatelliteQuality.valueOf(json.optString("satelliteQuality", FlightSatelliteQuality.HIGH.name))
 			}.getOrDefault(FlightSatelliteQuality.HIGH),
 			shadowsEnabled = json.optBoolean("shadowsEnabled", true),
-			shadowIntensity = json.optDouble("shadowIntensity", 0.85).toFloat().coerceIn(0f, 1f),
+			shadowIntensity = json.optDouble("shadowIntensity", 1.0).toFloat().coerceIn(0f, 1f),
 			resumeAfterRestart = json.optBoolean("resumeAfterRestart", true),
 			preparation = FlightPreparation.fromJson(json.optJSONObject("preparation"))
 		)
