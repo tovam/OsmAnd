@@ -138,7 +138,12 @@ internal fun FlightPlanningScreen(
             },
         )
     if (showTileFiles)
-        FlightTileFilesDialog(state, { showTileFiles = false }, onPreload, onCancelPreload)
+        FlightTileFilesDialog(state, { showTileFiles = false }, onPreload, onCancelPreload) { satellite, zoom ->
+            val bands = prep.bands.map { band ->
+                if (satellite) band.copy(satelliteZoom = zoom) else band.copy(terrainZoom = zoom)
+            }
+            onUpdate(state.plan.copy(preparation = prep.copy(bands = bands)))
+        }
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(Modifier.fillMaxWidth()) {
             PlanAction(stringResource(R.string.flight_workspace_future), onJournals)

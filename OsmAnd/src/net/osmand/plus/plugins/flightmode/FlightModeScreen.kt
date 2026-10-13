@@ -301,6 +301,13 @@ fun FlightModeScreen(
 		var includeFutureProfile by rememberSaveable(state.journeyId) { mutableStateOf(true) }
 		var editLiveRoute by remember(state.journeyId) { mutableStateOf(false) }
         var previousLiveStops by remember(state.journeyId) { mutableStateOf<List<FlightStop>?>(null) }
+        val onTilePrecision: (Boolean, Int) -> Unit = { satellite, zoom ->
+            val preparation = state.plan.preparation ?: FlightPreparation()
+            val bands = preparation.bands.map { band ->
+                if (satellite) band.copy(satelliteZoom = zoom) else band.copy(terrainZoom = zoom)
+            }
+            onUpdatePlan(state.plan.copy(preparation = preparation.copy(bands = bands)))
+        }
 		if (editLiveRoute && state.sessionMode == FlightSessionMode.LIVE)
 			FlightLiveRouteEditor(state, { draft ->
                 previousLiveStops = state.plan.stops
@@ -490,13 +497,7 @@ fun FlightModeScreen(
 					onPageChange = onPageChange,
 					onPreload = onPreloadPreparation,
 					onPausePreload = onCancelPreparationDownload,
-                    onPrecision = { satellite, zoom ->
-                        val preparation = state.plan.preparation ?: FlightPreparation()
-                        val bands = preparation.bands.map { band ->
-                            if (satellite) band.copy(satelliteZoom = zoom) else band.copy(terrainZoom = zoom)
-                        }
-                        onUpdatePlan(state.plan.copy(preparation = preparation.copy(bands = bands)))
-                    }
+                    onPrecision = onTilePrecision
 				)
 				FlightPage.SENSORS -> SensorsScreen(
 					state = state,
@@ -527,7 +528,7 @@ fun FlightModeScreen(
                     onRequestPointingTerrain = onRequestPointingTerrain, onRetryTerrain = onRetryTerrain,
                     onCorrectPhotoTimes = onCorrectPhotoTimes, onUndoPhotoTimeCorrection = onUndoPhotoTimeCorrection
 				)
-				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload, onInspectStorageCleanup, onCleanUnusedStorage)
+				FlightPage.JOURNAL -> FlightStorageScreen(state, onPageChange, onPreloadPreparation, onCancelPreparationDownload, onTilePrecision, onInspectStorageCleanup, onCleanUnusedStorage)
 			}
 
             }
@@ -1994,6 +1995,7 @@ internal fun decodePhotoPreview(file: File, maximumPixels: Int = MAXIMUM_PHOTO_P
 @Composable
 private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage) -> Unit,
     onPreload: (FlightOfflineQuote) -> Unit, onPausePreload: () -> Unit,
+    onPrecision: (Boolean, Int) -> Unit,
     onInspectCleanup: () -> Unit, onCleanUnused: () -> Unit) {
     var confirmCleanup by remember { mutableStateOf(false) }
     if (confirmCleanup && state.storageCleanup != null) AlertDialog(
@@ -2004,7 +2006,7 @@ private fun FlightStorageScreen(state: FlightUiState, onPageChange: (FlightPage)
         confirmButton = { TextButton(onClick = { confirmCleanup = false; onCleanUnused() }) { Text(stringResource(R.string.flight_storage_clean)) } },
         dismissButton = { TextButton(onClick = { confirmCleanup = false }) { Text(stringResource(R.string.shared_string_cancel)) } })
     var showFiles by remember { mutableStateOf(false) }
-    if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload)
+    if (showFiles) FlightTileFilesDialog(state, { showFiles = false }, onPreload, onPausePreload, onPrecision)
     Column(Modifier.fillMaxSize().background(FlightBackground)) {
         TextButton(onClick = { onPageChange(FlightPage.DETAIL) }) {
             Text(stringResource(R.string.flight_detail_title), fontSize = 12.sp)
