@@ -19,11 +19,15 @@ index 0ab324a555..79a9d5c112 100644
 -    obtainPrimitives(context, zoom, primitivisedObjects, objects, evaluationResult, cache, queryController, metric);
 +    obtainPrimitives(context, zoom, false, primitivisedObjects, objects, evaluationResult, cache, queryController, metric);
      if (metric)
-@@ -221,3 +222,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
-             {
--                detailedBinaryMapObjectsPresent = true;
-+                detailedBinaryMapObjectsPresent |= !isContourLinesObject;
-             }
+@@ -185,2 +186,3 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+     QList< std::shared_ptr<const MapObject> > extraCoastlineObjects;
++    bool detailedBinaryMapObjectsPresent = false;
+     int contourLinesObjectsCount = 0;
+@@ -228,3 +230,4 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
+             isBasemapObject = binaryMapObject->section->isBasemap;
+             isContourLinesObject = binaryMapObject->section->isContourLines;
++            detailedBinaryMapObjectsPresent |= !isBasemapObject && !isContourLinesObject;
+         }
 @@ -422,6 +423,6 @@ std::shared_ptr<OsmAnd::MapPrimitiviser_P::PrimitivisedObjects> OsmAnd::MapPrimi
      // Obtain primitives
 -    const bool detailedDataMissing =
