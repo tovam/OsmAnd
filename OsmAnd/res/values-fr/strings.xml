@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_download_queued">En attente du téléchargement en cours</string>
     <string name="flight_window_motion">Visée capteurs</string>
     <string name="flight_window_motion_align">Aligner ici</string>
     <string name="flight_window_motion_unavailable">Capteur d’orientation indisponible</string>

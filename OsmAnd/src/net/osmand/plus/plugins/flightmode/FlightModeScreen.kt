@@ -1059,7 +1059,7 @@ private fun WindowScreen(
 				onRenderStats = onTerrainRenderStats,
 				modifier = Modifier.fillMaxSize()
 			)
-            FlightWindowMotionControls(onMoveLook, Modifier.align(Alignment.BottomStart).background(FlightHudPanel))
+            key(state.journeyId) { FlightWindowMotionControls(onMoveLook, Modifier.align(Alignment.BottomStart).background(FlightHudPanel)) }
 			val toggleLabel = stringResource(if (controlsVisible) R.string.flight_controls_hide else R.string.flight_controls_show)
 			Text(if (controlsVisible) "⌄" else "⌃", color = FlightText, fontSize = 22.sp,
 				modifier = Modifier.align(Alignment.BottomEnd).size(40.dp).background(FlightHudPanel)

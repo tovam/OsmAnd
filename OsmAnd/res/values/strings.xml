@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_download_queued">Queued after the current download</string>
     <string name="flight_window_motion">Phone aiming</string>
     <string name="flight_window_motion_align">Align here</string>
     <string name="flight_window_motion_unavailable">Orientation sensor unavailable</string>

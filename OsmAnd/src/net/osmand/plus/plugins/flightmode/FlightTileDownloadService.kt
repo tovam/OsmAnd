@@ -64,10 +64,13 @@ class FlightTileDownloadService : Service() {
         } else {
             if (id != null) {
                 queue.add(id)
-                mutableUpdates.value = mutableUpdates.value + (id to FlightTerrainStatus(phase = FlightTerrainPhase.DOWNLOADING))
+                mutableUpdates.value = mutableUpdates.value + (id to FlightTerrainStatus(phase = FlightTerrainPhase.DOWNLOADING,
+                    message = if (activeId != null && activeId != id) getString(R.string.flight_download_queued) else null))
+                if (activeId == id) task?.cancel()
             }
             persist()
-            val notification = notification(id ?: queue.firstOrNull(), FlightTerrainStatus(phase = FlightTerrainPhase.DOWNLOADING))
+            val shownId = activeId ?: queue.firstOrNull()
+            val notification = notification(shownId, updates.value[shownId] ?: FlightTerrainStatus(phase = FlightTerrainPhase.DOWNLOADING))
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             else startForeground(NOTIFICATION, notification)
             startNext()
