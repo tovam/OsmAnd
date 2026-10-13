@@ -95,14 +95,17 @@ class FlightTileDownloadService : Service() {
                 require(requests.isNotEmpty()) { "No saved tile request" }
                 publish(id, FlightTerrainStatus(phase = FlightTerrainPhase.DOWNLOADING,
                     requestedTiles = quote.terrainCount, requestedSatelliteTiles = quote.satelliteCount))
+                // An offline verification of already cached files must still be allowed.
+                var firstPass = true
                 while (isActive) {
-                    if (!connected()) {
+                    if (!firstPass && !connected()) {
                         publish(id, (updates.value[id] ?: FlightTerrainStatus()).copy(
                             phase = FlightTerrainPhase.DOWNLOADING, bytesPerSecond = 0,
                             message = getString(R.string.flight_download_waiting_network)))
                         delay(30_000)
                         continue
                     }
+                    firstPass = false
                     val result = try {
                         wakeLock.acquire(10 * 60 * 1000L)
                         repository.preloadPrepared(quote) { status ->
