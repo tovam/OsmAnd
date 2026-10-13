@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
       - name: Test build recovery rules
         run: node --test .github/scripts/ensure-smart-build.test.cjs
       - name: Recover a pushed application revision without a build
