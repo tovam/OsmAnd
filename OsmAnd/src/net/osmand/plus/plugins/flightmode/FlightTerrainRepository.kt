@@ -977,7 +977,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 		fun result(status: FlightTerrainStatus)=PreparedResult(status,FlightOfflineAssets(verifiedTerrain.toList(),verifiedSatellite.toList()))
 		var terrain=0; var satellite=0; var failedTerrain=0; var failedSatellite=0; var downloaded=0
 		var bytes=0L
-		val started=android.os.SystemClock.elapsedRealtime()
+		val rate = DownloadRateTracker()
 		var lastPublished = 0L
 		var lastFailure: String? = null
 		val terrainCount=quote.requests.count { !it.satellite }
@@ -985,7 +985,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 			offlineFilesVerified=terrain+satellite==quote.requests.size,
 			availableTiles=terrain,failedTiles=failedTerrain,satelliteTiles=satellite,satelliteFailedTiles=failedSatellite,
 			downloadedTiles=downloaded,bytesDownloaded=bytes,
-			bytesPerSecond=bytes*1000/(android.os.SystemClock.elapsedRealtime()-started).coerceAtLeast(1),
+			bytesPerSecond=rate.bytesPerSecond(),
 			message=app.getString(net.osmand.plus.R.string.flight_plan_missing_tiles,terrain+satellite,quote.requests.size,failedTerrain+failedSatellite,
 				quote.requests.size-terrain-satellite-failedTerrain-failedSatellite) +
 				(lastFailure?.let { "\n$it" } ?: ""))
@@ -1035,6 +1035,7 @@ class FlightTerrainRepository(private val app: OsmandApplication) {
 					if(request.satellite) satellite++ else terrain++
 					if(it.downloaded) downloaded++
 					bytes+=it.downloadedBytes
+                    rate.record(it.downloadedBytes)
 				}.onFailure { error ->
 					if(request.satellite) failedSatellite++ else failedTerrain++
 					val tile=request.tile

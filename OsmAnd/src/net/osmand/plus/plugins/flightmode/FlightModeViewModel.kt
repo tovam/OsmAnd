@@ -80,6 +80,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			uiState.plan.terrainCorridorKm)
 	}
 
+
 	fun setOfflineSimulation(enabled: Boolean) {
 		if (enabled && uiState.sessionMode == FlightSessionMode.LIVE) return
 		if (enabled == uiState.offlineSimulation) return
@@ -113,13 +114,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 				withContext(Dispatchers.IO) { journeyStore.update(original.id) { it.copy(offlineRequest=quote.assets) } }
 				if (!journalOperations.isCurrent(operation)) return@launch
 				uiState=uiState.copy(offlinePreloadStatus=FlightTerrainStatus(phase=FlightTerrainPhase.DOWNLOADING))
-				val result=terrainRepository.preloadPrepared(quote) { status ->
-					if(uiState.journeyId==original.id && generation==preparationDownloadGeneration) uiState=uiState.copy(offlinePreloadStatus=status)
-				}
-				val saved=withContext(Dispatchers.IO) {
-					journeyStore.updateVerifiedOfflineAssets(original.id, quote.assets, result.assets)
-				}
-				if(uiState.journeyId==original.id && generation==preparationDownloadGeneration) uiState=uiState.copy(offlineAssets=saved.offlineAssets,offlinePreloadStatus=result.status)
+				FlightTileDownloadService.start(app, original.id)
 			} catch(e:CancellationException) { throw e }
 			catch(e:Exception) { if(journalOperations.isCurrent(operation) && generation==preparationDownloadGeneration) uiState=uiState.copy(offlinePreloadStatus=uiState.offlinePreloadStatus.copy(phase=FlightTerrainPhase.ERROR,message=e.message)) }
 		}
@@ -128,6 +123,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		terrainStreamingEngine.cancelBackgroundWork()
 		preparationDownloadGeneration++
 		preparationDownload?.cancel()
+        uiState.journeyId?.let { FlightTileDownloadService.pause(app, it) }
 		uiState=uiState.copy(offlinePreloadStatus=uiState.offlinePreloadStatus.copy(phase=FlightTerrainPhase.PAUSED,bytesPerSecond=0,
 			message=app.getString(net.osmand.plus.R.string.flight_plan_paused)))
 	}
@@ -197,6 +193,11 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	init {
+        viewModelScope.launch {
+            combine(FlightTileDownloadService.updates, snapshotFlow { uiState.journeyId }) { updates, id -> updates[id] }
+                .collect { status -> if (status != null) uiState = uiState.copy(offlinePreloadStatus = status) }
+        }
+
 		refreshSavedJourneys()
 		stopObservingSchedules = FlightScheduleManager.observe(app) { refreshDeviceState() }
 		refreshDeviceState()
@@ -324,7 +325,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			FlightUiActivity.set(this, null)
 			liveTimelineJob?.cancel()
 			citySearchJob?.cancel()
-			if (preparationDownload?.isActive == true) pausePreparationDownload()
 		} else {
 			refreshDeviceState()
 			uiState.snapshot?.sample?.let(::requestTerrain)
@@ -537,7 +537,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun newPreparation(repeatRoute: Boolean) {
 		runJournalNavigation {
 			savePendingLocalChanges()
-			pausePreparationDownload()
 			FlightNetworkAccess.release(offlineOwner)
 			val previous = uiState.plan
 			val plan = if (repeatRoute) previous.copy(preparation = (previous.preparation ?: FlightPreparation()).copy(
@@ -1176,8 +1175,6 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		// Do not leave the retained flight with spinners whose owners can no longer clear them.
 		simulationJob?.cancel()
 		storageJob?.cancel()
-		if (uiState.offlinePreloadStatus.phase in listOf(FlightTerrainPhase.PLANNING,
-			FlightTerrainPhase.DOWNLOADING, FlightTerrainPhase.BUILDING)) pausePreparationDownload()
 		uiState = uiState.afterAbandonedJournalNavigation()
 	}
 

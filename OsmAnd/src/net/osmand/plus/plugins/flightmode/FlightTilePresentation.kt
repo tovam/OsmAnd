@@ -128,3 +128,9 @@ internal fun flightTileTerrainColor(meters: Float): Int {
     }
     return colors.last()
 }
+
+/** ETA is based on remaining source bytes, never on counts of differently sized tiles. */
+internal fun flightDownloadEtaSeconds(status: FlightTerrainStatus, remainingBytes: Long?): Long? {
+    if (status.phase != FlightTerrainPhase.DOWNLOADING || status.bytesPerSecond <= 0 || remainingBytes == null) return null
+    return kotlin.math.ceil(remainingBytes.coerceAtLeast(0).toDouble() / status.bytesPerSecond).toLong()
+}

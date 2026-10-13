@@ -314,3 +314,25 @@ internal fun FlightOfflineSizeSummary(state: FlightUiState, compact: Boolean = f
             fontSize = 11.sp,
         )
 }
+
+@Composable
+internal fun FlightDownloadMetrics(state: FlightUiState) {
+    val status = state.offlinePreloadStatus
+    if (status.phase != FlightTerrainPhase.DOWNLOADING) return
+    val coverage = state.offlineCoverage
+    val remaining = coverage?.estimatedRemainingBytes ?: state.offlineQuote?.estimatedBytes
+    val eta = flightDownloadEtaSeconds(status, remaining)
+    val etaText = eta?.let { seconds ->
+        if (seconds >= 3600) "${seconds / 3600} h ${(seconds % 3600) / 60} min"
+        else if (seconds >= 60) "${seconds / 60} min ${seconds % 60} s" else "$seconds s"
+    } ?: stringResource(R.string.flight_download_eta_unknown)
+    Text(stringResource(R.string.flight_download_metrics, flightTileSize(status.bytesDownloaded),
+        flightTileSize(status.bytesPerSecond), etaText), color = Color(0xFF88DEBF), fontSize = 12.sp)
+    coverage?.let {
+        Text(stringResource(R.string.flight_download_size_progress, flightTileSize(it.storedBytes),
+            flightTileSize(it.storedBytes + it.estimatedRemainingBytes)), color = Color.LightGray, fontSize = 11.sp)
+    }
+    if (status.bytesPerSecond == 0L) status.message?.let {
+        Text(it, color = Color(0xFFFFCC66), fontSize = 11.sp)
+    }
+}

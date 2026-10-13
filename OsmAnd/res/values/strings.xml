@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_download_background">Downloading flight tiles</string>
+    <string name="flight_download_waiting_network">Waiting for a connection — automatic retry</string>
+    <string name="flight_download_system_paused">Android paused background work. Resume from Tiles.</string>
+    <string name="flight_download_metrics">%1$s transferred · %2$s/s · ETA ≈ %3$s</string>
+    <string name="flight_download_size_progress">%1$s saved · ≈ %2$s total</string>
+    <string name="flight_download_eta_unknown">calculating</string>
+
     <string name="flight_step_ten_seconds">10 s</string>
     <string name="flight_step_one_point">1 point</string>
 

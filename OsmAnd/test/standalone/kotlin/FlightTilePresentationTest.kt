@@ -19,6 +19,16 @@ class FlightTilePresentationTest {
     private fun state() = FlightUiState(offlineQuote = quote, offlineCoverage = missing)
 
     @Test
+    fun etaUsesBytesAndIsUnknownWhenTransferIsStoppedOrHasNoMeasuredRate() {
+        val active = FlightTerrainStatus(phase = FlightTerrainPhase.DOWNLOADING, bytesPerSecond = 300)
+        assertEquals(4L, flightDownloadEtaSeconds(active, 1000L))
+        assertEquals(0L, flightDownloadEtaSeconds(active, 0L))
+        assertNull(flightDownloadEtaSeconds(active, null))
+        assertNull(flightDownloadEtaSeconds(active.copy(bytesPerSecond = 0), 1000L))
+        assertNull(flightDownloadEtaSeconds(active.copy(phase = FlightTerrainPhase.PAUSED), 1000L))
+    }
+
+    @Test
     fun unknownInventoryAndRefreshCannotEnableTransfersOrClaimReadiness() {
         for (s in
             listOf(

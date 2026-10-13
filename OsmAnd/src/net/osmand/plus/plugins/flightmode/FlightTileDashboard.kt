@@ -122,6 +122,7 @@ internal fun FlightTileDashboard(
                 fontSize = 12.sp,
             )
         }
+        FlightDownloadMetrics(state)
         val failures = status.failedTiles + status.satelliteFailedTiles
         if (failures > 0)
             Text(

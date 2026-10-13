@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_download_background">Téléchargement des tuiles du vol</string>
+    <string name="flight_download_waiting_network">En attente de connexion — reprise automatique</string>
+    <string name="flight_download_system_paused">Android a suspendu le téléchargement. Reprends depuis Tuiles.</string>
+    <string name="flight_download_metrics">%1$s transférés · %2$s/s · reste ≈ %3$s</string>
+    <string name="flight_download_size_progress">%1$s enregistrés · ≈ %2$s au total</string>
+    <string name="flight_download_eta_unknown">calcul en cours</string>
+
     <string name="flight_step_ten_seconds">10 s</string>
     <string name="flight_step_one_point">1 point</string>
 
