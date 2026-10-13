@@ -55,6 +55,10 @@ def prepare(core):
     configure.write_text(fail_fast(configure.read_text()))
     skia = core / "externals/skia/configure.sh"
     source = fail_fast(skia.read_text())
+    # Upstream read intentionally reaches EOF after assigning the patch filename.
+    # Its status is 1 even on success; preserve that behavior under set -e.
+    source = source.replace('read  -rd \'\' PATCH <<< "$PATCH"\n',
+                            'read  -rd \'\' PATCH <<< "$PATCH" || true\n')
     command = "python3 " + shlex.quote(str(Path(__file__).resolve())) + ' patch-sync "$SRCLOC/upstream.patched/tools/git-sync-deps"'
     if command not in source:
         if source.count("\n./git-sync-deps\n") != 1:

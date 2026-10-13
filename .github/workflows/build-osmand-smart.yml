@@ -9,6 +9,7 @@ on:
       - master
     paths:
       - .github/workflows/build-osmand-smart.yml
+      - .github/scripts/**
       - OsmAnd/**
       - OsmAnd-java/**
 

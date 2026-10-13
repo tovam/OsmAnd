@@ -110,6 +110,63 @@ class LegacyDependencyTest(unittest.TestCase):
         self.assertEqual(result.returncode, 19)
         self.assertFalse(marker.exists())
 
+    def test_patch_filename_read_at_eof_is_not_a_preparation_failure(self):
+        core = self.root / "core-legacy"
+        skia = core / "externals/skia"
+        tools = skia / "upstream.patched/tools"
+        tools.mkdir(parents=True)
+        (core / "externals/configure.sh").write_text('#!/bin/bash\nexit 0\n')
+        sync = tools / "git-sync-deps"
+        sync.write_text('#!/usr/bin/env python3\n' + UPSTREAM)
+        sync.chmod(0o755)
+        marker = skia / "patched"
+        script = skia / "configure.sh"
+        script.write_text('#!/bin/bash\nSRCLOC="' + str(skia) + '"\n'
+            'cd "$SRCLOC/upstream.patched/tools"\n./git-sync-deps\n'
+            'PATCH="$SRCLOC/a patch.patch"\n'
+            'read  -rd \'\' PATCH <<< "$PATCH"\n'
+            'printf \'%s\' "$PATCH" > "' + str(marker) + '"\n')
+        legacy.prepare(core)
+        result = subprocess.run(["bash", str(script)])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(marker.read_text(), str(skia / "a patch.patch"))
+
+    def test_complete_pinned_skia_configure_applies_patch(self):
+        # Execute the real upstream shell flow; Git downloads use synthetic sources.
+        # Fixture from OsmAnd-core-legacy at 2d46e11ff329e53eb89dca2856ecb5fbb7856b4f (trailing whitespace normalized).
+        core = self.root / "core-legacy"
+        skia = core / "externals/skia"
+        patches = skia / "patches"
+        patches.mkdir(parents=True)
+        configure = core / "externals/configure.sh"
+        configure.write_text('#!/bin/bash\nexit 0\n')
+        script = skia / "configure.sh"
+        script.write_text((SCRIPT.parent / "fixtures/legacy-skia-configure.sh").read_text())
+        patches.joinpath("fixture.patch").write_text(
+            '--- a/proof.txt\n+++ b/proof.txt\n@@ -1 +1 @@\n-before\n+after\n')
+        fixture = self.root / "synthetic-sync"
+        fixture.write_text('#!/usr/bin/env python3\n' + UPSTREAM)
+        binaries = self.root / "bin"
+        binaries.mkdir()
+        git = binaries / "git"
+        git.write_text('''#!/bin/bash
+if [[ "$1" == checkout && "$PWD" == */upstream.original ]]; then
+  mkdir -p tools third_party/externals/harfbuzz
+  cp "$SKIA_SYNC_FIXTURE" tools/git-sync-deps
+  chmod +x tools/git-sync-deps
+  printf 'before\\n' > proof.txt
+fi
+''')
+        git.chmod(0o755)
+        legacy.prepare(core)
+        prepared = script.read_text()
+        legacy.prepare(core)
+        self.assertEqual(script.read_text(), prepared)
+        result = subprocess.run(["bash", str(script)], capture_output=True, text=True,
+            env={"PATH": str(binaries) + ":/usr/bin:/bin", "SKIA_SYNC_FIXTURE": str(fixture)})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((skia / "upstream.patched/proof.txt").read_text(), "after\n")
+
 
 if __name__ == "__main__":
     unittest.main()
