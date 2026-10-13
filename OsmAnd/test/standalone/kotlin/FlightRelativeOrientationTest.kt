@@ -5,6 +5,33 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FlightRelativeOrientationTest {
+    @Test fun aircraftHeadingChangesAreNotCountedTwice() {
+        val controller = FlightPhoneAimController()
+        var look = FlightWindowLook()
+        controller.reset(look, 20f)
+        controller.update(100f, 0f, look, 20f)
+        repeat(100) {
+            controller.update(120f, 0f, look, 40f)?.let { look = look.copy(
+                yawDegrees = look.yawDegrees + it.first, pitchDegrees = look.pitchDegrees + it.second).clamped() }
+        }
+        assertEquals(0f, look.yawDegrees, 0.04f)
+    }
+    @Test fun exceedingCameraPitchLimitDoesNotShiftTheNeutralReference() {
+        val controller = FlightPhoneAimController()
+        var look = FlightWindowLook()
+        controller.reset(look)
+        controller.update(0f, 0f, look)
+        repeat(80) {
+            controller.update(0f, 70f, look)?.let { look = look.copy(
+                yawDegrees = look.yawDegrees + it.first, pitchDegrees = look.pitchDegrees + it.second).clamped() }
+        }
+        assertEquals(FlightWindowLook.MAX_PITCH_DEGREES, look.pitchDegrees, 0.001f)
+        repeat(80) {
+            controller.update(0f, 0f, look)?.let { look = look.copy(
+                yawDegrees = look.yawDegrees + it.first, pitchDegrees = look.pitchDegrees + it.second).clamped() }
+        }
+        assertEquals(0f, look.pitchDegrees, 0.04f)
+    }
     @Test fun calibrationWrapAndResetDoNotJumpTheView() {
         val orientation = FlightRelativeOrientation()
         assertNull(orientation.update(179f, 0f))

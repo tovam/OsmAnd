@@ -1018,6 +1018,7 @@ private fun WindowScreen(
 			else state.progressForRecordedPhoto(photo.matchedSamplePosition)
 		}.filter(Float::isFinite).distinct().sorted()
 	}
+    var sensorAiming by rememberSaveable(state.journeyId) { mutableStateOf(false) }
 	var controlsVisible by rememberSaveable { mutableStateOf(true) }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_window), state.sessionMode, onClose)
@@ -1042,8 +1043,8 @@ private fun WindowScreen(
 				photo = overlayPhoto,
 				photoOverlay = state.windowPhotoOverlay,
 				onSetSide = onSetSide,
-				onMoveLook = onMoveLook,
-				onRecenterLook = onRecenterLook,
+				onMoveLook = { yaw, pitch -> sensorAiming = false; onMoveLook(yaw, pitch) },
+				onRecenterLook = { sensorAiming = false; onRecenterLook() },
 				onChangeZoom = onChangeZoom,
 				onTransformPhoto = onTransformPhoto,
 				onTransformLinkedView = onTransformLinkedView,
@@ -1059,7 +1060,11 @@ private fun WindowScreen(
 				onRenderStats = onTerrainRenderStats,
 				modifier = Modifier.fillMaxSize()
 			)
-            key(state.journeyId) { FlightWindowMotionControls(onMoveLook, Modifier.align(Alignment.BottomStart).background(FlightHudPanel)) }
+            key(state.journeyId) {
+                FlightWindowMotionControls(state.windowLook, state.snapshot?.sample?.bearingDegrees ?: 0f, sensorAiming, { sensorAiming = it },
+                    { yaw, pitch -> if (sensorAiming) onMoveLook(yaw, pitch) },
+                    Modifier.align(Alignment.BottomStart).background(FlightHudPanel))
+            }
 			val toggleLabel = stringResource(if (controlsVisible) R.string.flight_controls_hide else R.string.flight_controls_show)
 			Text(if (controlsVisible) "⌄" else "⌃", color = FlightText, fontSize = 22.sp,
 				modifier = Modifier.align(Alignment.BottomEnd).size(40.dp).background(FlightHudPanel)
