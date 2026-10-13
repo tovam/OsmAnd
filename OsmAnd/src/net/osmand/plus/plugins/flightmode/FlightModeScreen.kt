@@ -251,6 +251,7 @@ fun FlightModeScreen(
 	onRehearsePreparation: () -> Unit = {},
 	onPreparationPermissions: () -> Unit = {},
 	onStopLive: () -> Unit = {},
+	onWebSharing: (Boolean) -> Unit = {},
 	onToggleLiveMicrophone: () -> Unit = {},
 	onLocalJourneyRemoved: (String) -> Unit = {},
 	onConfirmJournalNavigation: () -> Unit = {},
@@ -399,7 +400,7 @@ fun FlightModeScreen(
 					onDisarmPreparation, onSimulateLive, onOfflineSimulation, onSetRecordingPolicy, { onNewPreparation(true) }, onSetIgnoredTimeRanges)
 				FlightPage.LIVE -> Column(Modifier.fillMaxSize()) {
 					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, { editLiveRoute = true })
-					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction,onSetRecordingPolicy) }
+					Box(Modifier.weight(1f)) { FlightLiveScreen(state,onStopLive,onToggleLiveMicrophone,onPhotoAction,onSetRecordingPolicy,onWebSharing) }
 				}
 				FlightPage.PREPARE -> key(state.journeyId) { FlightPlanningScreen(state,onUpdatePlan,
 					onSavePreparation,onPreloadPreparation,onCancelPreparationDownload,onRehearsePreparation,

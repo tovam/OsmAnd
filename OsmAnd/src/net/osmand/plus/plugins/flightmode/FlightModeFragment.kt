@@ -117,6 +117,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
                 )
 				if (!showFlightCamera) FlightModeScreen(
 					state = viewModel.displayState,
+					onWebSharing = viewModel::setWebSharing,
 					mapView = app.osmandMap.mapView,
 					onClose = ::close,
 					onPageChange = viewModel::showPage,

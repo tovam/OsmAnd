@@ -57,6 +57,7 @@ internal fun FlightLiveScreen(
     onMicrophone: () -> Unit,
     onPhoto: () -> Unit,
     onPolicy: (FlightRecordingPolicy) -> Unit,
+    onWebSharing: (Boolean) -> Unit,
 ) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     var confirmStop by remember { mutableStateOf(false) }
@@ -94,6 +95,18 @@ internal fun FlightLiveScreen(
                 color = if (live.running) Color(0xFF2CDBBE) else Color.LightGray,
                 fontSize = 13.sp,
             )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(stringResource(R.string.flight_web_title), color = Color.White, modifier = Modifier.weight(1f))
+                Switch(checked = state.webSharing, onCheckedChange = onWebSharing)
+            }
+            if (state.webSharing) {
+                Text(stringResource(R.string.flight_web_hint), color = Color.LightGray, fontSize = 11.sp)
+                if (state.webUrls.isEmpty()) Text(stringResource(R.string.flight_web_starting), color = Color.LightGray)
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Column { state.webUrls.forEach { Text(it, color = Color(0xFF2CDBBE), fontSize = 12.sp) } }
+                }
+            }
+            state.webError?.let { Text(it, color = Color(0xFFFFBD39), fontSize = 12.sp) }
             if (live.running && live.tracking.phase == FlightTrackingPhase.WAITING &&
                 fix?.speedMetersPerSecond?.let { it * 3.6 > (state.plan.preparation ?: FlightPreparation()).airborneSpeedKmh } == true) {
                 PlanAction(stringResource(R.string.flight_live_confirm_airborne), { confirmAirborne = true },

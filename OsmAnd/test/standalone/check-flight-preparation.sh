@@ -38,7 +38,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightTerrainLodPolicy.kt" "$sources/FlightTerrainResidency.kt" \
   "$sources/FlightNetworkAccess.kt" "$sources/FlightRasterDownloadAccess.kt" "$sources/FlightJournalSummaries.kt" "$sources/FlightPreparationSave.kt" \
   "$sources/FlightCloudArchive.kt" "$sources/FlightCloudClient.kt" "$sources/FlightJourneyNaming.kt" "$sources/FlightCloudVersions.kt" "$sources/FlightLibraryPresentation.kt" \
-  "$sources/FlightFavorites.kt" "$sources/FlightRelativeOrientation.kt" "$sources/FlightAltitudeFormat.kt" \
+  "$sources/FlightFavorites.kt" "$sources/FlightRelativeOrientation.kt" "$sources/FlightAltitudeFormat.kt" "$sources/FlightWebServer.kt" \
   "$sources/FlightOfflinePreparation.kt" "$sources/FlightLivePredictor.kt" "$sources/FlightLiveSimulation.kt" \
   "$sources/FlightWorkPolicy.kt" "$sources/FlightAssetScheduler.kt" "$sources/FlightDisplaySafety.kt" \
   "$sources/FlightSceneStreamingEngine.kt" \
@@ -76,7 +76,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightStreamingVisibilityTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightJournalSummaryMetadataTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightLibraryPresentationTest.kt" \
-  "$repo_root/OsmAnd/test/standalone/kotlin/FlightFavoritesTest.kt" "$repo_root/OsmAnd/test/standalone/kotlin/FlightRelativeOrientationTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightFavoritesTest.kt" "$repo_root/OsmAnd/test/standalone/kotlin/FlightRelativeOrientationTest.kt" "$repo_root/OsmAnd/test/standalone/kotlin/FlightWebServerTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightPointingSelectionTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMonitoringTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightTileFilesTest.kt" \
@@ -122,6 +122,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   -no-stdlib -no-reflect -jvm-target 1.8 -classpath "$classpath" -Xfriend-paths="$test_output" -d "$test_output" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightRecordingMetadataPersistenceTest.kt"
 java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore net.osmand.test.junit.FlightRelativeOrientationTest \
+  net.osmand.test.junit.FlightWebServerTest \
   net.osmand.test.junit.FlightTerrainPickingTest \
   net.osmand.test.junit.FlightPointingSelectionTest \
   net.osmand.test.junit.FlightTileFilesTest \

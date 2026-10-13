@@ -867,6 +867,9 @@ data class FlightRecordingPolicy(
 }
 
 data class FlightUiState(
+    val webSharing: Boolean = false,
+    val webUrls: List<String> = emptyList(),
+    val webError: String? = null,
     val photoTimeUndoAvailable: Boolean = false,
     val storageCleanup: FlightStorageCleanupSummary? = null,
     val storageCleanupBusy: Boolean = false,

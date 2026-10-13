@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_web_title">Local web view</string>
+    <string name="flight_web_hint">Open one of these links on the same Wi-Fi or phone hotspot. Localhost is for this phone. Sharing stays active across tabs and stops when this flight workspace closes.</string>
+    <string name="flight_web_starting">Starting…</string>
+    <string name="flight_web_position">Position</string>
+    <string name="flight_web_live">Live GPS</string>
+    <string name="flight_web_unavailable">Connection unavailable · last values retained</string>
     <string name="flight_download_queued">Queued after the current download</string>
     <string name="flight_window_motion">Phone aiming</string>
     <string name="flight_window_motion_align">Align here</string>

@@ -15,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -41,6 +42,51 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var storageJob: Job? = null
 	private var journeyListJob: Job? = null
 	private var deviceStateJob: Job? = null
+    private var webShareJob: Job? = null
+
+    fun setWebSharing(enabled: Boolean) {
+        webShareJob?.cancel()
+        uiState = uiState.copy(webSharing = enabled, webUrls = emptyList(), webError = null)
+        if (!enabled) return
+        val sharedJourney = uiState.journeyId
+        webShareJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                FlightWebServer().use { server ->
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        val data = withContext(Dispatchers.Main.immediate) {
+                            if (!uiState.webSharing || uiState.journeyId != sharedJourney) {
+                                setWebSharing(false)
+                                throw CancellationException()
+                            }
+                            val live = uiState.recordingForSelectedFlight()
+                            val fix = if (live.running) live.latest else uiState.snapshot?.sample
+                            val rows = org.json.JSONArray()
+                            fun row(label: Int, value: String?) {
+                                rows.put(org.json.JSONArray().put(app.getString(label)).put(value ?: "—"))
+                            }
+                            row(net.osmand.plus.R.string.flight_live_speed, fix?.speedMetersPerSecond?.let { "%.0f km/h".format(it * 3.6) })
+                            row(net.osmand.plus.R.string.flight_live_altitude, fix?.altitudeMeters?.let(::formatFlightAltitude))
+                            row(net.osmand.plus.R.string.flight_live_bearing, fix?.bearingDegrees?.let { "%.0f°".format(it) })
+                            row(net.osmand.plus.R.string.flight_live_accuracy, fix?.horizontalAccuracyMeters?.let { "±%.0f m".format(it) })
+                            row(net.osmand.plus.R.string.flight_live_fix_age, live.fixAgeSeconds(android.os.SystemClock.elapsedRealtime())?.let { "$it s" })
+                            row(net.osmand.plus.R.string.flight_live_points, (live.trip ?: uiState.trip)?.samples?.size?.toString())
+                            row(net.osmand.plus.R.string.flight_web_position, fix?.let { "%.5f, %.5f".format(it.latitude, it.longitude) })
+                            org.json.JSONObject().put("title", uiState.journeyName)
+                                .put("status", live.error ?: app.getString(if (live.running) net.osmand.plus.R.string.flight_web_live else net.osmand.plus.R.string.flight_live_not_running))
+                                .put("rows", rows).put("unavailable", app.getString(net.osmand.plus.R.string.flight_web_unavailable)).toString()
+                        }
+                        server.snapshot = data
+                        val urls = server.urls()
+                        withContext(Dispatchers.Main.immediate) { uiState = uiState.copy(webUrls = urls) }
+                        delay(1_000)
+                    }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                withContext(Dispatchers.Main.immediate) { uiState = uiState.copy(webSharing = false, webUrls = emptyList(), webError = e.message) }
+            }
+        }
+    }
 	private var stopObservingSchedules: (() -> Unit)? = null
 	private var citySearchJob: Job? = null
 	private var photoPersistenceJob: Job? = null
@@ -2318,6 +2364,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	override fun onCleared() {
+		webShareJob?.cancel()
 		journalOperations.invalidate()
 		stopObservingSchedules?.invoke()
 		deviceStateJob?.cancel()
