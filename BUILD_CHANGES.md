@@ -1,1 +1,3 @@
-- Repair Photo+ headers, keep tabs accessible and simplify live timeline controls.
+- Repair Photo+ and bottom tabs; simplify live controls, timeline stepping, route editing and tile files.
+- Keep tile downloads running with notification, size, speed and ETA; choose target precision from Files.
+- Stabilize future flight lines and terrain pointing; add calibrated phone aiming to the window view.
