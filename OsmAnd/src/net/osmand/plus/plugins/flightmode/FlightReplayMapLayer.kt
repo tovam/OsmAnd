@@ -70,6 +70,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	)
 	private val routeStrokes = mutableListOf<RouteStroke>()
 	private var hypothesisCollection: VectorLinesCollection? = null
+    private val hypothesisLines = mutableListOf<VectorLine>()
 	private var hypothesisPlan: FlightPlan? = null
 	private var hypothesisSample: FlightSample? = null
 	private var hypothesisDirty = true
@@ -79,25 +80,31 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 		hypothesisPlan=plan;hypothesisSample=sample;hypothesisDirty=true
 	}
 
-	private fun rebuildHypothesis() {
-		hypothesisCollection?.let { mapRenderer?.removeSymbolsProvider(it) }
-		hypothesisCollection=null; hypothesisDirty=false
-		val plan=hypothesisPlan?:return; val sample=hypothesisSample?:return
-		val route=FlightLiveTimeline.build(plan,null,sample).samples
-		if(route.size<2)return
-		val collection=VectorLinesCollection(true)
-		val lineScale = GeometryWayDrawer.getVectorLineScale(application)
-		// Bounded physical dashes, not a flat blue overlay. Intermediate route vertices
-		// remain in each dash so turns and altitude changes keep their true position.
-		flightRouteDashes(route).forEachIndexed { index, dash ->
-			val points = QVectorPointI().apply { dash.forEach { add(point31(it)) } }
-			val heights = QListFloat().apply { dash.forEach { add((it.altitudeMeters ?: 0.0).toFloat() + VISUAL_CLEARANCE_METERS) } }
-			val line = buildNativeStroke(collection, 9180 + index, pointsOrder + 3,
-				TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights)
-			enableFlightTube(line)
-		}
-		hypothesisCollection=collection
-	}
+    private fun rebuildHypothesis() {
+        hypothesisDirty = false
+        val plan = hypothesisPlan
+        val sample = hypothesisSample
+        if (plan == null || sample == null) {
+            hypothesisLines.forEach { it.setIsHidden(true) }
+            return
+        }
+        val route = FlightLiveTimeline.build(plan, null, sample).samples
+        val dashes = flightRouteDashes(route)
+        val collection = hypothesisCollection ?: VectorLinesCollection(true).also { hypothesisCollection = it }
+        val lineScale = GeometryWayDrawer.getVectorLineScale(application)
+        dashes.forEachIndexed { index, dash ->
+            val points = QVectorPointI().apply { dash.forEach { add(point31(it)) } }
+            val heights = QListFloat().apply { dash.forEach { add((it.altitudeMeters ?: 0.0).toFloat() + VISUAL_CLEARANCE_METERS) } }
+            val line = hypothesisLines.getOrNull(index) ?: buildNativeStroke(collection, 9180 + index, pointsOrder + 3,
+                TUBE_CORE_WIDTH_DP * lineScale, TUBE_CORE_COLOR, points, heights).also {
+                enableFlightTube(it)
+                hypothesisLines.add(it)
+            }
+            updateNativeStroke(line, (TUBE_CORE_WIDTH_DP * lineScale).toDouble(), points, heights)
+        }
+        for (index in dashes.size until hypothesisLines.size) hypothesisLines[index].setIsHidden(true)
+    }
+
 	private var pointMarkersCollection: MapMarkersCollection? = null
 	private val recordedPointMarkers = mutableListOf<MapMarker>()
 	private var recordedPointImage: net.osmand.core.jni.SingleSkImage? = null
@@ -808,7 +815,7 @@ class FlightReplayMapLayer(context: Context) : OsmandMapLayer(context) {
 	}
 
 	private fun clearNativeCollections() {
-		hypothesisCollection?.let { mapRenderer?.removeSymbolsProvider(it) }; hypothesisCollection=null
+		hypothesisCollection?.let { mapRenderer?.removeSymbolsProvider(it) }; hypothesisCollection=null; hypothesisLines.clear()
 		clearRouteCollection()
 		clearPointCollection()
 		clearPhotoCollection()

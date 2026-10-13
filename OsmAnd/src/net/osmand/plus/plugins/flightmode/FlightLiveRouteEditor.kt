@@ -45,6 +45,8 @@ internal fun FlightLiveRouteEditor(state: FlightUiState, onApply: (FlightPlan) -
     }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13)).windowInsetsPadding(WindowInsets.safeDrawing)) {
+            Text(stringResource(R.string.flight_route_edit_effects), color = Color.LightGray, fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().padding(12.dp))
             Row(Modifier.horizontalScroll(rememberScrollState())) {
                 TextButton(onClick = onClose) { Text(stringResource(R.string.shared_string_cancel), fontSize = 12.sp) }
                 TextButton(onClick = { add(FlightStopType.WAYPOINT) }, enabled = draft.stops.size < 100) {
@@ -53,7 +55,7 @@ internal fun FlightLiveRouteEditor(state: FlightUiState, onApply: (FlightPlan) -
                 TextButton(onClick = { add(FlightStopType.STOPOVER) }, enabled = draft.stops.size < 100) {
                     Text(stringResource(R.string.flight_route_add_stopover), fontSize = 12.sp)
                 }
-                TextButton(onClick = { onApply(draft); onClose() }, enabled = FlightOfflinePreparation.canSimulate(draft)) {
+                TextButton(onClick = { onApply(draft); onClose() }, enabled = draft != original && FlightOfflinePreparation.canSimulate(draft)) {
                     Text(stringResource(R.string.shared_string_apply), fontSize = 12.sp)
                 }
             }

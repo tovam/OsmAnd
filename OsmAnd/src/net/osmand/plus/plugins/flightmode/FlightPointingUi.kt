@@ -19,24 +19,25 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.collect
 import net.osmand.plus.R
 
 @Composable
 internal fun rememberTerrainPicker(scene: FlightTerrainScene?): FlightTerrainPicker? {
-    val geometry = scene?.let(::FlightPickingGeometryKey)
-    val result by
-        produceState<FlightTerrainPicker?>(null, geometry) {
+    val current by rememberUpdatedState(scene)
+    val result by produceState<FlightTerrainPicker?>(null) {
+        // Finish one index, then reuse it for the newest scene. collectLatest cancelled
+        // every partial index in live mode, leaving no reusable bounds for the next frame.
+        snapshotFlow { current }.conflate().collect { next ->
             val previous = value
-            value =
-                if (scene == null) null
-                else runInterruptible(Dispatchers.Default) { FlightTerrainPicker(scene, previous) }
+            value = if (next == null) null else runInterruptible(Dispatchers.Default) {
+                FlightTerrainPicker(next, previous)
+            }
         }
-    // Texture changes reuse the index; a newly rendered shape must wait for its own index.
-    return remember(scene, result) {
-        result
-            ?.takeIf { it.geometryKey == geometry }
-            ?.let { if (it.scene === scene) it else FlightTerrainPicker(requireNotNull(scene), it) }
     }
+    val geometry = scene?.let(::FlightPickingGeometryKey)
+    return result?.takeIf { it.geometryKey == geometry }
 }
 
 internal class FlightPointingState {
