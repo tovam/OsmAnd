@@ -49,7 +49,7 @@ internal fun FlightWorkspaceHome(
         flightLibraryRows(state.savedJourneys, cloud, planned).filter {
             it.matchesLocation(locationFilter) &&
                 (!favoritesOnly || favorites.favorites.contains(it)) &&
-                !(state.activeRecording.running && it.local?.id == state.activeRecording.journeyId)
+                !it.isActiveRecording(state.activeRecording, cloud?.bindings.orEmpty())
         }
     Column(Modifier.fillMaxSize().background(Color(0xFF0A0F13))) {
         Row(

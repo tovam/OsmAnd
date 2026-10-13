@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_step_ten_seconds">10 s</string>
+    <string name="flight_step_one_point">1 point</string>
+
 	<string name="fork_app_update_status_title">Version</string>
 	<string name="fork_app_updates_title">Application updates</string>
 	<string name="fork_app_updates_summary">Check releases from your fork: tovam/OsmAnd.</string>

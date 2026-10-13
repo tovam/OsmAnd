@@ -1163,7 +1163,7 @@ private fun CompactInstrumentStrip(sample: FlightSample?, showAccuracy: Boolean 
 		Modifier.fillMaxWidth().heightIn(min = 34.dp).background(FlightPanelStrong).border(1.dp, FlightLine),
 		verticalAlignment = Alignment.CenterVertically
 	) {
-		CompactMetric(stringResource(R.string.flight_mode_altitude_short).uppercase(), sample?.altitudeMeters?.let { "%.0f m".format(it) } ?: "—", Modifier.weight(1f))
+		CompactMetric(stringResource(R.string.flight_mode_altitude_short).uppercase(), sample?.altitudeMeters?.let { formatFlightAltitude(it) } ?: "—", Modifier.weight(1f))
 		CompactMetric(stringResource(R.string.flight_mode_speed_short).uppercase(), sample?.speedMetersPerSecond?.let { "%.0f km/h".format(it * 3.6f) } ?: "—", Modifier.weight(1f))
 		CompactMetric(stringResource(R.string.flight_mode_gps).uppercase(), sample?.satellitesUsed?.let { "$it/${sample.satellitesFound ?: 0}" } ?: "—", Modifier.weight(1f))
 		if (showAccuracy) {
@@ -2173,7 +2173,8 @@ private fun ReplayBar(
 	val density = LocalDensity.current
 	val overviewTapHeightPx = with(density) { 9.dp.toPx() }
 	val fineScrubDistancePx = with(density) { 44.dp.toPx() }
-	val stepLabel = if (trip?.hasUsableTimestamps == true) "1s" else "1p"
+	val stepMillis = if (trip?.hasUsableTimestamps == true) 10_000L else 1_000L
+	val stepLabel = stringResource(if (trip?.hasUsableTimestamps == true) R.string.flight_step_ten_seconds else R.string.flight_step_one_point)
 	val tripDurationMillis = trip?.durationMillis
 	val windowLabel = when {
 		windowFraction >= 0.9999f -> "trajet entier"
@@ -2193,7 +2194,7 @@ private fun ReplayBar(
 			Text(if (state.replayPlaying) "Ⅱ" else "▶", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
 		}
 		ReplayStepButton("−$stepLabel") {
-			onSeek(stepFlightReplayProgress(trip, state.replayProgress, -1_000L))
+			onSeek(stepFlightReplayProgress(trip, state.replayProgress, -stepMillis))
 		}
 		Column(
 			modifier = Modifier.weight(1f).padding(horizontal = 5.dp),
@@ -2338,7 +2339,7 @@ private fun ReplayBar(
 			}
 		}
 		ReplayStepButton("+$stepLabel") {
-			onSeek(stepFlightReplayProgress(trip, state.replayProgress, 1_000L))
+			onSeek(stepFlightReplayProgress(trip, state.replayProgress, stepMillis))
 		}
 		Column(Modifier.widthIn(min = 54.dp), horizontalAlignment = Alignment.End) {
 			Text(
@@ -2355,7 +2356,7 @@ private fun ReplayBar(
 @Composable
 private fun ReplayStepButton(text: String, onClick: () -> Unit) {
 	Box(
-		Modifier.padding(start = 3.dp).width(30.dp).height(28.dp).border(1.dp, FlightLine).clickable(onClick = onClick),
+		Modifier.padding(start = 3.dp).widthIn(min = 48.dp).height(44.dp).clickable(onClick = onClick).padding(horizontal = 4.dp),
 		contentAlignment = Alignment.Center
 	) {
 		Text(text, color = FlightBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
@@ -3773,7 +3774,7 @@ private fun SensorReadout(sample: FlightSample?) {
 		DenseSensorLine("HDOP", sample?.hdop?.let { "%.1f".format(it) } ?: "—")
 		DenseSensorLine(stringResource(R.string.flight_mode_latitude), sample?.let { "%.6f°".format(it.latitude) } ?: "—")
 		DenseSensorLine(stringResource(R.string.flight_mode_longitude), sample?.let { "%.6f°".format(it.longitude) } ?: "—")
-		DenseSensorLine(stringResource(R.string.flight_mode_altitude), sample?.altitudeMeters?.let { "%.0f m".format(it) } ?: "—")
+		DenseSensorLine(stringResource(R.string.flight_mode_altitude), sample?.altitudeMeters?.let { formatFlightAltitude(it) } ?: "—")
 		DenseSensorLine(stringResource(R.string.flight_mode_speed), sample?.speedMetersPerSecond?.let { "%.0f km/h".format(it * 3.6f) } ?: "—")
 		DenseSensorLine(stringResource(R.string.flight_mode_heading), sample?.bearingDegrees?.let { "%03.0f°".format(it) } ?: "—")
 		DenseSensorLine(stringResource(R.string.flight_mode_timestamp), sample?.timestampMillis?.takeIf { it > 0L }?.let(::formatClock) ?: "—")

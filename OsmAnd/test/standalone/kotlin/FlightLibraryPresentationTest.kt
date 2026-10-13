@@ -12,6 +12,21 @@ class FlightLibraryPresentationTest {
     private val id = "synthetic"
 
     @Test
+    fun activeStripSuppressesLocalAndRemoteVersionsButStoppedFlightReturns() {
+        val summary = journey().toLibrarySummary()
+        val live = FlightLiveState(journeyId = summary.id, running = true)
+        val binding = FlightCloudBinding(summary.id, "server-copy", "revision", 0L)
+        val remote = FlightCloudEntry("server-copy", "Synthetic", "revision", 1L, 0L, emptySet(), 2)
+        val localRow = FlightLibraryRow(summary, remote, binding)
+        val serverRow = FlightLibraryRow(null, remote, null)
+        assertTrue(localRow.isActiveRecording(live, listOf(binding)))
+        assertTrue(serverRow.isActiveRecording(live, listOf(binding)))
+        assertFalse(serverRow.isActiveRecording(live.copy(running = false), listOf(binding)))
+        assertTrue(serverRow.isActiveRecording(live.copy(running = false, error = "failure"), listOf(binding)))
+        assertFalse(serverRow.isActiveRecording(live.copy(journeyId = "another"), listOf(binding)))
+    }
+
+    @Test
     fun summaryAndPlanClassificationPreserveSimulationMetadata() {
         val simulated = journey(
             simulation = true,

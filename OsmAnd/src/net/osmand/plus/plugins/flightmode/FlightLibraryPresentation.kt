@@ -76,3 +76,11 @@ internal fun flightScheduleSettingsDiffer(
 ): Boolean =
     armed.copy(automatic = false, bands = emptyList()) !=
         (current ?: FlightPreparation()).copy(automatic = false, bands = emptyList())
+
+/** Hide every representation of the recorder already shown above the library. */
+internal fun FlightLibraryRow.isActiveRecording(live: FlightLiveState, bindings: List<FlightCloudBinding>): Boolean {
+    val id = live.journeyId ?: return false
+    if (!live.running && live.error == null) return false
+    val remoteId = bindings.firstOrNull { it.localId == id }?.remoteId ?: id
+    return local?.id == id || logicalCloudId == remoteId
+}
