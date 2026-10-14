@@ -29,14 +29,17 @@ jobs:
       - name: Check flight string resource literals
         run: python3 android/OsmAnd/test/standalone/test_flight_string_resources.py
 
+      - name: Check fork local diagnostics behavior
+        run: python3 android/OsmAnd/test/standalone/test_local_crash_report.py
+
       - name: Checkout OsmAnd resources
         uses: actions/checkout@v7
         with:
           repository: osmandapp/OsmAnd-resources
-          # Match the routing/test code in this fork: exact resources from build 105.1.
+          # Match the upstream source merged on 2026-10-14, including search rules and fixtures.
           # Refresh this SHA together with upstream routing/test-loader updates;
           # floating HEAD can require code and OBF fixtures the fork does not have.
-          ref: 13bb530595a2671f4baef431a1e0c7aa5f0b12fa
+          ref: 8d3a73f79f089848a471eacdf1ba49a20fb892ed
           path: resources
 
       - name: Checkout OsmAnd core

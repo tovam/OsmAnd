@@ -63,6 +63,7 @@ import net.osmand.plus.exploreplaces.ExplorePlacesOnlineProvider;
 import net.osmand.plus.exploreplaces.ExplorePlacesProvider;
 import net.osmand.plus.feedback.AnalyticsHelper;
 import net.osmand.plus.feedback.FeedbackHelper;
+import net.osmand.plus.feedback.MemoryLog;
 import net.osmand.plus.feedback.RateUsHelper;
 import net.osmand.plus.feedback.RateUsState;
 import net.osmand.plus.gallery.GalleryHelper;
@@ -157,16 +158,19 @@ public class OsmandApplication extends MultiDexApplication {
 	OsmandAidlApi aidlApi;
 	OsmAndDiagnosticThread diagnosticThread;
 
+
 	NavigationCarAppService navigationCarAppService;
 	NavigationSession carNavigationSession;
 	OnRequestPermissionsResultCallback carAppPermissionListener;
 
+	private final MemoryLog memoryLog = new MemoryLog();
 	private final SQLiteAPI sqliteAPI = new SQLiteAPIImpl(this);
 	private final OsmAndTaskManager taskManager = new OsmAndTaskManager(this);
 	private final UiUtilities iconsCache = new UiUtilities(this);
 	private final LocaleHelper localeHelper = new LocaleHelper(this);
 	private final ToastHelper toastHelper = new ToastHelper(this);
 	private final CoordinateFormatHelper coordinateFormatHelper = new CoordinateFormatHelper(this);
+
 	PanelAppearanceSettingsManager panelAppearanceSettingsManager;
 
 	// start variables
@@ -340,9 +344,15 @@ public class OsmandApplication extends MultiDexApplication {
 		return externalStorageDirectoryReadOnly;
 	}
 
+	@NonNull
+	public MemoryLog getMemoryLog() {
+		return memoryLog;
+	}
+
 	private synchronized void startDiagnostics() {
 		OsmAndDiagnosticThread diagnosticThread = this.diagnosticThread;
 		if (diagnosticThread == null || !diagnosticThread.isAlive()) {
+			memoryLog.watchActivities(this);
 			diagnosticThread = new OsmAndDiagnosticThread(this);
 			diagnosticThread.start();
 			this.diagnosticThread = diagnosticThread;
@@ -573,6 +583,12 @@ public class OsmandApplication extends MultiDexApplication {
 		FunctionGemmaRuntime.release();
 		super.onLowMemory();
 		resourceManager.onLowMemory();
+	}
+
+	@Override
+	public void onTrimMemory(int level) {
+		super.onTrimMemory(level);
+		memoryLog.onTrimMemory(level);
 	}
 
 	@Override
@@ -1262,6 +1278,14 @@ public class OsmandApplication extends MultiDexApplication {
 	public void logMapDownloadEvent(@NonNull String event, @NonNull IndexItem item, long time) {
 		try {
 			analyticsHelper.addEvent("map_download_" + event + ": " + item.getFileName() + " in " + time + " msec", AnalyticsHelper.EVENT_TYPE_MAP_DOWNLOAD);
+		} catch (Exception e) {
+			LOG.error(e);
+		}
+	}
+
+	public void logMapDownloadEvent(@NonNull String event, @NonNull IndexItem item, long time, @NonNull String details) {
+		try {
+			analyticsHelper.addEvent("map_download_" + event + ": " + item.getFileName() + " in " + time + " msec " + details, AnalyticsHelper.EVENT_TYPE_MAP_DOWNLOAD);
 		} catch (Exception e) {
 			LOG.error(e);
 		}

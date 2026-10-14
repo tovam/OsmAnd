@@ -565,7 +565,9 @@ public class SearchCoreFactory {
 								}
 								City closestCity = null;
 								if (closestCities == null) {
-									closestCities = townCitiesCache.queryCities(villagesBbox);
+									// cities are loaded only from files near the user: a village from a file beyond that keeps the region name
+									closestCities = townCitiesCache.contains(currentFile[0])
+											? townCitiesCache.queryCities(villagesBbox) : Collections.emptyList();
 								}
 								double minDist = -1;
 								double pDist = -1;
@@ -792,7 +794,6 @@ public class SearchCoreFactory {
 			}
 			ResultMatcher<Amenity> matcher = new ResultMatcher<Amenity>() {
 				int limit = 0;
-				boolean isSkipped = false;
 
 				@Override
 				public boolean publish(Amenity object) {
@@ -804,7 +805,6 @@ public class SearchCoreFactory {
 					}
 					String poiID = object.getType().getKeyName() + "_" + object.getId();
 					if (ids.contains(poiID)) {
-						isSkipped = true;
 						return false;
 					}
 					SearchResult sr = new SearchResult(phrase);
@@ -854,11 +854,6 @@ public class SearchCoreFactory {
 				@Override
 				public boolean isCancelled() {
 					return resultMatcher.isCancelled() && (limit < LIMIT);
-				}
-
-				@Override
-				public boolean isSkippedDuplication() {
-					return isSkipped;
 				}
 			};
 
@@ -1428,8 +1423,10 @@ public class SearchCoreFactory {
 			String nameFilter = null;
 			int countExtraWords = 0;
 			Set<String> poiAdditionals = new LinkedHashSet<>();
+			Object selectedType = null;
 			if (phrase.isLastWord(ObjectType.POI_TYPE)) {
 				Object obj = phrase.getLastSelectedWord().getResult().object;
+				selectedType = obj;
 				if (obj instanceof AbstractPoiType) {
 					poiTypeFilter = getPoiTypeFilter((AbstractPoiType) obj, poiAdditionals);
 				} else if (obj instanceof SearchPoiTypeFilter) {
@@ -1487,9 +1484,22 @@ public class SearchCoreFactory {
 					}
 				}
 				QuadRect bbox = phrase.getRadiusBBoxToSearch(radius);
-				List<BinaryMapIndexReader> offlineIndexes = phrase.getOfflineIndexes();
 				Set<String> searchedPois = new TreeSet<>();
+				List<Amenity> indexed = selectedType == null ? null
+						: searchByNameIndex(phrase, resultMatcher, selectedType, bbox);
+				if (indexed != null) {
+					ResultMatcher<Amenity> rm = getResultMatcher(phrase, poiTypeFilter, resultMatcher, nameFilter, null,
+							searchedPois, poiAdditionals, countExtraWords);
+					if (poiTypeFilter instanceof CustomSearchPoiFilter) {
+						rm = ((CustomSearchPoiFilter) poiTypeFilter).wrapResultMatcher(rm);
+					}
+					indexed.forEach(rm::publish);
+				}
+				List<BinaryMapIndexReader> offlineIndexes = phrase.getOfflineIndexes();
 				for (BinaryMapIndexReader r : offlineIndexes) {
+					if (indexed != null && isReadByNameIndex(r)) {
+						continue;
+					}
 					ResultMatcher<Amenity> rm = getResultMatcher(phrase, poiTypeFilter, resultMatcher, nameFilter, r,
 							searchedPois, poiAdditionals, countExtraWords);
 					if (poiTypeFilter instanceof CustomSearchPoiFilter) {
@@ -1505,6 +1515,15 @@ public class SearchCoreFactory {
 			return true;
 		}
 
+		// null - read the maps with the type filter
+		protected List<Amenity> searchByNameIndex(SearchPhrase phrase, SearchResultMatcher resultMatcher,
+				Object poiType, QuadRect bbox31) throws IOException {
+			return null;
+		}
+
+		protected boolean isReadByNameIndex(BinaryMapIndexReader reader) {
+			return false;
+		}
 
 		private ResultMatcher<Amenity> getResultMatcher(final SearchPhrase phrase, final SearchPoiTypeFilter poiTypeFilter,
 		                                                final SearchResultMatcher resultMatcher, final String nameFilter,

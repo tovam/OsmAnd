@@ -57,6 +57,12 @@ jobs:
           echo "### Upstream sync" >> "${GITHUB_STEP_SUMMARY}"
           echo "Merged osmandapp/OsmAnd:master into the fork master." >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Check fork behavior before pushing the merge
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          python3 OsmAnd/test/standalone/test_local_crash_report.py
+          python3 OsmAnd/test/standalone/test_flight_string_resources.py
+
       - name: Push merged master
         if: steps.merge.outputs.changed == 'true'
         run: git push origin HEAD:master

@@ -42,6 +42,21 @@ class LocalCrashReportSourceContractTest(unittest.TestCase):
                 for forbidden in ("ACTION_SEND", "EXTRA_EMAIL", "EXTRA_STREAM", "createChooser"):
                     self.assertNotIn(forbidden, body)
 
+    def test_upstream_report_api_cannot_upload_diagnostics(self):
+        source = read_source("feedback/FeedbackHelper.java")
+        body = method_body(source, "public void sendCrashReport(")
+        self.assertIn("sendCrashLog()", body)
+        self.assertIn("callback.processResult(false)", body)
+        for forbidden in ("uploadFile", "CRASH_REPORT_URL", "ZipOutputStream", "writeCrashReport"):
+            self.assertNotIn(forbidden, source)
+
+    def test_heap_diagnostics_entry_opens_local_report(self):
+        source = read_source("plugins/development/HeapDumpBottomSheet.java")
+        self.assertIn("app.getFeedbackHelper().sendCrashLog()", source)
+        self.assertIn("R.string.local_crash_report", source)
+        self.assertNotIn("sendCrashReport", source)
+        self.assertNotIn("R.string.heap_dump_share", source)
+
     def test_viewer_is_private_and_uses_text_document_export(self):
         manifest = (APP_MODULE / "AndroidManifest.xml").read_text(encoding="utf-8")
         registration = re.search(

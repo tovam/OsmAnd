@@ -1,3 +1,2 @@
-- Repair Photo+ and bottom tabs; simplify live controls, timeline stepping, route editing and tile files.
-- Keep tile downloads running with notification, size, speed and ETA; choose target precision from Files.
-- Stabilize flight lines and pointing; add phone aiming, black terrain shadows and a local web view with IP/port links.
+- Update OsmAnd from upstream while preserving flight tracking, Photo+, smart search and fork updates.
+- Keep crash reports local, including the new upstream diagnostics actions.

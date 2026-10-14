@@ -25,11 +25,20 @@ object TurnPreparation {
 
 	private const val TURN_DEGREE_MIN = 45.0
 
+	private const val TWICE_ROAD_LOOKAHEAD_M = 150.0
+
 	// decrease speed proportionally from 15ms (50kmh)
 	private const val SLOW_DOWN_SPEED_THRESHOLD = 15.0
 
 	// reference speed 30ms (108kmh) - 2ms (7kmh)
 	private const val SLOW_DOWN_SPEED = 2.0
+
+	private const val TRAFFIC_SIGNALS_INTERSECTION_SIZE = 60.0
+
+	private class CumulativeIntersectionDistance {
+		var currentDistance = 0.0
+		var lastIntersectionDistance = -1.0
+	}
 
 	// ---- the manoeuvres ----
 
@@ -85,7 +94,7 @@ object TurnPreparation {
 				t = TurnLanes.getActiveTurnType(lanes, leftSide, t)
 				t.lanes = lanes
 			} else if (fromTag != TurnType.C) {
-				t = TurnLanes.attachKeepLeftInfoAndLanes(leftSide, prev, rr, twiceRoadPresent)
+				t = TurnLanes.attachKeepLeftInfoAndLanes(leftSide, prev, rr, twiceRoadPresent, getBearingEndExtended(result, i, bearingDist))
 				if (t != null) {
 					val mainTurnType = TurnType.valueOf(fromTag, leftSide)
 					val lanes = t.lanes
@@ -128,7 +137,7 @@ object TurnPreparation {
 			t = TurnLanes.getActiveTurnType(lanes, leftSide, t)
 			t.lanes = lanes
 		} else {
-			t = TurnLanes.attachKeepLeftInfoAndLanes(leftSide, prev, rr, twiceRoadPresent)
+			t = TurnLanes.attachKeepLeftInfoAndLanes(leftSide, prev, rr, twiceRoadPresent, getBearingEndExtended(result, i, bearingDist))
 		}
 		if (t != null) {
 			t.turnAngle = (-mpi).toFloat()
@@ -150,8 +159,13 @@ object TurnPreparation {
 			val currentSegment = result[i]
 			val currentTurn = currentSegment.getTurnType()
 			dist += currentSegment.getDistance()
-			if (currentTurn == null || currentTurn.lanes == null) {
+			if (currentTurn == null) {
 				// skip
+			} else if (currentTurn.lanes == null) {
+				if (!TurnType.isSlightTurn(currentTurn.value)) {
+					// all turns except: C, KL, KR, TSLL, TSLR
+					nextSegment = null
+				}
 			} else {
 				var merged = false
 				if (nextSegment != null) {
@@ -251,18 +265,47 @@ object TurnPreparation {
 				if (ut) {
 					tnext.isSkipToSpeak = true
 					if (tl && TurnType.isLeftTurnNoUTurn(tnext.value)) {
-						val tt = TurnType.valueOf(TurnType.TU, false)
-						tt.lanes = t.lanes
-						return tt
+						return withUTurnLanes(TurnType.valueOf(TurnType.TU, false), result, i, t)
 					} else if (tr && TurnType.isRightTurnNoUTurn(tnext.value)) {
-						val tt = TurnType.valueOf(TurnType.TU, true)
-						tt.lanes = t.lanes
-						return tt
+						return withUTurnLanes(TurnType.valueOf(TurnType.TU, true), result, i, t)
 					}
 				}
 			}
 		}
 		return null
+	}
+
+	/**
+	 * Direction of the road before the junction. A short previous segment gives a noisy bearing,
+	 * so the baseline is extended backwards while the road continues without junctions.
+	 */
+	private fun getBearingEndExtended(result: List<RouteSegmentResult>, i: Int, bearingDist: Float): Float {
+		val prev = result[i - 1]
+		var bearing = prev.getBearingEnd()
+		var length = if (prev.getDistance() > 0) prev.getDistance().toDouble() else bearingDist.toDouble()
+		var k = i - 2
+		while (k >= 0 && length < bearingDist) {
+			val before = result[k]
+			if (before.getDistance() <= 0 || before.getTurnType() != null
+				|| before.getAttachedRoutes(before.getEndPointIndex()).isNotEmpty()) {
+				// a junction in between, the road before it goes in another direction
+				break
+			}
+			bearing = before.getBearingEnd()
+			length += before.getDistance()
+			k--
+		}
+		return bearing
+	}
+
+	private fun withUTurnLanes(uTurn: TurnType, result: List<RouteSegmentResult>, i: Int, t: TurnType): TurnType {
+		val lanes = TurnLanes.getTurnLanesInfo(result[i - 1], result[i], uTurn.value)
+		if (TurnType.hasActiveLane(lanes)) {
+			uTurn.lanes = lanes
+		} else {
+			uTurn.lanes = t.lanes
+		}
+		return uTurn
 	}
 
 	/** The road's name, falling back to the neighbour in the given direction when it has none. */
@@ -382,24 +425,46 @@ object TurnPreparation {
 
 	/** Whether the same road appears twice around this segment, which changes what the lanes mean. */
 	private fun twiceRoadPresent(result: List<RouteSegmentResult>, i: Int): Boolean {
-		if (i > 0 && i < result.size - 1) {
-			val prev = result[i - 1]
-			TurnLanes.getTurnLanesString(prev) ?: return false
-			val curr = result[i]
-			val next = result[i + 1]
-			if (prev.getObject().getId() == curr.getObject().getId()) {
-				// check if turn lanes allowed for next segment
-				return next.getAttachedRoutes(next.getStartPointIndex()).isNotEmpty()
-			} else {
-				for (attach in curr.getAttachedRoutes(curr.getStartPointIndex())) {
-					if (attach.getObject().getId() == prev.getObject().getId()) {
-						// check if road the continue in attached roads
-						return true
-					}
-				}
-			}
+		if (i <= 0 || i >= result.size - 1) {
+			return false
 		}
-		return false
+		val prev = result[i - 1]
+		val turnLanes = TurnLanes.getTurnLanesString(prev) ?: return false
+		val curr = result[i]
+		val prevId = prev.getObject().getId()
+		if (prevId == curr.getObject().getId()) {
+			// same way, two segments
+			var dist = curr.getDistance().toDouble()
+			var j = i + 1
+			while (j < result.size && dist <= TWICE_ROAD_LOOKAHEAD_M) {
+				val next = result[j]
+				if (next.getAttachedRoutes(next.getStartPointIndex()).isNotEmpty()) {
+					return true
+				}
+				val lanes = TurnLanes.getTurnLanesString(next)
+				if (lanes != null && lanes != turnLanes) {
+					return false
+				}
+				if (turnLanes == lanes) {
+					return true
+				}
+				dist += next.getDistance()
+				j++
+			}
+			return false
+		}
+		// different ways: prev's road continues as an attached one
+		var attachedPriority = TurnLanes.MAX_SPEAK_PRIORITY
+		for (attach in curr.getAttachedRoutes(curr.getStartPointIndex())) {
+			if (attach.getObject().getId() == prevId) {
+				return true
+			}
+			attachedPriority = min(attachedPriority, TurnLanes.highwaySpeakPriority(attach.getObject().getHighway()))
+		}
+		// same turn:lanes, minor attached roads (3+ classes lower), except none lanes (none can mean different)
+		val minorAttachedRoads = attachedPriority == TurnLanes.MAX_SPEAK_PRIORITY
+				|| attachedPriority - TurnLanes.highwaySpeakPriority(curr.getObject().getHighway()) > 2
+		return turnLanes == TurnLanes.getTurnLanesString(curr) && !TurnLanes.hasNoneLane(turnLanes) && minorAttachedRoads
 	}
 
 	// ---- how long each segment takes ----
@@ -410,13 +475,23 @@ object TurnPreparation {
 	 */
 	@JvmStatic
 	fun calculateTimeSpeed(request: RoutingRequest, result: List<RouteSegmentResult>) {
+		val state = CumulativeIntersectionDistance()
 		for (i in result.indices) {
-			calculateTimeSpeed(request, result[i])
+			if (i > 0) {
+				state.currentDistance += result[i - 1].getDistance().toDouble()
+			}
+			calculateTimeSpeed(request, result[i], state)
 		}
 	}
 
 	@JvmStatic
 	fun calculateTimeSpeed(request: RoutingRequest, rr: RouteSegmentResult) {
+		calculateTimeSpeed(request, rr, CumulativeIntersectionDistance())
+	}
+
+	private fun calculateTimeSpeed(
+		request: RoutingRequest, rr: RouteSegmentResult, state: CumulativeIntersectionDistance
+	) {
 		// Naismith's/Scarf rules add additional travel time when moving uphill
 		var useNaismithRule = false
 		var scarfSeconds = 0.0 // Additional time as per Naismith/Scarf
@@ -463,6 +538,16 @@ object TurnPreparation {
 			var obstacle = request.getRouter().defineObstacle(road, j, !plus).toDouble()
 			if (obstacle < 0) {
 				obstacle = 0.0
+			} else if (obstacle > 0 && road.hasTrafficLightAt(j)) {
+				// A driver stops once per intersection
+				val signalDistance = state.currentDistance + distance
+				val startsNewIntersection = state.lastIntersectionDistance < 0 ||
+						signalDistance - state.lastIntersectionDistance >= TRAFFIC_SIGNALS_INTERSECTION_SIZE
+				if (startsNewIntersection) {
+					state.lastIntersectionDistance = signalDistance
+				} else {
+					obstacle = 0.0
+				}
 			}
 			distOnRoadToPass += d / speed + obstacle // this is time in seconds
 

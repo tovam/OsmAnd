@@ -388,4 +388,9 @@ public class HelpMainFragment extends BaseFullScreenFragment implements OnItemCl
 					.commitAllowingStateLoss();
 		}
 	}
+
+	@Override
+	public String getAnalyticsScreen() {
+		return "help_main";
+	}
 }

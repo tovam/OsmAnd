@@ -1,6 +1,7 @@
 package net.osmand.plus.mapcontextmenu.editors;
 
 import static net.osmand.data.FavouritePoint.DEFAULT_BACKGROUND_TYPE;
+import static net.osmand.shared.gpx.GpxUtilities.DEFAULT_ICON_NAME;
 
 import android.content.Context;
 import android.graphics.drawable.Drawable;
@@ -62,6 +63,8 @@ public class FavoritePointEditorFragment extends PointEditorFragment {
 	private FavoriteGroup group;
 
 	private boolean saved;
+	private boolean iconSelectedByUser;
+	private boolean selectingIconForGroup;
 
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
@@ -77,6 +80,8 @@ public class FavoritePointEditorFragment extends PointEditorFragment {
 			this.favorite = favorite;
 			this.group = favouritesHelper.getGroup(favorite);
 			this.selectedGroup = group != null ? group.toPointsGroup(app) : null;
+			// an existing favorite keeps its icon when it is moved to another folder
+			this.iconSelectedByUser = !editor.isNew();
 
 			setColor(getInitialColor());
 			setIcon(getInitialIconId());
@@ -151,37 +156,66 @@ public class FavoritePointEditorFragment extends PointEditorFragment {
 		if (ctx != null) {
 			String groupIdName = FavoriteGroup.convertDisplayNameToGroupIdName(ctx, group.getName());
 			this.group = favouritesHelper.getGroup(groupIdName);
+			String iconName = getIconName();
 			super.setPointsGroup(group, true);
-			setIconName(getIconNameForGroup());
+			// an icon picked by the user is kept, otherwise the icon follows the folder
+			setIconName(iconSelectedByUser ? iconName : getIconNameForGroup());
 			selectIconInController();
 			updateContent();
 		}
 	}
 
+	@Override
+	public void onIconSelectedFromPalette(@Nullable String icon) {
+		if (!selectingIconForGroup) {
+			iconSelectedByUser = true;
+		}
+		super.onIconSelectedFromPalette(icon);
+	}
+
+	/**
+	 * Folder icon chosen by the user. The star is what folders get on creation
+	 * without a choice, so it counts as no icon ("Original").
+	 */
+	@Nullable
+	private static String getChosenGroupIconName(@Nullable FavoriteGroup group) {
+		String iconName = group != null ? group.getIconName() : null;
+		if (Algorithms.isEmpty(iconName) || DEFAULT_ICON_NAME.equals(iconName)
+				|| RenderingIcons.getBigIconResourceId(iconName) == 0) {
+			return null;
+		}
+		return iconName;
+	}
+
 	@NonNull
 	private String getIconNameForGroup() {
-		String iconName = group != null ? group.getIconName() : null;
-		if (!Algorithms.isEmpty(iconName)) {
+		String iconName = getChosenGroupIconName(group);
+		if (iconName != null) {
 			return iconName;
 		}
 
+		// the POI icon that the editor set for a new point
 		FavouritePoint favorite = getFavorite();
-		if (favorite != null) {
-			int iconId = favouritesHelper.getOriginalIconId(favorite);
-			if (iconId == 0) {
-				iconId = favorite.getIconId();
-			}
-			iconName = RenderingIcons.getBigIconName(iconId);
-			if (!Algorithms.isEmpty(iconName)) {
-				return iconName;
-			}
+		iconName = favorite != null ? RenderingIcons.getBigIconName(favorite.getIconId()) : null;
+		if (!Algorithms.isEmpty(iconName)) {
+			return iconName;
+		}
+		// a point without its own icon (an empty place on the map) gets the folder icon, as when the editor opens
+		iconName = group != null ? group.getIconName() : null;
+		if (!Algorithms.isEmpty(iconName) && RenderingIcons.getBigIconResourceId(iconName) != 0) {
+			return iconName;
 		}
 		return getDefaultIconName();
 	}
 
 	private void selectIconInController() {
 		EditorIconController controller = EditorIconController.getInstance(app, this, getIconName());
-		controller.onIconSelectedFromPalette(getIconName(), getIconCategoryKey(controller, getIconName()));
+		selectingIconForGroup = true;
+		try {
+			controller.onIconSelectedFromPalette(getIconName(), getIconCategoryKey(controller, getIconName()));
+		} finally {
+			selectingIconForGroup = false;
+		}
 	}
 
 	@Nullable
@@ -487,11 +521,13 @@ public class FavoritePointEditorFragment extends PointEditorFragment {
 	@DrawableRes
 	private int getInitialIconId() {
 		FavouritePoint favorite = getFavorite();
-		int iconId = 0;
 		FavoriteGroup group = getGroup();
 		FavoritePointEditor editor = getFavoritePointEditor();
-		if (editor != null && editor.isNew() && group != null && !Algorithms.isEmpty(group.getIconName())) {
-			iconId = RenderingIcons.getBigIconResourceId(group.getIconName());
+		int iconId = 0;
+		// a new point (its POI icon was not picked by the user) follows the icon chosen for the folder
+		String groupIconName = editor != null && editor.isNew() ? getChosenGroupIconName(group) : null;
+		if (groupIconName != null) {
+			iconId = RenderingIcons.getBigIconResourceId(groupIconName);
 		}
 		if (iconId == 0 && favorite != null) {
 			iconId = favorite.getIconId();
@@ -555,5 +591,10 @@ public class FavoritePointEditorFragment extends PointEditorFragment {
 					.addToBackStack(null)
 					.commitAllowingStateLoss();
 		}
+	}
+
+	@Override
+	public String getAnalyticsScreen() {
+		return "favorite_point_editor";
 	}
 }

@@ -9,6 +9,7 @@ import android.os.Build;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import net.osmand.CallbackWithObject;
 import net.osmand.PlatformUtil;
 import net.osmand.plus.OsmandApplication;
 import net.osmand.plus.R;
@@ -85,6 +86,32 @@ public class FeedbackHelper {
 
 	public void sendCrashLog(@NonNull File file) {
 		LocalCrashReportActivity.show(app, file);
+	}
+
+	// a native crash or ANR happened after the dialog was shown last time (and after the app was installed / updated)
+	public boolean hasNewSystemCrash() {
+		return nativeCrashHandler.getLastCrashTimestamp() > getShownSystemCrashTime();
+	}
+
+	public void markSystemCrashesShown() {
+		long timestamp = nativeCrashHandler.getLastCrashTimestamp();
+		if (timestamp > 0) {
+			app.getSettings().LAST_SHOWN_SYSTEM_CRASH_TIME.set(timestamp);
+		}
+	}
+
+	private long getShownSystemCrashTime() {
+		long shown = app.getSettings().LAST_SHOWN_SYSTEM_CRASH_TIME.get();
+		PackageInfo info = getPackageInfo();
+		return info != null ? Math.max(shown, info.lastUpdateTime) : shown;
+	}
+
+	// The upstream API also stays local; false means that nothing was uploaded.
+	public void sendCrashReport(@Nullable CallbackWithObject<Boolean> callback) {
+		sendCrashLog();
+		if (callback != null) {
+			callback.processResult(false);
+		}
 	}
 
 	public void sendSupportEmail(@NonNull String screenName) {
