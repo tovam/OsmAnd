@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
 import net.osmand.plus.R
 import net.osmand.plus.Version
 import net.osmand.plus.base.BaseFullScreenFragment
@@ -28,6 +29,7 @@ import net.osmand.plus.utils.InsetTargetsCollection
 import net.osmand.plus.views.layers.base.OsmandMapLayer
 import net.osmand.plus.views.corenative.NativeCoreContext
 import net.osmand.core.jni.FlightVectorLineBridge
+import net.osmand.core.android.MapRendererView
 
 class FlightModeFragment : BaseFullScreenFragment() {
 
@@ -52,6 +54,13 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private var flightMapViewInitialized = false
 	private var flightRendererSetupRequested = false
 	private var flightProjectionEnabled = false
+	private var previousMapVisibility: Int? = null
+	private val mapRenderLease = FlightMapRenderLease<MapRendererView>(
+		pause = { it.handleOnPause() },
+		resume = {
+			it.handleOnResume()
+			app.osmandMap.mapView.refreshMap()
+		})
 	private val locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
 		if (granted[Manifest.permission.ACCESS_FINE_LOCATION]==true) viewModel.startLive()
 	}
@@ -94,6 +103,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		if (showFlightCamera == visible) return
 		showFlightCamera = visible
 		if (::viewModel.isInitialized) viewModel.onCameraPreviewVisibilityChanged(visible)
+		updateNativeMapRendering()
 	}
 
 	override fun onCreate(savedInstanceState: Bundle?) {
@@ -153,6 +163,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 						if (isResumed) {
 							val overlay = satelliteMapOverlay ?: FlightSatelliteMapOverlay(requireContext()).also { satelliteMapOverlay = it }
 							overlay.update(app.osmandMap.mapView.mapRenderer, opacity)
+							updateNativeMapRendering()
 						}
 					},
 					onSetWindowAltitudeOverride = viewModel::setWindowAltitudeOverride,
@@ -200,6 +211,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSetPhotoImageAdjustments = viewModel::setPhotoImageAdjustments,
 					onSetPhotoCalibration = viewModel::setPhotoCalibration,
 					onPreparePhotoCalibration = viewModel::preparePhotoCalibration,
+					onPhotoEditorVisibilityChanged = viewModel::onPhotoEditorVisibilityChanged,
                     onRequestPointingTerrain = viewModel::requestPointingTerrain,
 					onOpenPhotoOnMap = viewModel::openPhotoOnMap,
 					onOpenPhotoInWindow = viewModel::openPhotoInWindow,
@@ -281,9 +293,19 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		splitMapBounds?.let(::updateSplitMapBounds)
 		updateSatelliteOverlay()
 		activity.refreshMap()
+		updateNativeMapRendering()
+		val resumedView = view
+		resumedView?.post {
+			// MapActivity resumes its shared surface after Fragment.onResume returns.
+			if (isResumed && view === resumedView) {
+				mapRenderLease.release(attachedNativeMapRenderer(), resumeRendering = false)
+				updateNativeMapRendering()
+			}
+		}
 	}
 
 	override fun onPause() {
+		restoreNativeMapRendering()
 		viewModel.setUiVisible(false)
 		viewModel.saveWindowPlacement()
 		app.osmandMap.mapView.let { map ->
@@ -306,6 +328,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	}
 
 	override fun onDestroyView() {
+		restoreNativeMapRendering()
 		setFlightProjection(false)
 		viewModel.setUiVisible(false)
 		setFlightCameraVisible(false)
@@ -451,6 +474,32 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		overlay.update(app.osmandMap.mapView.mapRenderer, satelliteBlend)
 	}
 
+	private fun updateNativeMapRendering() {
+		if (!isResumed || !::viewModel.isInitialized) return
+		val wrapper = requireMapActivity().findViewById<View>(R.id.map_view_with_layers)
+		if (previousMapVisibility == null) previousMapVisibility = wrapper.visibility
+		val visible = FlightWorkPolicy.nativeMapVisible(viewModel.uiState.page, showFlightCamera)
+		// An opaque Compose page does not automatically suspend the shared GL surface beneath it.
+		wrapper.visibility = if (visible) previousMapVisibility!! else View.INVISIBLE
+		mapRenderLease.update(attachedNativeMapRenderer(), visible)
+	}
+
+	private fun attachedNativeMapRenderer(): MapRendererView? {
+		// An offscreen flyover or Android Auto can own a different shared renderer.
+		return activity?.findViewById<MapRendererView>(R.id.atlasMapRendererView)
+			?.takeIf { it === app.osmandMap.mapView.mapRenderer }
+	}
+
+	private fun restoreNativeMapRendering() {
+		previousMapVisibility?.let { visibility ->
+			activity?.findViewById<View>(R.id.map_view_with_layers)?.visibility = visibility
+		}
+		previousMapVisibility = null
+		// If the activity is stopping, its own lifecycle will resume the renderer next time.
+		mapRenderLease.release(attachedNativeMapRenderer(),
+			resumeRendering = activity?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true)
+	}
+
 	private fun removeMapInteractionGuard() {
 		val mapView = app.osmandMap.mapView
 		mapInteractionBlockerLayer?.let(mapView::removeLayer)
@@ -563,6 +612,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 			app.osmandMap.mapView.mapActivity?.refreshMapComplete()
 			setFlightProjection(true)
 			updateSatelliteOverlay()
+			updateNativeMapRendering()
 		}
 		if (NativeCoreContext.isInit()) {
 			attachRenderer()

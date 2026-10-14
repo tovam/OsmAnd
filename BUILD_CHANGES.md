@@ -1,2 +1,1 @@
-- Update OsmAnd from upstream while preserving flight tracking, Photo+, smart search and fork updates.
-- Keep crash reports local, including the new upstream diagnostics actions.
+- Make Photo+ scrolling lighter by pausing hidden map and terrain work and reusing photo thumbnails.

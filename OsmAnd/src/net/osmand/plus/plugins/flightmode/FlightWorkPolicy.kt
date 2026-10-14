@@ -21,6 +21,27 @@ internal object FlightWorkPolicy {
     fun visualWorkActive(uiVisible: Boolean, cameraPreviewActive: Boolean): Boolean =
         uiVisible && !cameraPreviewActive
 
+    /** Browsing photos consumes no terrain; the photo editor can request it explicitly. */
+    fun terrainWorkActive(
+        uiVisible: Boolean,
+        cameraPreviewActive: Boolean,
+        page: FlightPage,
+        photoEditorVisible: Boolean,
+    ): Boolean =
+        visualWorkActive(uiVisible, cameraPreviewActive) &&
+            (page == FlightPage.MAP || page == FlightPage.WINDOW ||
+                page == FlightPage.MIXED || page == FlightPage.WINDOW_SETUP ||
+                page == FlightPage.PHOTO && photoEditorVisible)
+
+    fun nativeMapVisible(page: FlightPage, cameraPreviewActive: Boolean): Boolean =
+        !cameraPreviewActive && (page == FlightPage.MAP || page == FlightPage.MIXED)
+
+    /** Only pages displaying offline coverage need to maintain its inventory subscription. */
+    fun offlineCoverageActive(page: FlightPage): Boolean =
+        page == FlightPage.PREPARE || page == FlightPage.DETAIL ||
+            page == FlightPage.JOURNAL || page == FlightPage.SATELLITE ||
+            page == FlightPage.MAP || page == FlightPage.WINDOW || page == FlightPage.MIXED
+
     fun recordingActive(simulation: Boolean, visible: Boolean, userPaused: Boolean): Boolean =
         !simulation || (visible && !userPaused)
 

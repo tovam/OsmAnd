@@ -3,6 +3,7 @@ package net.osmand.plus.plugins.flightmode
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Paint
+import android.util.LruCache
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -263,7 +264,8 @@ fun FlightModeScreen(
 	onOpenJourneyDetails: (String) -> Unit = onOpenJourney,
 	onImportPhotos: () -> Unit = onPhotoAction,
 	onSplitMapBounds: (android.graphics.Rect?) -> Unit = {},
-	onMapSatelliteBlend: (Float) -> Unit = {}
+	onMapSatelliteBlend: (Float) -> Unit = {},
+	onPhotoEditorVisibilityChanged: (Boolean) -> Unit = {}
 ) {
 	val favorites = rememberFlightFavorites()
 	val cloudContext = LocalContext.current.applicationContext
@@ -525,6 +527,7 @@ fun FlightModeScreen(
 					onSetPhotoCalibration = onSetPhotoCalibration,
 					onSetPhotoImageAdjustments = onSetPhotoImageAdjustments,
 					onPreparePhotoCalibration = onPreparePhotoCalibration,
+					onPhotoEditorVisibilityChanged = onPhotoEditorVisibilityChanged,
                     onRequestPointingTerrain = onRequestPointingTerrain, onRetryTerrain = onRetryTerrain,
                     onCorrectPhotoTimes = onCorrectPhotoTimes, onUndoPhotoTimeCorrection = onUndoPhotoTimeCorrection
 				)
@@ -1651,6 +1654,7 @@ private fun PhotoScreen(
 	onSetPhotoCalibration: (String, FlightPhotoCalibration) -> Unit,
 	onSetPhotoImageAdjustments: (String, FlightPhotoImageAdjustments) -> Unit,
 	onPreparePhotoCalibration: (String) -> Unit,
+	onPhotoEditorVisibilityChanged: (Boolean) -> Unit,
     onRequestPointingTerrain: (Double, Double) -> Unit, onRetryTerrain: () -> Unit,
     onCorrectPhotoTimes: (Set<String>, Int, Int) -> Unit, onUndoPhotoTimeCorrection: () -> Unit
 ) {
@@ -1664,10 +1668,22 @@ private fun PhotoScreen(
 	var fullScreenPhotoId by remember { mutableStateOf<String?>(null) }
 	val favorites = LocalFlightFavorites.current
 	var favoritesOnly by rememberSaveable(state.journeyId) { mutableStateOf(false) }
-	val all = state.photos + state.pendingPhotos
+	val all = remember(state.photos, state.pendingPhotos) { state.photos + state.pendingPhotos }
+	val pending = remember(state.pendingPhotos) { state.pendingPhotos.sortedWith(PHOTO_TIME_COMPARATOR) }
+	val visiblePhotos = remember(state.photos, favoritesOnly, favorites.favorites.photos) {
+		state.photos.filter { !favoritesOnly || it.id in favorites.favorites.photos }.sortedWith(PHOTO_TIME_COMPARATOR)
+	}
+	val previews = remember(state.journeyId) {
+		// Scoped to this library, bounded by bytes; eviction never recycles a displayed bitmap.
+		object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
+			override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+		}
+	}
 	val editorPhoto = all.firstOrNull { it.id == editorId }
 	LaunchedEffect(editorId, editorPhoto?.matchedSamplePosition, editorPhoto?.calibration?.fit, editorPhoto?.windowAlignment) { editorId?.let(onPreparePhotoCalibration) }
 	val fullScreenPhoto = all.firstOrNull { it.id == fullScreenPhotoId }
+	val editorVisible = editorPhoto != null && fullScreenPhoto == null
+	FlightVisibilityEffect(editorVisible) { resumed -> onPhotoEditorVisibilityChanged(resumed && editorVisible) }
 	Column(Modifier.fillMaxSize().background(FlightBackground)) {
 		FlightTopBar(stringResource(R.string.flight_mode_photo), state.sessionMode, onClose)
 		FlightStorageStatusStrip(state)
@@ -1703,20 +1719,19 @@ private fun PhotoScreen(
 			}
 			if (state.pendingPhotos.isNotEmpty()) {
 				item { SectionTitle(stringResource(R.string.flight_mode_photos_to_confirm, state.pendingPhotos.size)) }
-				itemsIndexed(state.pendingPhotos.sortedWith(PHOTO_TIME_COMPARATOR), key = { _, p -> p.id }) { _, photo ->
-					PhotoLibraryEntry(photo, state.trip) { editorPointingMode = false; editorId = photo.id; onSelectPhoto(photo.id) }
+				itemsIndexed(pending, key = { _, p -> p.id }) { _, photo ->
+					PhotoLibraryEntry(photo, state.trip, previews) { editorPointingMode = false; editorId = photo.id; onSelectPhoto(photo.id) }
 				}
 				item { Row(Modifier.fillMaxWidth()) {
 					CompactAction(stringResource(R.string.flight_mode_cancel), FlightMuted, onDiscardPhotos, Modifier.weight(1f))
 					CompactAction(stringResource(R.string.flight_mode_confirm_photos), FlightGreen, onValidatePhotos, Modifier.weight(1f))
 				} }
 			}
-			val visiblePhotos = state.photos.filter { !favoritesOnly || it.id in favorites.favorites.photos }.sortedWith(PHOTO_TIME_COMPARATOR)
 			if (favoritesOnly && favorites.ready && visiblePhotos.isEmpty()) item {
 				Text(stringResource(R.string.flight_favorites_empty), color = FlightMuted, fontSize = 12.sp, modifier = Modifier.padding(12.dp))
 			}
 			itemsIndexed(visiblePhotos, key = { _, p -> p.id }) { _, photo ->
-				PhotoLibraryEntry(photo, state.trip) { editorPointingMode = false; editorId = photo.id; onSelectPhoto(photo.id) }
+				PhotoLibraryEntry(photo, state.trip, previews) { editorPointingMode = false; editorId = photo.id; onSelectPhoto(photo.id) }
 			}
 		}
 	}
@@ -1741,10 +1756,13 @@ private fun PhotoScreen(
 }
 
 @Composable
-private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, onOpen: () -> Unit) {
+private fun PhotoLibraryEntry(photo: FlightPhotoAttachment, trip: FlightTrip?, previews: LruCache<String, Bitmap>, onOpen: () -> Unit) {
 	val favorites = LocalFlightFavorites.current
-	val bitmap by produceState<Bitmap?>(null, photo.localPath) {
-		value = withContext(Dispatchers.IO) { decodePhotoPreview(File(photo.localPath), 192) }
+	val bitmap by produceState<Bitmap?>(previews.get(photo.localPath), photo.localPath, previews) {
+		value = withContext(Dispatchers.IO) {
+			previews.get(photo.localPath) ?: runCatching { decodePhotoPreview(File(photo.localPath), 192) }.getOrNull()
+				?.also { previews.put(photo.localPath, it) }
+		}
 	}
 	val adjustments = photo.effectiveImageAdjustments()
 	val corrected = rememberDehazedPhoto(bitmap, adjustments)

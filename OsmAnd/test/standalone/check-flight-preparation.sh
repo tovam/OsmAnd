@@ -54,7 +54,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightCameraKeyPolicy.kt" \
   "$sources/FlightCalibrationTerrain.kt" \
   "$sources/FlightAltitudeProfile.kt" \
-  "$sources/FlightGpsGaps.kt" "$sources/FlightOverviewTiles.kt" "$sources/FlightVisibilityLease.kt" \
+  "$sources/FlightGpsGaps.kt" "$sources/FlightOverviewTiles.kt" "$sources/FlightVisibilityLease.kt" "$sources/FlightMapRenderLease.kt" \
   "$sources/FlightIgnoredTimes.kt" "$sources/FlightAutomaticTimes.kt" "$sources/FlightTimeProjection.kt" \
   "$sources/FlightProfileSegments.kt" \
   "$sources/FlightLiveDisplayState.kt" \
@@ -83,6 +83,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightTilePresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMapPresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightVisibilityLeaseTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightMapRenderLeaseTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightOverviewTilesTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightConcurrentTransfersTest.kt" \
   "$repo_root/OsmAnd/test/java/net/osmand/test/junit/FlightNativeTrackUpdatePlanTest.kt" \
@@ -131,6 +132,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore
   net.osmand.test.junit.FlightMapPresentationTest \
   net.osmand.test.junit.FlightMapCameraTest \
   net.osmand.test.junit.FlightVisibilityLeaseTest \
+  net.osmand.test.junit.FlightMapRenderLeaseTest \
   net.osmand.test.junit.FlightOverviewTilesTest \
   net.osmand.test.junit.FlightGpsGapsTest \
   net.osmand.test.junit.FlightIgnoredTimesTest net.osmand.test.junit.FlightAutomaticTimesTest \

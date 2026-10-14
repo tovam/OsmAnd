@@ -96,7 +96,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var pendingDuplicateTrip: FlightTrip? = null
 	private var flightUiVisible by mutableStateOf(false)
 	private var cameraPreviewActive by mutableStateOf(false)
+	private var photoEditorVisible by mutableStateOf(false)
 	private val visualWorkActive get() = FlightWorkPolicy.visualWorkActive(flightUiVisible, cameraPreviewActive)
+	private val terrainWorkActive get() = FlightWorkPolicy.terrainWorkActive(
+		flightUiVisible, cameraPreviewActive, uiState.page, photoEditorVisible)
 	private val uiVisibility = MutableStateFlow(false)
 	private val livePredictor = FlightLivePredictor()
 	private var preparationDownload: Job? = null
@@ -119,7 +122,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	private var offlineCachedQuote: FlightOfflineQuote? = null
 	private fun currentOfflineCoverageScope(): OfflineCoverageScope? {
 		if (!flightUiVisible || !hasOfflineCorridorSource() ||
-			uiState.page in listOf(FlightPage.HOME, FlightPage.PLANS, FlightPage.JOURNEYS)) return null
+			!FlightWorkPolicy.offlineCoverageActive(uiState.page)) return null
 		return OfflineCoverageScope(uiState.journeyId, uiState.journeyCreatedAtMillis,
 			uiState.plan.stops.map { it.latitude to it.longitude },
 			(uiState.plan.preparation ?: FlightPreparation().takeIf { uiState.sessionMode == FlightSessionMode.PREPARE })?.bands,
@@ -235,10 +238,13 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 			initialScene = { uiState.terrainScene },
 			publishScene = { scene -> uiState = uiState.copy(terrainScene = scene) },
 			publishStatus = { status -> uiState = uiState.copy(terrainStatus = status) }
-		).also { it.setForeground(visualWorkActive) }
+		).also { it.setForeground(terrainWorkActive) }
 	}
 
 	init {
+		viewModelScope.launch {
+			snapshotFlow { terrainWorkActive }.collect { terrainStreamingEngine.setForeground(it) }
+		}
         viewModelScope.launch {
             combine(FlightTileDownloadService.updates, snapshotFlow { uiState.journeyId }) { updates, id -> updates[id] }
                 .collect { status -> if (status != null) uiState = uiState.copy(offlinePreloadStatus = status) }
@@ -366,7 +372,7 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		if (flightUiVisible == visible) return
 		flightUiVisible = visible
 		uiVisibility.value = visible
-		terrainStreamingEngine.setForeground(visualWorkActive)
+		terrainStreamingEngine.setForeground(terrainWorkActive)
 		if (!visible) {
 			FlightUiActivity.set(this, null)
 			liveTimelineJob?.cancel()
@@ -380,12 +386,18 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 	fun onCameraPreviewVisibilityChanged(active: Boolean) {
 		if (cameraPreviewActive == active) return
 		cameraPreviewActive = active
-		terrainStreamingEngine.setForeground(visualWorkActive)
+		terrainStreamingEngine.setForeground(terrainWorkActive)
 		if (active) liveTimelineJob?.cancel()
 		else if (visualWorkActive) {
 			if (uiState.sessionMode == FlightSessionMode.LIVE) rebuildLiveTimeline(uiState.liveState)
 			uiState.snapshot?.sample?.let(::requestTerrain)
 		}
+	}
+
+	fun onPhotoEditorVisibilityChanged(visible: Boolean) {
+		if (photoEditorVisible == visible) return
+		photoEditorVisible = visible
+		terrainStreamingEngine.setForeground(terrainWorkActive)
 	}
 
 	private fun refreshDeviceState() {
