@@ -171,6 +171,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSaveWindowPlacement = viewModel::saveWindowPlacement,
 					onSetWindowSide = viewModel::setWindowSide,
 					onMoveWindowLook = viewModel::moveWindowLook,
+					onSetWindowLook = viewModel::setWindowLook,
 					onRecenterWindowLook = viewModel::recenterWindowLook,
 					onSetWindowZoom = viewModel::setWindowZoom,
 					onChangeWindowZoom = viewModel::changeWindowZoom,

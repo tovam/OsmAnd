@@ -11,7 +11,8 @@
     <string name="flight_web_unavailable">Connection unavailable · last values retained</string>
     <string name="flight_download_queued">Queued after the current download</string>
     <string name="flight_window_motion">Phone aiming</string>
-    <string name="flight_window_motion_align">Align here</string>
+    <string name="flight_window_motion_align">Set reference</string>
+    <string name="flight_window_motion_reference">Current phone direction now matches the displayed view.</string>
     <string name="flight_window_motion_unavailable">Orientation sensor unavailable</string>
 
     <string name="flight_route_undo">Undo route edit</string>

@@ -1476,6 +1476,14 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		scheduleTerrainDetailFocus()
 	}
 
+	fun setWindowLook(look: FlightWindowLook) {
+		if (!look.yawDegrees.isFinite() || !look.pitchDegrees.isFinite()) return
+		val target = look.clamped()
+		if (target == uiState.windowLook) return
+		uiState = uiState.copy(windowLook = target)
+		scheduleTerrainDetailFocus()
+	}
+
 	fun recenterWindowLook() {
 		if (uiState.windowLook != FlightWindowLook()) {
 			uiState = uiState.copy(windowLook = FlightWindowLook())

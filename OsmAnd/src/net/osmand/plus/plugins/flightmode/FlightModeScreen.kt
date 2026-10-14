@@ -265,7 +265,8 @@ fun FlightModeScreen(
 	onImportPhotos: () -> Unit = onPhotoAction,
 	onSplitMapBounds: (android.graphics.Rect?) -> Unit = {},
 	onMapSatelliteBlend: (Float) -> Unit = {},
-	onPhotoEditorVisibilityChanged: (Boolean) -> Unit = {}
+	onPhotoEditorVisibilityChanged: (Boolean) -> Unit = {},
+	onSetWindowLook: (FlightWindowLook) -> Unit = {}
 ) {
 	val favorites = rememberFlightFavorites()
 	val cloudContext = LocalContext.current.applicationContext
@@ -456,6 +457,7 @@ fun FlightModeScreen(
 					onReturnLive = onReturnLive,
 					onSetSide = onSetWindowSide,
 					onMoveLook = onMoveWindowLook,
+					onSetLook = onSetWindowLook,
 					onRecenterLook = onRecenterWindowLook,
 					onChangeZoom = onChangeWindowZoom,
 					onSetZoom = onSetWindowZoom,
@@ -982,6 +984,7 @@ private fun WindowScreen(
 	onReturnLive: () -> Unit,
 	onSetSide: (FlightCabinSide) -> Unit,
 	onMoveLook: (Float, Float) -> Unit,
+	onSetLook: (FlightWindowLook) -> Unit,
 	onRecenterLook: () -> Unit,
 	onChangeZoom: (Float) -> Unit,
 	onSetZoom: (Float) -> Unit,
@@ -1066,8 +1069,8 @@ private fun WindowScreen(
 				modifier = Modifier.fillMaxSize()
 			)
             key(state.journeyId) {
-                FlightWindowMotionControls(state.windowLook, state.snapshot?.sample?.bearingDegrees ?: 0f, sensorAiming, { sensorAiming = it },
-                    { yaw, pitch -> if (sensorAiming) onMoveLook(yaw, pitch) },
+                FlightWindowMotionControls(state.windowLook, state.windowPlacement, state.snapshot?.sample?.bearingDegrees, sensorAiming, { sensorAiming = it },
+                    { target -> if (sensorAiming) onSetLook(target) },
                     Modifier.align(Alignment.BottomStart).background(FlightHudPanel))
             }
 			val toggleLabel = stringResource(if (controlsVisible) R.string.flight_controls_hide else R.string.flight_controls_show)

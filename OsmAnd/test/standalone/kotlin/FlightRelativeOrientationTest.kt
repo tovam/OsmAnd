@@ -1,53 +1,126 @@
 package net.osmand.test.junit
 
+import kotlin.math.*
 import net.osmand.plus.plugins.flightmode.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class FlightRelativeOrientationTest {
-    @Test fun aircraftHeadingChangesAreNotCountedTwice() {
-        val controller = FlightPhoneAimController()
-        var look = FlightWindowLook()
-        controller.reset(look, 20f)
-        controller.update(100f, 0f, look, 20f)
+    private fun camera(yaw: Double, pitch: Double = 0.0): FloatArray {
+        val a = Math.toRadians(yaw)
+        val p = Math.toRadians(pitch)
+        return floatArrayOf(
+            cos(a).toFloat(),
+            (-sin(a) * sin(p)).toFloat(),
+            (-sin(a) * cos(p)).toFloat(),
+            -sin(a).toFloat(),
+            (-cos(a) * sin(p)).toFloat(),
+            (-cos(a) * cos(p)).toFloat(),
+            0f,
+            cos(p).toFloat(),
+            -sin(p).toFloat(),
+        )
+    }
+
+    private fun controller(
+        look: FlightWindowLook = FlightWindowLook(),
+        bearing: Float? = 0f,
+        azimuth: Float = 0f,
+        elevation: Float = 0f,
+    ) = FlightPhoneAimController().also { it.reset(look, bearing, azimuth, elevation) }
+
+    @Test
+    fun delayedUiCannotAccumulateDuplicateCorrections() {
+        val aim = controller()
+        aim.update(camera(0.0), 1L, 0f)
+        var target = FlightWindowLook()
+        repeat(160) { target = aim.update(camera(30.0), (it + 1) * 50_000_000L, 0f)!! }
+        // No intermediate target was applied to a UI, unlike the old delta-based API.
+        assertEquals(30f, target.yawDegrees, 0.001f)
+        assertEquals(0f, target.pitchDegrees, 0.001f)
+    }
+
+    @Test
+    fun aircraftHeadingChangesAreNotCountedTwice() {
+        val aim = controller(bearing = 20f, azimuth = 20f)
+        aim.update(camera(20.0), 1L, 20f)
+        var target = FlightWindowLook()
+        repeat(160) { target = aim.update(camera(40.0), (it + 1) * 50_000_000L, 40f)!! }
+        assertEquals(0f, target.yawDegrees, 0.001f)
+    }
+
+    @Test
+    fun verticalPhoneNoiseDoesNotSpinTheView() {
+        val aim = controller()
+        aim.update(camera(0.0), 1L, 0f)
+        var target = FlightWindowLook()
+        repeat(100) { target = aim.update(camera(0.0, -89.99), (it + 1) * 50_000_000L, 0f)!! }
+        val heading = target.yawDegrees
         repeat(100) {
-            controller.update(120f, 0f, look, 40f)?.let { look = look.copy(
-                yawDegrees = look.yawDegrees + it.first, pitchDegrees = look.pitchDegrees + it.second).clamped() }
+            target =
+                aim.update(
+                    camera(if (it % 2 == 0) 170.0 else -170.0, -89.99),
+                    (it + 101) * 50_000_000L,
+                    0f,
+                )!!
         }
-        assertEquals(0f, look.yawDegrees, 0.04f)
+        assertEquals(heading, target.yawDegrees, 0.01f)
+        assertEquals(FlightWindowLook.MIN_PITCH_DEGREES, target.pitchDegrees, 0.01f)
     }
-    @Test fun exceedingCameraPitchLimitDoesNotShiftTheNeutralReference() {
-        val controller = FlightPhoneAimController()
-        var look = FlightWindowLook()
-        controller.reset(look)
-        controller.update(0f, 0f, look)
-        repeat(80) {
-            controller.update(0f, 70f, look)?.let { look = look.copy(
-                yawDegrees = look.yawDegrees + it.first, pitchDegrees = look.pitchDegrees + it.second).clamped() }
+
+    @Test
+    fun returningFromPitchClampRestoresNeutral() {
+        val aim = controller()
+        aim.update(camera(0.0), 1L, 0f)
+        var target = FlightWindowLook()
+        repeat(100) { target = aim.update(camera(0.0, 70.0), (it + 1) * 50_000_000L, 0f)!! }
+        assertEquals(FlightWindowLook.MAX_PITCH_DEGREES, target.pitchDegrees, 0.001f)
+        repeat(100) { target = aim.update(camera(0.0), (it + 101) * 50_000_000L, 0f)!! }
+        assertEquals(0f, target.pitchDegrees, 0.001f)
+    }
+
+    @Test
+    fun referencePreservesTheDisplayedDirectionRegardlessOfSensorNorth() {
+        val look = FlightWindowLook(35f, -15f)
+        val aim = controller(look, bearing = 80f, azimuth = 25f, elevation = -20f)
+        val rotation = camera(155.0, 35.0)
+        aim.update(rotation, 1L, 80f)
+        repeat(50) {
+            val target = aim.update(rotation, (it + 1) * 50_000_000L, 80f)!!
+            assertEquals(look.yawDegrees, target.yawDegrees, 0.001f)
+            assertEquals(look.pitchDegrees, target.pitchDegrees, 0.001f)
         }
-        assertEquals(FlightWindowLook.MAX_PITCH_DEGREES, look.pitchDegrees, 0.001f)
-        repeat(80) {
-            controller.update(0f, 0f, look)?.let { look = look.copy(
-                yawDegrees = look.yawDegrees + it.first, pitchDegrees = look.pitchDegrees + it.second).clamped() }
+    }
+
+    @Test
+    fun rollAroundTheOpticalAxisDoesNotAimElsewhere() {
+        val aim = controller()
+        val base = camera(0.0)
+        aim.update(base, 1L, 0f)
+        val angle = Math.toRadians(60.0)
+        val roll =
+            doubleArrayOf(cos(angle), -sin(angle), 0.0, sin(angle), cos(angle), 0.0, 0.0, 0.0, 1.0)
+        val rolled =
+            FloatArray(9) { i ->
+                (0..2).sumOf { k -> base[i / 3 * 3 + k] * roll[k * 3 + i % 3] }.toFloat()
+            }
+        repeat(50) {
+            val target = aim.update(rolled, (it + 1) * 50_000_000L, 0f)!!
+            assertEquals(0f, target.yawDegrees, 0.001f)
+            assertEquals(0f, target.pitchDegrees, 0.001f)
         }
-        assertEquals(0f, look.pitchDegrees, 0.04f)
     }
-    @Test fun calibrationWrapAndResetDoNotJumpTheView() {
-        val orientation = FlightRelativeOrientation()
-        assertNull(orientation.update(179f, 0f))
-        val delta = orientation.update(-179f, 8f)!!
-        assertEquals(0.5f, delta.first, 0.001f)
-        assertEquals(2f, delta.second, 0.001f)
-        orientation.reset()
-        assertNull(orientation.update(-90f, -30f))
-        assertNull(orientation.update(Float.NaN, 0f))
+
+    @Test
+    fun staleAndInvalidSensorSamplesAreIgnored() {
+        val aim = controller()
+        aim.update(camera(0.0), 100L, null)
+        assertNull(aim.update(camera(60.0), 99L, null))
+        assertNull(aim.update(floatArrayOf(Float.NaN), 200L, null))
     }
-    @Test fun stationaryPhoneSettlesAndAltitudeGroupingIsStable() {
-        val orientation = FlightRelativeOrientation()
-        orientation.update(0f, 0f)
-        var total = 0f
-        repeat(80) { total += orientation.update(40f, 0f)!!.first }
-        assertEquals(40f, total, 0.001f)
+
+    @Test
+    fun altitudeGroupingIsStable() {
         assertEquals("10\u202f500 m", formatFlightAltitude(10500.0))
         assertEquals("—", formatFlightAltitude(Double.NaN))
     }

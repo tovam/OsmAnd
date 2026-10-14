@@ -1,2 +1,3 @@
 - Make Photo+ scrolling lighter by pausing hidden map and terrain work and reusing photo thumbnails.
 - Make tile Files a dense inventory with one row per resolution and a single download-resolution menu.
+- Stabilize phone aiming with an absolute filtered direction and a clear reference action.
