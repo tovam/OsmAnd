@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_files_download_resolution">Résolution à télécharger : z%1$s ▾</string>
+    <string name="flight_files_size_short">Stocké</string>
+    <string name="flight_files_remaining_short">À télécharger</string>
+    <string name="flight_range_edit_short">Limites du vol</string>
+    <string name="flight_timeline_future_short">Estimé</string>
+    <string name="flight_timeline_past_short">Enregistré</string>
+    <string name="flight_altitude_manual_value">Manuel : %1$s</string>
+    <string name="flight_altitude_gps_value">GPS : %1$s</string>
+    <string name="flight_window_motion_reference">La direction actuelle du téléphone correspond maintenant à la vue affichée.</string>
     <string name="flight_web_title">Vue web locale</string>
     <string name="flight_web_hint">Ouvrir un de ces liens sur le même Wi-Fi ou le partage de connexion du téléphone. Localhost est réservé à ce téléphone. Le partage reste actif entre les onglets et s’arrête à la fermeture du suivi.</string>
     <string name="flight_web_starting">Démarrage…</string>
@@ -8,7 +17,7 @@
     <string name="flight_web_unavailable">Connexion indisponible · dernières valeurs conservées</string>
     <string name="flight_download_queued">En attente du téléchargement en cours</string>
     <string name="flight_window_motion">Visée capteurs</string>
-    <string name="flight_window_motion_align">Aligner ici</string>
+    <string name="flight_window_motion_align">Définir la référence</string>
     <string name="flight_window_motion_unavailable">Capteur d’orientation indisponible</string>
 
     <string name="flight_route_undo">Annuler la modification</string>
