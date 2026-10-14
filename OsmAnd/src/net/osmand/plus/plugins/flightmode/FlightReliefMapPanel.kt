@@ -515,10 +515,10 @@ private fun FlightReliefMapScale(
             Column {
                 Text(label, color = Color.White, fontSize = 10.sp)
                 Canvas(Modifier.fillMaxWidth().height(7.dp)) {
-                    val end = (size.width * step / distance).toFloat()
+                    val end = (this.size.width * step / distance).toFloat()
                     drawLine(Color.White, Offset(0f, 2f), Offset(end, 2f), 2f)
-                    drawLine(Color.White, Offset.Zero, Offset(0f, size.height), 2f)
-                    drawLine(Color.White, Offset(end, 0f), Offset(end, size.height), 2f)
+                    drawLine(Color.White, Offset.Zero, Offset(0f, this.size.height), 2f)
+                    drawLine(Color.White, Offset(end, 0f), Offset(end, this.size.height), 2f)
                 }
             }
         }
