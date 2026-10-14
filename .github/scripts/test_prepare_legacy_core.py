@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,8 +13,19 @@ spec = importlib.util.spec_from_file_location("legacy_preparation", SCRIPT)
 legacy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(legacy)
 
-UPSTREAM = '''import subprocess
+UPSTREAM = '''import os
+import sys
+import subprocess
 import threading
+def git_checkout_to_directory(git, repo, commithash, directory, verbose):
+  if not os.path.isdir(directory):
+    subprocess.check_call([git, 'clone', '--quiet', '--no-checkout', repo, directory])
+    subprocess.check_call([git, 'checkout', '--quiet', commithash], cwd=directory)
+    return
+  subprocess.check_call([git, 'fetch', '--quiet'], cwd=directory)
+  subprocess.check_call([git, 'checkout', '--quiet', commithash], cwd=directory)
+def parse_file_to_dict(path):
+  return {}
 def multithread(function, list_of_arg_lists):
   threads = []
   for args in list_of_arg_lists:
@@ -57,6 +69,106 @@ class LegacyDependencyTest(unittest.TestCase):
         with patch("time.sleep"), self.assertRaises(subprocess.CalledProcessError):
             self.namespace["multithread"](download, [()])
         self.assertEqual(len(calls), 3)
+
+    def test_stalled_fetch_is_retried_and_timeout_remains_visible(self):
+        calls = []
+        def download():
+            calls.append(1)
+            raise subprocess.TimeoutExpired("synthetic fetch", 180)
+        with patch("time.sleep"), self.assertRaises(subprocess.TimeoutExpired):
+            self.namespace["multithread"](download, [()])
+        self.assertEqual(len(calls), 3)
+
+    def test_exact_older_commit_is_shallow_and_reused_without_network(self):
+        environment = {"PATH": os.environ["PATH"], "GIT_CONFIG_NOSYSTEM": "1",
+                       "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                       "GIT_AUTHOR_NAME": "Synthetic", "GIT_COMMITTER_NAME": "Synthetic",
+                       "GIT_AUTHOR_EMAIL": "synthetic@example.invalid",
+                       "GIT_COMMITTER_EMAIL": "synthetic@example.invalid"}
+        with patch.dict(os.environ, environment, clear=True):
+            source = self.root / "synthetic-upstream"
+            subprocess.run(["git", "init", "--quiet", str(source)], check=True)
+            def git(*args, cwd=source):
+                return subprocess.check_output(["git", *args], cwd=cwd, text=True).strip()
+            for value in ["first", "pinned", "newer"]:
+                source.joinpath("proof.txt").write_text(value)
+                git("add", "proof.txt")
+                git("commit", "--quiet", "-m", value)
+                if value == "pinned":
+                    pinned = git("rev-parse", "HEAD")
+            target = self.root / "shallow-dependency"
+            self.namespace["is_git_toplevel"] = lambda executable, directory: git("rev-parse", "--show-toplevel", cwd=directory) == directory
+            self.namespace["git_repository_sync_is_disabled"] = lambda *args: False
+            self.namespace["status"] = lambda *args: None
+            checkout = self.namespace["git_checkout_to_directory"]
+            checkout("git", source.as_uri(), pinned, str(target), False)
+            self.assertEqual(git("rev-parse", "HEAD", cwd=target), pinned)
+            self.assertEqual(git("rev-list", "--count", "HEAD", cwd=target), "1")
+            self.assertEqual(target.joinpath("proof.txt").read_text(), "pinned")
+            self.assertEqual(git("config", "--get", "remote.origin.url", cwd=target), source.as_uri())
+            # Successful dependencies need no repeated transfer, even when upstream disappears.
+            source.rename(self.root / "removed-synthetic-upstream")
+            checkout("git", source.as_uri(), pinned, str(target), False)
+            self.assertEqual(git("rev-parse", "HEAD", cwd=target), pinned)
+
+    def test_failed_transfer_leaves_a_repo_that_can_resume_at_the_same_pin(self):
+        target = self.root / "synthetic-dependency"
+        commands = []
+        fetched = False
+        def run(command, **kwargs):
+            nonlocal fetched
+            commands.append(command)
+            if "init" in command:
+                target.mkdir()
+            if "fetch" in command:
+                if not fetched:
+                    fetched = True
+                    raise subprocess.CalledProcessError(128, command)
+                self.assertIn("--depth=1", command)
+                self.assertEqual(command[-1], "a" * 40)
+                self.assertEqual(kwargs["timeout"], 180)
+        self.namespace["is_git_toplevel"] = lambda *args: True
+        self.namespace["git_repository_sync_is_disabled"] = lambda *args: False
+        with patch("subprocess.check_call", side_effect=run), patch("subprocess.call", return_value=1), patch("time.sleep"):
+            self.namespace["multithread"](self.namespace["git_checkout_to_directory"],
+                [("git", "https://source.invalid/synthetic.git", "a" * 40, str(target), False)])
+        self.assertEqual(sum("init" in c for c in commands), 1)
+        self.assertEqual(sum("fetch" in c for c in commands), 2)
+        self.assertFalse(any("clone" in c for c in commands))
+
+    def test_dependency_directory_cannot_modify_its_parent_repository(self):
+        target = self.root / "not-a-repo"
+        target.mkdir()
+        self.namespace["is_git_toplevel"] = lambda *args: False
+        with patch("subprocess.check_call") as command, self.assertRaises(RuntimeError):
+            self.namespace["git_checkout_to_directory"]("git", "https://source.invalid/synthetic.git", "a" * 40, str(target), False)
+        command.assert_not_called()
+
+    def test_shallow_harfbuzz_keeps_the_existing_legacy_override(self):
+        target = self.root / "third_party/externals/harfbuzz"
+        self.namespace["is_git_toplevel"] = lambda *args: True
+        self.namespace["git_repository_sync_is_disabled"] = lambda *args: False
+        with patch("subprocess.check_call") as command:
+            self.namespace["git_checkout_to_directory"]("git", "https://source.invalid/harfbuzz.git",
+                "3a74ee528255cc027d84b204a87b5c25e47bff79", str(target), False)
+        fetch = next(call.args[0] for call in command.call_args_list if "fetch" in call.args[0])
+        checkout = next(call.args[0] for call in command.call_args_list if "checkout" in call.args[0])
+        pinned = "b37f03f16b39d397a626f097858e9ae550234ca0"
+        self.assertEqual(fetch[-1], pinned)
+        self.assertEqual(checkout[-1], pinned)
+
+    def test_patch_upgrades_already_prepared_workers_and_rejects_unknown_checkout(self):
+        already_prepared = self.sync.read_text().replace(
+            "except (subprocess.CalledProcessError, subprocess.TimeoutExpired):",
+            "except subprocess.CalledProcessError:")
+        self.sync.write_text(already_prepared)
+        legacy.patch_sync(self.sync)
+        self.assertIn("except (subprocess.CalledProcessError, subprocess.TimeoutExpired):", self.sync.read_text())
+        unknown = UPSTREAM.replace("[git, 'fetch', '--quiet']", "[git, 'pull']")
+        self.sync.write_text(unknown)
+        with self.assertRaises(ValueError):
+            legacy.patch_sync(self.sync)
+        self.assertEqual(self.sync.read_text(), unknown)
 
     def test_at_most_four_downloads_run_at_once(self):
         active = maximum = 0

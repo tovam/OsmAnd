@@ -1,9 +1,42 @@
 #!/usr/bin/env python3
-"""Make legacy Skia dependency failures visible and limit network concurrency."""
+"""Fetch pinned legacy Skia dependencies with bounded transfers and visible failures."""
 
 import argparse
 from pathlib import Path
 import shlex
+
+
+PINNED_CHECKOUT = '''def git_checkout_to_directory(git, repo, commithash, directory, verbose):
+  # OsmAnd: shallow pinned dependency checkout, not every branch and historical blob.
+  # Legacy configure explicitly overrides Skia's older HarfBuzz revision with 2.8.1.
+  # Fetch that existing override directly so its later checkout survives shallow history.
+  if os.path.normpath(directory).endswith(os.path.join('third_party', 'externals', 'harfbuzz')):
+    commithash = 'b37f03f16b39d397a626f097858e9ae550234ca0'
+  created = not os.path.isdir(directory)
+  if created:
+    subprocess.check_call([git, 'init', '--quiet', directory])
+    subprocess.check_call([git, 'remote', 'add', 'origin', repo], cwd=directory)
+
+  if not is_git_toplevel(git, directory):
+    raise RuntimeError('Dependency is not a top-level Git directory: ' + directory)
+  if git_repository_sync_is_disabled(git, directory):
+    sys.stdout.write('%s\\n  SYNC IS DISABLED.\\n' % directory)
+    return
+  with open(os.devnull, 'w') as devnull:
+    if not created and 0 == subprocess.call([git, 'checkout', '--quiet', commithash],
+                                            cwd=directory, stderr=devnull):
+      if verbose:
+        status(directory, commithash, False)
+      return
+  subprocess.check_call([git, 'remote', 'set-url', 'origin', repo], cwd=directory)
+  # Fetch the exact unchanged DEPS revision. A failed fetch leaves a valid repo for retry.
+  subprocess.check_call([git, '-c', 'http.version=HTTP/1.1', 'fetch', '--quiet',
+                         '--depth=1', 'origin', commithash], cwd=directory, timeout=180)
+  subprocess.check_call([git, 'checkout', '--quiet', commithash], cwd=directory)
+  if verbose:
+    status(directory, commithash, True)
+
+'''
 
 
 SYNC_WORKERS = '''def multithread(function, list_of_arg_lists):
@@ -15,7 +48,7 @@ SYNC_WORKERS = '''def multithread(function, list_of_arg_lists):
     for attempt in range(3):
       try:
         return function(*args)
-      except subprocess.CalledProcessError:
+      except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         if attempt == 2:
           raise
         time.sleep(5 * (attempt + 1))
@@ -30,12 +63,21 @@ SYNC_WORKERS = '''def multithread(function, list_of_arg_lists):
 
 def patch_sync(path):
     source = path.read_text()
-    if "# OsmAnd: bounded dependency sync" in source:
-        return
+    start = source.index("def git_checkout_to_directory(")
+    end = source.index("\ndef parse_file_to_dict(", start)
+    original = source[start:end]
+    if "# OsmAnd: shallow pinned dependency checkout" not in original and (
+        "[git, 'clone', '--quiet', '--no-checkout', repo, directory]" not in original
+        or "[git, 'fetch', '--quiet']" not in original
+    ):
+        raise ValueError("Unsupported Skia dependency checkout implementation")
+    source = source[:start] + PINNED_CHECKOUT + source[end:]
     start = source.index("def multithread(function, list_of_arg_lists):")
     end = source.index("\ndef main(", start)
     original = source[start:end]
-    if "threading.Thread(None, function, None, args)" not in original or "thread.join()" not in original:
+    if "# OsmAnd: bounded dependency sync" not in original and (
+        "threading.Thread(None, function, None, args)" not in original or "thread.join()" not in original
+    ):
         raise ValueError("Unsupported Skia dependency worker implementation")
     patched = source[:start] + SYNC_WORKERS + source[end:]
     compile(patched, str(path), "exec")
@@ -55,6 +97,8 @@ def prepare(core):
     configure.write_text(fail_fast(configure.read_text()))
     skia = core / "externals/skia/configure.sh"
     source = fail_fast(skia.read_text())
+    if 'VERSION_HARFBUZZ=' in source and 'VERSION_HARFBUZZ="b37f03f"' not in source:
+        raise ValueError("Unsupported legacy HarfBuzz override")
     # Upstream read intentionally reaches EOF after assigning the patch filename.
     # Its status is 1 even on success; preserve that behavior under set -e.
     source = source.replace('read  -rd \'\' PATCH <<< "$PATCH"\n',
