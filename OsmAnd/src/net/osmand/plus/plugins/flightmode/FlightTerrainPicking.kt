@@ -77,11 +77,27 @@ internal class FlightTerrainPicker(
 
     private data class TriangleBlock(val start: Int, val end: Int, val bounds: Bounds)
 
-    private data class BoundedMesh(
-        val mesh: FlightTerrainMesh,
-        val bounds: Bounds,
-        val blocks: List<TriangleBlock>,
-    )
+    private class BoundedMesh(val mesh: FlightTerrainMesh) {
+        private val coarse = lazy(LazyThreadSafetyMode.SYNCHRONIZED) { vertexBounds(mesh) }
+        val bounds
+            get() = coarse.value
+
+        val boundsReady
+            get() = coarse.isInitialized()
+
+        val blocks by
+            lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+                (mesh.indices.indices step 192).map { start ->
+                    ensureNotInterrupted()
+                    val end = min(start + 192, mesh.indices.size)
+                    TriangleBlock(start, end, bounds(mesh, start, end))
+                }
+            }
+    }
+
+    /** Readiness never scans triangles. Queries prepare only bounds that they actually use. */
+    val preparedBoundsCount
+        get() = meshes.count { it.boundsReady }
 
     private val meshes: List<BoundedMesh> = run {
         val reusable =
@@ -100,35 +116,44 @@ internal class FlightTerrainPicker(
             reusable[FlightPickingMeshKey(mesh.vertices, mesh.indices, mesh.terrainAvailable)]
                 ?: run {
                     newlyIndexedMeshCount++
-                    val blocks =
-                        (mesh.indices.indices step 192).map { start ->
-                            checkCancellation()
-                            val end = min(start + 192, mesh.indices.size)
-                            TriangleBlock(start, end, bounds(mesh, start, end))
-                        }
-                    val low =
-                        DoubleArray(3) { axis -> blocks.minOfOrNull { it.bounds.low[axis] } ?: 0.0 }
-                    val high =
-                        DoubleArray(3) { axis ->
-                            blocks.maxOfOrNull { it.bounds.high[axis] } ?: 0.0
-                        }
-                    BoundedMesh(mesh, Bounds(low, high), blocks)
+                    BoundedMesh(mesh)
                 }
         }
     }
 
-    private fun bounds(mesh: FlightTerrainMesh, start: Int, end: Int): Bounds {
-        val low = DoubleArray(3) { Double.POSITIVE_INFINITY }
-        val high = DoubleArray(3) { Double.NEGATIVE_INFINITY }
-        for (i in start until end) {
-            val offset = (mesh.indices[i].toInt() and 0xffff) * 9
-            for (axis in 0..2) {
-                val value = mesh.vertices[offset + axis].toDouble()
-                low[axis] = min(low[axis], value)
-                high[axis] = max(high[axis], value)
-            }
+    private companion object {
+        fun ensureNotInterrupted() {
+            if (Thread.currentThread().isInterrupted) throw CancellationException()
         }
-        return Bounds(low, high)
+
+        fun vertexBounds(mesh: FlightTerrainMesh): Bounds {
+            val low = DoubleArray(3) { Double.POSITIVE_INFINITY }
+            val high = DoubleArray(3) { Double.NEGATIVE_INFINITY }
+            // Scan unique vertices once, rather than their six repeated triangle indices.
+            for (offset in mesh.vertices.indices step 9) {
+                if (offset % (9 * 256) == 0) ensureNotInterrupted()
+                for (axis in 0..2) {
+                    val value = mesh.vertices[offset + axis].toDouble()
+                    low[axis] = min(low[axis], value)
+                    high[axis] = max(high[axis], value)
+                }
+            }
+            return Bounds(low, high)
+        }
+
+        fun bounds(mesh: FlightTerrainMesh, start: Int, end: Int): Bounds {
+            val low = DoubleArray(3) { Double.POSITIVE_INFINITY }
+            val high = DoubleArray(3) { Double.NEGATIVE_INFINITY }
+            for (i in start until end) {
+                val offset = (mesh.indices[i].toInt() and 0xffff) * 9
+                for (axis in 0..2) {
+                    val value = mesh.vertices[offset + axis].toDouble()
+                    low[axis] = min(low[axis], value)
+                    high[axis] = max(high[axis], value)
+                }
+            }
+            return Bounds(low, high)
+        }
     }
 
     fun local(point: FlightPickedPoint) =

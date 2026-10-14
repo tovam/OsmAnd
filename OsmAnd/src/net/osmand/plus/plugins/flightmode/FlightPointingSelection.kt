@@ -68,21 +68,30 @@ internal class FlightPointingSelection(
     private var demandSent = false
 
     /** Approximate location requests coverage only; it never becomes a selected point. */
-    private fun demandLocation(click: FlightPointingClick, current: FlightPointingContext?): Pair<Double, Double>? {
+    private fun demandLocation(
+        click: FlightPointingClick,
+        current: FlightPointingContext?,
+    ): Pair<Double, Double>? {
         if (click is FlightPointingClick.Map) return click.latitude to click.longitude
         current ?: return null
         val ray = click.ray(current) ?: return null
         if (ray.direction[1] >= -1e-6) return null
         val distance = -ray.eye[1] / ray.direction[1]
         if (!distance.isFinite() || distance !in 0.0..500_000.0) return null
-        val geo = current.terrain.coordinates.toGeographic(DoubleArray(3) { ray.eye[it] + ray.direction[it] * distance })
+        val geo =
+            current.terrain.coordinates.toGeographic(
+                DoubleArray(3) { ray.eye[it] + ray.direction[it] * distance }
+            )
         return geo[0] to geo[1]
     }
 
     private fun requestGround(click: FlightPointingClick, current: FlightPointingContext?) {
         val location = demandLocation(click, current) ?: return
         val callback = onGroundNeeded ?: return
-        if (!demandSent) { demandSent = true; callback(location.first, location.second) }
+        if (!demandSent) {
+            demandSent = true
+            callback(location.first, location.second)
+        }
     }
 
     fun retry(scope: CoroutineScope) {
@@ -96,19 +105,17 @@ internal class FlightPointingSelection(
         val previous = context
         context = next
         if (next == null || !next.terrain.hasTerrain) {
-            cancelRequest()
-            publish(if (preparing) FlightPointingPhase.PREPARING else FlightPointingPhase.LOADING)
+            if (request?.isActive != true)
+                publish(
+                    if (preparing) FlightPointingPhase.PREPARING else FlightPointingPhase.LOADING
+                )
             return
         }
-        val changed =
-            previous == null ||
-                previous.terrain.geometryKey != next.terrain.geometryKey ||
-                previous.terrain.scene.missingTiles != next.terrain.scene.missingTiles ||
-                previous.terrain.scene.centerLatitude != next.terrain.scene.centerLatitude ||
-                previous.terrain.scene.centerLongitude != next.terrain.scene.centerLongitude ||
-                previous.terrain.scene.radiusKm != next.terrain.scene.radiusKm
+        val changed = previous == null || terrainChanged(previous, next)
         if (changed) {
-            cancelRequest()
+            // Finish a captured click while tiles stream. Cancelling on every LOD update can
+            // starve even an already visible-ground query forever.
+            if (request?.isActive == true) return
             if (latestClick != null) resolve(scope) else publish(FlightPointingPhase.READY)
         } else if (
             mutableState.value.phase == FlightPointingPhase.NO_INTERSECTION &&
@@ -150,9 +157,19 @@ internal class FlightPointingSelection(
                         click.ray(current)?.let(current.terrain::pick)
                             ?: FlightTerrainPickResult.Miss
                     }
-                // A replaced click, disabled mode or newer scene can never publish an obsolete
-                // result.
+                // A replaced click or disabled mode can never publish an obsolete result.
                 if (token != revision) return@launch
+                request = null
+                val newest = context
+                if (
+                    result !is FlightTerrainPickResult.Hit &&
+                        newest != null &&
+                        newest.terrain.hasTerrain &&
+                        terrainChanged(current, newest)
+                ) {
+                    resolve(scope)
+                    return@launch
+                }
                 when (result) {
                     is FlightTerrainPickResult.Hit -> {
                         latestClick = null
@@ -165,10 +182,17 @@ internal class FlightPointingSelection(
                     }
                     FlightTerrainPickResult.Miss -> {
                         val location = demandLocation(click, current)
-                        val outside = location != null && FlightTerrainTilePlanner.distanceKm(
-                            current.terrain.scene.centerLatitude, current.terrain.scene.centerLongitude,
-                            location.first, location.second) > current.terrain.scene.radiusKm
-                        if (onGroundNeeded != null && (click is FlightPointingClick.Map || outside)) {
+                        val outside =
+                            location != null &&
+                                FlightTerrainTilePlanner.distanceKm(
+                                    current.terrain.scene.centerLatitude,
+                                    current.terrain.scene.centerLongitude,
+                                    location.first,
+                                    location.second,
+                                ) > current.terrain.scene.radiusKm
+                        if (
+                            onGroundNeeded != null && (click is FlightPointingClick.Map || outside)
+                        ) {
                             publish(FlightPointingPhase.WAITING_GROUND)
                             requestGround(click, current)
                         } else publish(FlightPointingPhase.NO_INTERSECTION)
@@ -176,6 +200,16 @@ internal class FlightPointingSelection(
                 }
             }
     }
+
+    private fun terrainChanged(
+        previous: FlightPointingContext,
+        next: FlightPointingContext,
+    ): Boolean =
+        previous.terrain.geometryKey != next.terrain.geometryKey ||
+            previous.terrain.scene.missingTiles != next.terrain.scene.missingTiles ||
+            previous.terrain.scene.centerLatitude != next.terrain.scene.centerLatitude ||
+            previous.terrain.scene.centerLongitude != next.terrain.scene.centerLongitude ||
+            previous.terrain.scene.radiusKm != next.terrain.scene.radiusKm
 
     private fun publish(phase: FlightPointingPhase) {
         mutableState.value =

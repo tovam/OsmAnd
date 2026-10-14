@@ -7,8 +7,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconToggleButton
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -19,25 +19,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.collect
 import net.osmand.plus.R
 
 @Composable
 internal fun rememberTerrainPicker(scene: FlightTerrainScene?): FlightTerrainPicker? {
-    val current by rememberUpdatedState(scene)
-    val result by produceState<FlightTerrainPicker?>(null) {
-        // Finish one index, then reuse it for the newest scene. collectLatest cancelled
-        // every partial index in live mode, leaving no reusable bounds for the next frame.
-        snapshotFlow { current }.conflate().collect { next ->
-            val previous = value
-            value = if (next == null) null else runInterruptible(Dispatchers.Default) {
-                FlightTerrainPicker(next, previous)
-            }
-        }
+    val retained = remember { arrayOfNulls<FlightTerrainPicker>(1) }
+    // Constructing a picker is now metadata-only. There is no whole-scene indexing job to wait
+    // for or discard each time the renderer publishes a newer mesh list.
+    return remember(scene) {
+        scene?.let { FlightTerrainPicker(it, retained[0]).also { next -> retained[0] = next } }
     }
-    val geometry = scene?.let(::FlightPickingGeometryKey)
-    return result?.takeIf { it.geometryKey == geometry }
 }
 
 internal class FlightPointingState {
@@ -91,8 +82,9 @@ internal fun FlightPointingStatus(
     terrainStatus: FlightTerrainStatus = FlightTerrainStatus(),
     onRetry: (() -> Unit)? = null,
 ) {
-    val blocked = state.phase in listOf(FlightPointingPhase.LOADING, FlightPointingPhase.WAITING_GROUND) &&
-        terrainStatus.phase in listOf(FlightTerrainPhase.ERROR, FlightTerrainPhase.PAUSED)
+    val blocked =
+        state.phase in listOf(FlightPointingPhase.LOADING, FlightPointingPhase.WAITING_GROUND) &&
+            terrainStatus.phase in listOf(FlightTerrainPhase.ERROR, FlightTerrainPhase.PAUSED)
     var showReady by remember { mutableStateOf(false) }
     LaunchedEffect(state.phase) {
         showReady = state.phase == FlightPointingPhase.READY
@@ -102,14 +94,15 @@ internal fun FlightPointingStatus(
         }
     }
     if (state.phase == FlightPointingPhase.READY && !showReady) return
-    val working = !blocked &&
-        state.phase in
-            listOf(
-                FlightPointingPhase.LOADING,
-                FlightPointingPhase.PREPARING,
-                FlightPointingPhase.SELECTING,
-                FlightPointingPhase.WAITING_GROUND,
-            )
+    val working =
+        !blocked &&
+            state.phase in
+                listOf(
+                    FlightPointingPhase.LOADING,
+                    FlightPointingPhase.PREPARING,
+                    FlightPointingPhase.SELECTING,
+                    FlightPointingPhase.WAITING_GROUND,
+                )
     val text =
         stringResource(
             when (state.phase) {
@@ -150,9 +143,10 @@ internal fun FlightPointingStatus(
             fontSize = 11.sp,
             modifier = Modifier.weight(1f, fill = false),
         )
-        if (blocked && onRetry != null) TextButton(onClick = onRetry) {
-            Text(stringResource(R.string.flight_pointing_retry), fontSize = 12.sp)
-        }
+        if (blocked && onRetry != null)
+            TextButton(onClick = onRetry) {
+                Text(stringResource(R.string.flight_pointing_retry), fontSize = 12.sp)
+            }
     }
 }
 

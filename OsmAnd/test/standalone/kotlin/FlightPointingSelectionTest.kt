@@ -8,6 +8,70 @@ import org.junit.Test
 
 /** All clicks, views and streamed meshes are synthetic; tests never access application data. */
 class FlightPointingSelectionTest {
+    @Test
+    fun visibleTerrainIsReadyWithoutIndexingTheWholeScene() {
+        val ground = scene(*Array(100) { mesh() })
+        val picker = FlightTerrainPicker(ground)
+        assertTrue(picker.hasTerrain)
+        assertEquals(0, picker.preparedBoundsCount)
+        val tasks = Tasks()
+        val scope = CoroutineScope(SupervisorJob() + tasks)
+        val selection = FlightPointingSelection(tasks)
+        selection.update(scope, FlightPointingContext(picker), false)
+        assertEquals(FlightPointingPhase.READY, selection.state.value.phase)
+        selection.select(scope, FlightPointingClick.Map(0.0, 0.0))
+        tasks.drain()
+        assertNotNull(selection.state.value.point)
+        val next = FlightTerrainPicker(ground.copy(generation = 2L), picker)
+        assertEquals(picker.preparedBoundsCount, next.preparedBoundsCount)
+        assertEquals(0, next.newlyIndexedMeshCount)
+        scope.cancel()
+    }
+
+    @Test
+    fun streamingCannotStarveACapturedVisibleGroundClick() {
+        val tasks = Tasks()
+        val scope = CoroutineScope(SupervisorJob() + tasks)
+        val selection = FlightPointingSelection(tasks)
+        val initial = FlightTerrainPicker(scene(mesh()))
+        selection.update(scope, FlightPointingContext(initial), false)
+        selection.select(scope, FlightPointingClick.Map(0.0, 0.0))
+        repeat(30) {
+            selection.update(
+                scope,
+                FlightPointingContext(FlightTerrainPicker(scene(mesh(1000f + it)))),
+                false,
+            )
+        }
+        tasks.drain()
+        assertEquals(FlightPointingPhase.READY, selection.state.value.phase)
+        // A real hit belongs to the terrain visible when the click was captured.
+        assertEquals(0.0, selection.state.value.point!!.altitude, .01)
+        scope.cancel()
+    }
+
+    @Test
+    fun anInFlightLoadingResultRetriesTheNewestGroundBeforeRequestingDownloads() {
+        val tasks = Tasks()
+        val scope = CoroutineScope(SupervisorJob() + tasks)
+        val selection = FlightPointingSelection(tasks)
+        val base = mesh()
+        val old = FlightTerrainPicker(scene(base, mesh(5000f, available = false)))
+        selection.update(scope, FlightPointingContext(old, photo = projection), false)
+        selection.select(scope, FlightPointingClick.Photo(.5, .5, projection))
+        selection.update(
+            scope,
+            FlightPointingContext(
+                FlightTerrainPicker(scene(base, mesh(5000f)), old),
+                photo = projection,
+            ),
+            false,
+        )
+        tasks.drain()
+        assertEquals(5000.0, selection.state.value.point!!.altitude, .01)
+        scope.cancel()
+    }
+
     private class Tasks : CoroutineDispatcher() {
         private val queue = ArrayDeque<Runnable>()
 

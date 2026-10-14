@@ -99,8 +99,12 @@ class FlightTerrainView @JvmOverloads constructor(
 	) {
 		rendererErrorListener = onRendererError
 		renderStatsListener = onRenderStats
+		val enteringPointing = onPickingFrame != null && pickingFrameListener == null
 		pickingFrameListener = onPickingFrame
 		terrainRenderer.pickingEnabled = onPickingFrame != null
+		if (enteringPointing) post {
+			terrainRenderer.visiblePickingFrame?.let { pickingFrameListener?.invoke(it) }
+		}
 		terrainRenderer.update(
 			scene,
 			sample,
@@ -127,6 +131,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		private val requestRetryFrame: () -> Unit
 	) : GLSurfaceView.Renderer {
 		@Volatile var pickingEnabled = false
+		@Volatile var visiblePickingFrame: FlightPickingFrame? = null
+			private set
 		private var lastPickingFrame: FlightPickingFrame? = null
 		private var pickingSourceScene: FlightTerrainScene? = null
 		private var pickingRenderMeshes: List<RenderMesh>? = null
@@ -327,6 +333,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				GLES20.glClearColor(SKY_RED, SKY_GREEN, SKY_BLUE, 1f)
 			} catch (error: RuntimeException) {
 				program = 0
+				visiblePickingFrame = null
 				onError(error.message ?: "Initialisation OpenGL impossible")
 			}
 		}
@@ -350,6 +357,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			} catch (error: RuntimeException) {
 				// Keep the GL thread alive so an explicit retry can replace this surface.
 				program = 0
+				visiblePickingFrame = null
 				clearDefaultFrameBuffer(floatArrayOf(SKY_RED, SKY_GREEN, SKY_BLUE))
 				onError(error.message ?: "OpenGL rendering failed")
 			}
@@ -357,6 +365,7 @@ class FlightTerrainView @JvmOverloads constructor(
 
 		private fun drawFrame() {
 			if (program == 0) {
+				visiblePickingFrame = null
 				clearDefaultFrameBuffer(floatArrayOf(SKY_RED, SKY_GREEN, SKY_BLUE))
 				return
 			}
@@ -386,6 +395,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			val daylight = ((sun.up + 0.08f) / 0.22f).coerceIn(0f, 1f)
 			val sky = skyColor(daylight)
 			if (currentScene == null) {
+				visiblePickingFrame = null
 				clearDefaultFrameBuffer(sky)
 				return
 			}
@@ -419,6 +429,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			processTextureUploads()
 			publishRenderStats()
 			if (renderMeshes.isEmpty()) {
+				visiblePickingFrame = null
 				clearDefaultFrameBuffer(sky)
 				requestReadyTextureFrame()
 				return
@@ -561,25 +572,26 @@ class FlightTerrainView @JvmOverloads constructor(
 			GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 			drawSpatialPhoto(currentScene, currentSpatialPhoto, mvp)
 			inspection?.let { inspectionRenderer?.draw(it, coordinates, camera, mvp) }
-			if (pickingEnabled) {
-				if (pickingSourceScene !== currentScene || pickingRenderMeshes !== renderMeshes) {
-					pickingSourceScene = currentScene
-					pickingRenderMeshes = renderMeshes
-					pickingScene = currentScene.copy(meshes = renderMeshes.map { mesh ->
-						FlightTerrainMesh(mesh.geometry.tileId, mesh.geometry.sourceVertices, mesh.geometry.sourceIndices,
-							refinementLevel = mesh.refinementLevel, terrainAvailable = mesh.terrainAvailable)
-					})
+			// Retain the exact rendered camera even when the pointing toggle is off. Enabling
+			// it can then use visible ground immediately, without waiting for another GL frame.
+			if (pickingSourceScene !== currentScene || pickingRenderMeshes !== renderMeshes) {
+				pickingSourceScene = currentScene
+				pickingRenderMeshes = renderMeshes
+				pickingScene = currentScene.copy(meshes = renderMeshes.map { mesh ->
+					FlightTerrainMesh(mesh.geometry.tileId, mesh.geometry.sourceVertices, mesh.geometry.sourceIndices,
+						refinementLevel = mesh.refinementLevel, terrainAvailable = mesh.terrainAvailable)
+				})
+			}
+			val inverse = FloatArray(16)
+			if (Matrix.invertM(inverse, 0, mvp, 0)) {
+				val frame = FlightPickingFrame(requireNotNull(pickingScene), camera.map { it.toDouble() }.toDoubleArray(), mvp, inverse)
+				visiblePickingFrame = frame
+				if (pickingEnabled && lastPickingFrame?.sameView(frame) != true) {
+					lastPickingFrame = frame
+					onPickingFrame(frame)
 				}
-				val inverse = FloatArray(16)
-				if (Matrix.invertM(inverse, 0, mvp, 0)) {
-					val frame = FlightPickingFrame(requireNotNull(pickingScene), camera.map { it.toDouble() }.toDoubleArray(), mvp, inverse)
-					// Send the initial frame again when enabling pointing at an unchanged camera.
-					if (lastPickingFrame?.sameView(frame) != true) {
-						lastPickingFrame = frame
-						onPickingFrame(frame)
-					}
-				}
-			} else lastPickingFrame = null
+			} else visiblePickingFrame = null
+			if (!pickingEnabled) lastPickingFrame = null
 			requestReadyTextureFrame()
 		}
 
