@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_files_download_resolution">Download resolution: z%1$s ▾</string>
+    <string name="flight_files_size_short">Saved size</string>
+    <string name="flight_files_remaining_short">Remaining</string>
     <string name="flight_web_title">Local web view</string>
     <string name="flight_web_hint">Open one of these links on the same Wi-Fi or phone hotspot. Localhost is for this phone. Sharing stays active across tabs and stops when this flight workspace closes.</string>
     <string name="flight_web_starting">Starting…</string>

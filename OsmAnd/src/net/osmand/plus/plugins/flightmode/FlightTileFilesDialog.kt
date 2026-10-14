@@ -1,7 +1,6 @@
 package net.osmand.plus.plugins.flightmode
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,7 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -24,7 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.osmand.plus.R
 
-/** Source and flight scope remain explicit; phone widths no longer squeeze a six-column table. */
+/** One row per resolution. Download precision is an action, never an inventory filter. */
 @Composable
 internal fun FlightTileFilesDialog(
     state: FlightUiState,
@@ -38,6 +37,7 @@ internal fun FlightTileFilesDialog(
     val rows = coverage?.levels ?: state.offlineQuote?.levelRequirements.orEmpty()
     var scope by rememberSaveable { mutableIntStateOf(0) }
     var source by rememberSaveable { mutableIntStateOf(0) }
+    var precisionMenu by remember { mutableStateOf(false) }
     var help by remember { mutableStateOf(false) }
     var free by remember { mutableStateOf<Long?>(null) }
     FlightResumedEffect(state.offlinePreloadStatus.phase) {
@@ -54,172 +54,185 @@ internal fun FlightTileFilesDialog(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     stringResource(R.string.flight_tiles_manage),
                     color = Color.White,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { help = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(stringResource(R.string.flight_tiles_help))
+                TextButton(
+                    onClick = { help = true },
+                    contentPadding = PaddingValues(horizontal = 6.dp),
+                ) {
+                    Text(stringResource(R.string.flight_tiles_help), fontSize = 11.sp)
                 }
-                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(stringResource(R.string.shared_string_close))
+                TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                    Text(stringResource(R.string.shared_string_close), fontSize = 11.sp)
                 }
             }
-            FlightTileChoices(
-                listOf(
-                    stringResource(R.string.flight_files_this_flight),
-                    stringResource(R.string.flight_files_shared),
-                ),
-                scope,
-                { scope = it },
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            )
-            Spacer(Modifier.height(8.dp))
-            FlightTileChoices(
-                listOf(
-                    stringResource(R.string.flight_offline_size_satellite),
-                    stringResource(R.string.flight_offline_size_terrain),
-                ),
-                source,
-                { source = it },
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                listOf(R.string.flight_files_this_flight, R.string.flight_files_shared)
+                    .forEachIndexed { index, label ->
+                        TextButton(
+                            onClick = { scope = index },
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) {
+                            Text(
+                                stringResource(label),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                color =
+                                    if (scope == index) FlightTileColors.accent
+                                    else FlightTileColors.muted,
+                            )
+                        }
+                    }
+                Spacer(Modifier.weight(1f))
+                listOf(R.string.flight_offline_size_satellite, R.string.flight_offline_size_terrain)
+                    .forEachIndexed { index, label ->
+                        TextButton(
+                            onClick = { source = index },
+                            contentPadding = PaddingValues(horizontal = 6.dp),
+                        ) {
+                            Text(
+                                stringResource(label),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                color =
+                                    if (source == index) FlightTileColors.accent
+                                    else FlightTileColors.muted,
+                            )
+                        }
+                    }
+            }
             if (scope == 0) {
-                Text(stringResource(R.string.flight_files_target_precision), color = FlightTileColors.muted,
-                    fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp))
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    val bands = state.plan.preparation?.bands.orEmpty()
-                    val target = bands.maxOfOrNull { if (source == 0) it.satelliteZoom else it.terrainZoom }
-                    (3..14).forEach { zoom ->
-                        TextButton(onClick = { onPrecision(source == 0, zoom) },
-                            enabled = FlightOfflinePreparation.canSimulate(state.plan)) {
-                            Text("z$zoom", fontSize = 12.sp,
-                                color = if (target == zoom) FlightTileColors.accent else FlightTileColors.muted)
+                val target =
+                    (state.plan.preparation ?: FlightPreparation()).bands.maxOfOrNull {
+                        if (source == 0) it.satelliteZoom else it.terrainZoom
+                    }
+                Box {
+                    TextButton(
+                        onClick = { precisionMenu = true },
+                        enabled = FlightOfflinePreparation.canSimulate(state.plan),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.flight_files_download_resolution,
+                                target?.toString() ?: "—",
+                            ),
+                            fontSize = 11.sp,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = precisionMenu,
+                        onDismissRequest = { precisionMenu = false },
+                    ) {
+                        (3..14).forEach { zoom ->
+                            DropdownMenuItem(
+                                text = { Text("z$zoom") },
+                                onClick = {
+                                    precisionMenu = false
+                                    onPrecision(source == 0, zoom)
+                                },
+                            )
                         }
                     }
                 }
             }
-            LazyColumn(
-                Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                item {
-                    if (scope == 0) FlightTileDashboard(state, detailed = false)
-                    else
-                        FlightTileCard(Modifier.fillMaxWidth()) {
-                            Text(
-                                stringResource(R.string.flight_tiles_shared_note),
-                                color = FlightTileColors.muted,
-                                fontSize = 13.sp,
-                            )
-                            if (coverage == null) {
-                                Text(
-                                    stringResource(R.string.flight_tiles_inventory_pending),
-                                    color = FlightTileColors.muted,
-                                )
-                                LinearProgressIndicator(
-                                    Modifier.fillMaxWidth(),
-                                    color = FlightTileColors.accent,
-                                )
-                            } else {
-                                val shared =
-                                    coverage.sharedLevels.filter { it.satellite == (source == 0) }
-                                val files = shared.sumOf { it.files }
-                                val size = shared.sumOf { it.bytes }
-                                Row(Modifier.fillMaxWidth()) {
-                                    FlightTileValue(
-                                        stringResource(R.string.flight_files_present),
-                                        if (coverage.sharedInventoryComplete) files.toString()
-                                        else if (files > 0) "≥ $files" else "—",
-                                        Modifier.weight(1f),
-                                    )
-                                    FlightTileValue(
-                                        stringResource(R.string.flight_tiles_saved_size),
-                                        if (coverage.sharedInventoryComplete) flightTileSize(size)
-                                        else if (size > 0) "≥ " + flightTileSize(size) else "—",
-                                        Modifier.weight(1f),
-                                    )
-                                }
-                                if (!coverage.sharedInventoryComplete) {
-                                    Text(
-                                        stringResource(R.string.flight_files_indexing),
-                                        color = FlightTileColors.muted,
-                                        fontSize = 12.sp,
-                                    )
-                                    LinearProgressIndicator(
-                                        Modifier.fillMaxWidth(),
-                                        color = FlightTileColors.accent,
-                                    )
-                                }
-                            }
-                        }
-                }
+            if (
+                state.offlineCoverageRefreshing ||
+                    coverage?.sharedInventoryComplete == false && scope == 1
+            )
+                LinearProgressIndicator(
+                    Modifier.fillMaxWidth().height(2.dp),
+                    color = FlightTileColors.accent,
+                )
+            FlightTileInventoryRow(
+                stringResource(R.string.flight_files_level),
+                stringResource(R.string.flight_files_present),
+                stringResource(R.string.flight_files_missing),
+                "?",
+                stringResource(R.string.flight_files_size_short),
+                stringResource(R.string.flight_files_remaining_short),
+            )
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 if (scope == 0) {
-                    val levels = rows.filter { it.satellite == (source == 0) }
+                    val levels = rows.filter { it.satellite == (source == 0) }.sortedBy { it.zoom }
                     if (levels.isEmpty())
                         item {
-                            FlightTileEmptyState(
+                            Text(
                                 stringResource(
-                                    if (
-                                        state.offlineQuote == null &&
-                                            state.offlineCoverageRefreshing
-                                    )
+                                    if (state.offlineCoverageRefreshing)
                                         R.string.flight_tiles_inventory_pending
                                     else R.string.flight_tiles_no_requirements
-                                )
+                                ),
+                                color = FlightTileColors.muted,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(8.dp),
                             )
                         }
-                    items(levels, key = { it.zoom }) { level -> FlightTileLevelCard(level) }
+                    items(levels, key = { it.zoom }) { level ->
+                        FlightTileInventoryRow(
+                            "z${level.zoom}",
+                            level.present.toString(),
+                            level.missing.toString(),
+                            level.unknown.toString(),
+                            flightTileSize(level.storedBytes),
+                            if (level.estimatedRemainingBytes > 0)
+                                "≈ " + flightTileSize(level.estimatedRemainingBytes)
+                            else "—",
+                            if (level.present > 0) FlightTileColors.complete
+                            else FlightTileColors.muted,
+                            if (level.missing > 0) FlightTileColors.missing
+                            else FlightTileColors.muted,
+                        )
+                    }
                 } else {
                     val levels =
-                        coverage?.sharedLevels.orEmpty().filter { it.satellite == (source == 0) }
+                        coverage
+                            ?.sharedLevels
+                            .orEmpty()
+                            .filter { it.satellite == (source == 0) }
+                            .sortedBy { it.zoom }
                     if (levels.isEmpty())
                         item {
-                            FlightTileEmptyState(
+                            Text(
                                 stringResource(
                                     if (coverage?.sharedInventoryComplete == true)
                                         R.string.flight_tiles_no_source_files
                                     else R.string.flight_tiles_inventory_pending
-                                )
+                                ),
+                                color = FlightTileColors.muted,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(8.dp),
                             )
                         }
                     items(levels, key = { it.zoom }) { level ->
-                        Row(Modifier.fillMaxWidth().background(FlightTileColors.background).padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("z${level.zoom}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text(stringResource(R.string.flight_files_saved_count, level.files), color = FlightTileColors.complete, fontSize = 11.sp)
-                            Text(flightTileSize(level.bytes), color = FlightTileColors.muted, fontSize = 11.sp)
-                        }
+                        FlightTileInventoryRow(
+                            "z${level.zoom}",
+                            level.files.toString(),
+                            "—",
+                            "—",
+                            flightTileSize(level.bytes),
+                            "—",
+                            FlightTileColors.complete,
+                        )
                     }
                 }
-
             }
-            Column(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                free?.let {
-                    Text(
-                        stringResource(R.string.flight_tiles_free_size, flightTileSize(it)),
-                        color = FlightTileColors.muted,
-                        fontSize = 12.sp,
-                    )
-                }
-                if (scope == 0) FlightTileDownloadBar(state, onDownload, onPause)
-                else
-                    Text(
-                        stringResource(R.string.flight_tiles_shared_action_note),
-                        color = FlightTileColors.muted,
-                        fontSize = 12.sp,
-                    )
+            free?.let {
+                Text(
+                    stringResource(R.string.flight_tiles_free_size, flightTileSize(it)),
+                    color = FlightTileColors.muted,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
             }
+            if (scope == 0) FlightTileDownloadBar(state, onDownload, onPause)
         }
         if (help)
             AlertDialog(
@@ -241,32 +254,43 @@ internal fun FlightTileFilesDialog(
 }
 
 @Composable
-private fun FlightTileEmptyState(text: String) {
-    FlightTileCard(Modifier.fillMaxWidth()) {
-        Text(text, color = FlightTileColors.muted, fontSize = 14.sp)
+private fun FlightTileInventoryRow(
+    zoom: String,
+    present: String,
+    missing: String,
+    unknown: String,
+    stored: String,
+    remaining: String,
+    presentColor: Color = FlightTileColors.muted,
+    missingColor: Color = FlightTileColors.muted,
+) {
+    Row(
+        Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf(
+                zoom to 0.65f,
+                present to 1f,
+                missing to 1f,
+                unknown to 0.55f,
+                stored to 1.2f,
+                remaining to 1.25f,
+            )
+            .forEachIndexed { index, (value, weight) ->
+                Text(
+                    value,
+                    color =
+                        when (index) {
+                            1 -> presentColor
+                            2 -> missingColor
+                            else -> FlightTileColors.muted
+                        },
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(weight),
+                )
+            }
     }
-}
-
-@Composable
-private fun FlightTileLevelCard(level: FlightOfflineLevelCoverage) {
-    Column(Modifier.fillMaxWidth().background(FlightTileColors.background).padding(horizontal = 10.dp, vertical = 6.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("z${level.zoom}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(stringResource(R.string.flight_tiles_level_present, level.present, level.required),
-                color = if (level.present == level.required && level.unknown == 0) FlightTileColors.complete else FlightTileColors.muted,
-                fontSize = 11.sp)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.flight_files_saved_count, level.present), color = FlightTileColors.complete, fontSize = 11.sp)
-            Text(stringResource(R.string.flight_files_missing_count, level.missing),
-                color = if (level.missing > 0) FlightTileColors.missing else FlightTileColors.muted, fontSize = 11.sp)
-            if (level.unknown > 0) Text(stringResource(R.string.flight_tiles_unchecked_label) + " ${level.unknown}",
-                color = FlightTileColors.checking, fontSize = 11.sp)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(flightTileSize(level.storedBytes), color = FlightTileColors.muted, fontSize = 11.sp)
-            if (level.estimatedRemainingBytes > 0) Text("+ ≈ " + flightTileSize(level.estimatedRemainingBytes),
-                color = FlightTileColors.missing, fontSize = 11.sp)
-        }
-    }
+    HorizontalDivider(color = FlightTileColors.muted.copy(alpha = 0.12f))
 }
