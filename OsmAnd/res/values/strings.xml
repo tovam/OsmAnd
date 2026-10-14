@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_range_edit_short">Flight limits</string>
+    <string name="flight_timeline_future_short">Estimate</string>
+    <string name="flight_timeline_past_short">Recorded</string>
     <string name="flight_files_download_resolution">Download resolution: z%1$s ▾</string>
     <string name="flight_files_size_short">Saved size</string>
     <string name="flight_files_remaining_short">Remaining</string>

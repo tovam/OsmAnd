@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -835,59 +836,73 @@ private fun MapScreen(
 	onCancelFlightStart: () -> Unit,
 	onRemoveFlightSpan: (Int) -> Unit
 ) {
-	val sample = state.snapshot?.sample
 	val altitudeProfile = rememberAltitudeProfile(state, includeFutureProfile)
 	var controlsVisible by rememberSaveable { mutableStateOf(true) }
+	var editRanges by remember { mutableStateOf(false) }
 	Column(Modifier.fillMaxSize()) {
 		FlightTopBar(routeTitle(state), state.sessionMode, onClose, overlay = true)
-		if (controlsVisible) CompactInstrumentStrip(sample, showAccuracy = true)
 		FlightMapPanel(state, mapView, { onSetMapFollowing(false) }, onMapBounds,
 			modifier = Modifier.weight(1f).fillMaxWidth(), onFollow = { onSetMapFollowing(!state.mapFollowing) },
 			onLockCenter = { onSetMapCenterLocked(!state.mapCenterLocked) },
 			onSetHeadingLocked = onSetMapHeadingLocked,
 			controlsVisible = controlsVisible, onToggleControls = { controlsVisible = !controlsVisible })
-		if (controlsVisible) Column(Modifier.fillMaxWidth()) {
-			Row(Modifier.fillMaxWidth().background(FlightHudPanel).horizontalScroll(rememberScrollState())) {
-				CompactAction(stringResource(R.string.flight_map_points_short),
-					if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
-				if (state.sessionMode == FlightSessionMode.LIVE) {
-					CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, onEditLiveRoute)
-                    onUndoLiveRoute?.let { CompactAction(stringResource(R.string.flight_route_undo), FlightMuted, it) }
-					AltitudeProfileSelector(includeFutureProfile, onIncludeFutureProfile)
-				}
+		if (controlsVisible) FlightBottomPanel(state, altitudeProfile, includeFutureProfile,
+			onIncludeFutureProfile, onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay, onReturnLive) {
+			CompactAction(stringResource(R.string.flight_map_points_short),
+				if (state.showTrackPoints) FlightOrange else FlightMuted, { onShowTrackPoints(!state.showTrackPoints) })
+			if (state.sessionMode == FlightSessionMode.LIVE) {
+				CompactAction(stringResource(R.string.flight_route_edit), FlightBlue, onEditLiveRoute)
+				onUndoLiveRoute?.let { CompactAction(stringResource(R.string.flight_route_undo), FlightMuted, it) }
+			} else CompactAction(stringResource(R.string.flight_range_edit_short), FlightMuted, { editRanges = true })
+		}
+	}
+	if (editRanges) AlertDialog(onDismissRequest = { editRanges = false },
+		title = { Text(stringResource(R.string.flight_range_edit_short)) },
+		text = { FlightRangeEditor(state, onMarkFlightStart, onMarkFlightEnd, onCancelFlightStart, onRemoveFlightSpan) },
+		confirmButton = { TextButton(onClick = { editRanges = false }) { Text(stringResource(R.string.shared_string_close)) } })
+}
+
+/** The same height, instruments, profile and timeline in Map and Window. */
+@Composable
+private fun FlightBottomPanel(
+	state: FlightUiState, profile: FlightAltitudeProfile, includeFuture: Boolean,
+	onIncludeFuture: (Boolean) -> Unit, onSeek: (Float) -> Unit, onWindowFraction: (Float) -> Unit,
+	onToggle: () -> Unit, onReturnLive: () -> Unit, altitudeOverride: Float? = null,
+	actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
+) {
+	val sample = state.snapshot?.sample
+	val photos = remember(state.trip, profile, state.photos, state.pendingPhotos, state.sessionMode) {
+		(state.photos + state.pendingPhotos).mapNotNull { photo ->
+			if (state.sessionMode == FlightSessionMode.LIVE) profile.photoProgress(state.trip, photo.matchedSamplePosition)
+			else state.progressForRecordedPhoto(photo.matchedSamplePosition)
+		}.filter(Float::isFinite).distinct().sorted()
+	}
+	Column(Modifier.fillMaxWidth().background(FlightPanelStrong)) {
+		Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+			CompactMetric(stringResource(R.string.flight_mode_altitude_short),
+				(altitudeOverride?.toDouble() ?: sample?.altitudeMeters)?.let(::formatFlightAltitude) ?: "—", Modifier.weight(1.2f))
+			CompactMetric(stringResource(R.string.flight_mode_speed_short),
+				sample?.speedMetersPerSecond?.takeIf(Float::isFinite)?.let { "%.0f km/h".format(it * 3.6f) } ?: "—", Modifier.weight(1f))
+			CompactMetric(stringResource(R.string.flight_live_bearing),
+				sample?.bearingDegrees?.takeIf(Float::isFinite)?.let { "%03d°".format(Math.floorMod(it.roundToInt(), 360)) } ?: "—", Modifier.weight(.7f))
+		}
+		if (state.sessionMode == FlightSessionMode.LIVE) FlightLiveFixNotice(state.liveState)
+		if (state.snapshot?.dataGap == true) Text(stringResource(R.string.flight_replay_estimated_position),
+			color = FlightWarning, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
+		Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically) {
+			Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+				actions()
+				if (state.sessionMode == FlightSessionMode.LIVE) AltitudeProfileSelector(includeFuture, onIncludeFuture)
 			}
 			if (state.sessionMode == FlightSessionMode.LIVE) LiveTimelineAction(state, onReturnLive)
-			if (state.snapshot?.dataGap == true) {
-				Text(
-					stringResource(R.string.flight_replay_estimated_position),
-					color = FlightWarning,
-					fontSize = 12.sp,
-					modifier = Modifier.fillMaxWidth().background(Color(0xE31A1510)).padding(9.dp),
-					textAlign = TextAlign.Center
-				)
-			}
-			FlightProfileView(
-				profile = altitudeProfile.profile,
-				gpsGaps = altitudeProfile.gaps,
-				gapTrip = altitudeProfile.gapTrip,
-				progress = altitudeProfile.progress(sample?.timestampMillis, state.replayProgress),
-				futureStartProgress = flightProfileFutureStart(altitudeProfile.trip, state.liveState.latest?.timestampMillis),
-				flightSpans = state.flightSpans,
-				pendingStartProgress = state.pendingFlightStartProgress,
-				modifier = Modifier.fillMaxWidth().height(122.dp).background(FlightHudPanel).padding(horizontal = 8.dp, vertical = 4.dp)
-			)
-			if (state.sessionMode == FlightSessionMode.REPLAY) {
-				FlightRangeEditor(
-					state = state,
-					onMarkStart = onMarkFlightStart,
-					onMarkEnd = onMarkFlightEnd,
-					onCancelStart = onCancelFlightStart,
-					onRemoveSpan = onRemoveFlightSpan
-				)
-			}
-			if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty())
-				ReplayBar(state.copy(trip = state.liveTimeline ?: state.trip), onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
 		}
+		FlightProfileView(profile.profile, profile.gaps, profile.gapTrip,
+			progress = profile.progress(sample?.timestampMillis, state.replayProgress),
+			futureStartProgress = flightProfileFutureStart(profile.trip, state.liveState.latest?.timestampMillis),
+			flightSpans = state.flightSpans, pendingStartProgress = state.pendingFlightStartProgress,
+			photoProgress = photos, modifier = Modifier.fillMaxWidth().height(54.dp))
+		if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty())
+			ReplayBar(state.copy(trip = state.liveTimeline ?: state.trip), onSeek, onWindowFraction, onToggle)
 	}
 }
 
@@ -951,23 +966,15 @@ private fun CompactAction(text: String, color: Color, onClick: () -> Unit, modif
 
 @Composable
 private fun LiveTimelineAction(state: FlightUiState, onReturnLive: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(FlightPanelStrong)) {
-        FlightLiveFixNotice(state.liveState)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            val future = (state.snapshot?.sample?.timestampMillis ?: 0L) >
-                (state.liveState.latest?.timestampMillis ?: Long.MAX_VALUE)
-            Text(
-                stringResource(if (!state.browsingLiveTimeline) R.string.flight_mode_live
-                    else if (future) R.string.flight_timeline_hypothesis else R.string.flight_timeline_actual),
-                color = if (!state.browsingLiveTimeline) FlightGreen else FlightMuted,
-                fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            if (state.browsingLiveTimeline) TextButton(onClick = onReturnLive) {
-                Text(stringResource(R.string.flight_return_live), color = FlightGreen, fontSize = 12.sp, maxLines = 1)
-            }
-        }
-    }
+	val future = (state.snapshot?.sample?.timestampMillis ?: 0L) > (state.liveState.latest?.timestampMillis ?: Long.MAX_VALUE)
+	val label = if (!state.browsingLiveTimeline) stringResource(R.string.flight_mode_live)
+		else stringResource(if (future) R.string.flight_timeline_future_short else R.string.flight_timeline_past_short) + " · " + stringResource(R.string.flight_mode_live) + " ↩"
+	Box(Modifier.height(32.dp).widthIn(max = 148.dp).clickable(enabled = state.browsingLiveTimeline,
+		onClickLabel = stringResource(R.string.flight_return_live), onClick = onReturnLive).padding(horizontal = 8.dp),
+		contentAlignment = Alignment.Center) {
+		Text(label, color = if (state.browsingLiveTimeline) FlightBlue else FlightGreen,
+			fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+	}
 }
 
 @Composable
@@ -1018,13 +1025,6 @@ private fun WindowScreen(
 	val altitudeProfile = rememberAltitudeProfile(state, includeFutureProfile)
 	val overlayPhoto = state.windowPhotoOverlay.photoId?.let { photoId ->
 		(state.photos + state.pendingPhotos).firstOrNull { it.id == photoId }
-	}
-	val photoProgress = remember(state.trip, altitudeProfile, state.photos, state.pendingPhotos) {
-		(state.photos + state.pendingPhotos).mapNotNull { photo ->
-			if (state.sessionMode == FlightSessionMode.LIVE)
-				altitudeProfile.photoProgress(state.trip, photo.matchedSamplePosition)
-			else state.progressForRecordedPhoto(photo.matchedSamplePosition)
-		}.filter(Float::isFinite).distinct().sorted()
 	}
     var sensorAiming by rememberSaveable(state.journeyId) { mutableStateOf(false) }
 	var controlsVisible by rememberSaveable { mutableStateOf(true) }
@@ -1079,28 +1079,12 @@ private fun WindowScreen(
 					.clickable(onClickLabel = toggleLabel) { controlsVisible = !controlsVisible }.wrapContentSize())
 		}
 		if (controlsVisible) {
-		if (state.sessionMode == FlightSessionMode.LIVE) LiveTimelineAction(state, onReturnLive)
-		WindowPanelSelector(panel = panel, onSelect = { panel = it })
+		if (panel == WindowPanel.VIEW) WindowPanelSelector(panel = panel, onSelect = { panel = it })
 		when (panel) {
-			WindowPanel.FLIGHT -> {
-				if (state.sessionMode == FlightSessionMode.LIVE)
-					AltitudeProfileSelector(includeFutureProfile, onIncludeFutureProfile)
-				if (!(state.liveTimeline ?: state.trip)?.samples.isNullOrEmpty()) {
-					FlightProfileView(
-						profile = altitudeProfile.profile,
-						gpsGaps = altitudeProfile.gaps,
-						gapTrip = altitudeProfile.gapTrip,
-						progress = altitudeProfile.progress(state.snapshot?.sample?.timestampMillis, state.replayProgress),
-						futureStartProgress = flightProfileFutureStart(altitudeProfile.trip, state.liveState.latest?.timestampMillis),
-						flightSpans = state.flightSpans,
-						photoProgress = photoProgress,
-						modifier = Modifier.fillMaxWidth().height(66.dp).background(FlightPanelStrong)
-							.padding(horizontal = 7.dp, vertical = 3.dp)
-					)
-					ReplayBar(state.copy(trip = state.liveTimeline ?: state.trip), onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay)
-				} else {
-					CompactInstrumentStrip(state.snapshot?.sample)
-				}
+			WindowPanel.FLIGHT -> FlightBottomPanel(state, altitudeProfile, includeFutureProfile,
+				onIncludeFutureProfile, onSeekReplay, onSetReplayTimelineWindowFraction, onToggleReplay, onReturnLive,
+				altitudeOverride = state.windowAltitudeOverrideMeters) {
+				WindowPanelSelector(panel = panel, onSelect = { panel = it })
 			}
 			WindowPanel.VIEW -> {
 				LazyColumn(Modifier.fillMaxWidth().height(258.dp)) {
@@ -1172,35 +1156,15 @@ private fun WindowScreen(
 
 @Composable
 private fun WindowPanelSelector(panel: WindowPanel, onSelect: (WindowPanel) -> Unit) {
-	Row(Modifier.fillMaxWidth().height(32.dp).background(FlightPanelStrong).border(1.dp, FlightLine)) {
-		listOf(
-			WindowPanel.FLIGHT to stringResource(R.string.flight_mode_route_replay).uppercase(),
-			WindowPanel.VIEW to stringResource(R.string.flight_mode_display).uppercase()
-		).forEach { (item, label) ->
-			Box(
-				Modifier.weight(1f).fillMaxHeight().clickable { onSelect(item) },
-				contentAlignment = Alignment.Center
-			) {
-				if (panel == item) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(FlightOrange))
-				Text(label, color = if (panel == item) FlightText else FlightMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-			}
+	var expanded by remember { mutableStateOf(false) }
+	Box {
+		TextButton(onClick = { expanded = true }, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 6.dp)) {
+			Text(stringResource(if (panel == WindowPanel.FLIGHT) R.string.flight_mode_route_replay else R.string.flight_mode_display) + " ▾", fontSize = 11.sp)
 		}
-	}
-}
-
-@Composable
-private fun CompactInstrumentStrip(sample: FlightSample?, showAccuracy: Boolean = false) {
-	Row(
-		Modifier.fillMaxWidth().heightIn(min = 34.dp).background(FlightPanelStrong).border(1.dp, FlightLine),
-		verticalAlignment = Alignment.CenterVertically
-	) {
-		CompactMetric(stringResource(R.string.flight_mode_altitude_short).uppercase(), sample?.altitudeMeters?.let { formatFlightAltitude(it) } ?: "—", Modifier.weight(1f))
-		CompactMetric(stringResource(R.string.flight_mode_speed_short).uppercase(), sample?.speedMetersPerSecond?.let { "%.0f km/h".format(it * 3.6f) } ?: "—", Modifier.weight(1f))
-		CompactMetric(stringResource(R.string.flight_mode_gps).uppercase(), sample?.satellitesUsed?.let { "$it/${sample.satellitesFound ?: 0}" } ?: "—", Modifier.weight(1f))
-		if (showAccuracy) {
-			CompactMetric(stringResource(R.string.flight_mode_accuracy).uppercase(), sample?.horizontalAccuracyMeters?.let { "±%.0f m".format(it) } ?: "—", Modifier.weight(1f))
-		} else {
-			CompactMetric(stringResource(R.string.flight_mode_time_short).uppercase(), sample?.timestampMillis?.takeIf { it > 0L }?.let(::formatClock) ?: "—", Modifier.weight(1f))
+		DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+			listOf(WindowPanel.FLIGHT to R.string.flight_mode_route_replay, WindowPanel.VIEW to R.string.flight_mode_display).forEach { (item, label) ->
+				DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { expanded = false; onSelect(item) })
+			}
 		}
 	}
 }
@@ -1208,8 +1172,8 @@ private fun CompactInstrumentStrip(sample: FlightSample?, showAccuracy: Boolean 
 @Composable
 private fun CompactMetric(label: String, value: String, modifier: Modifier) {
 	Column(modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.Center) {
-		Text(label, color = FlightMuted, fontSize = 12.sp, maxLines = 1)
-		Text(value, color = FlightText, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+		Text(label, color = FlightMuted, fontSize = 9.sp, maxLines = 1)
+		Text(value, color = FlightText, fontSize = 14.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
 	}
 }
 
@@ -2255,7 +2219,7 @@ private fun ReplayBar(
 				)
 			}
 			Canvas(
-				modifier = Modifier.fillMaxWidth().height(28.dp).pointerInput(Unit) {
+				modifier = Modifier.fillMaxWidth().height(32.dp).pointerInput(Unit) {
 					awaitEachGesture {
 						val down = awaitFirstDown(requireUnconsumed = false)
 						var gestureProgress = currentProgress.value
@@ -2379,8 +2343,12 @@ private fun ReplayBar(
 				val localProgress = if (timelineWindow.fraction > 0f) {
 					((state.replayProgress - timelineWindow.startProgress) / timelineWindow.fraction).coerceIn(0f, 1f)
 				} else 0f
-				drawCircle(FlightOrange, 5.dp.toPx(), Offset(localProgress * size.width, mainY))
-				drawCircle(Color.Black, 1.8.dp.toPx(), Offset(localProgress * size.width, mainY))
+				val cursorWidth = 6.dp.toPx()
+				val cursorX = (localProgress * size.width).coerceIn(cursorWidth / 2, max(cursorWidth / 2, size.width - cursorWidth / 2))
+				drawRoundRect(Color.Black, Offset(cursorX - cursorWidth / 2 - 1.dp.toPx(), 7.dp.toPx()),
+					Size(cursorWidth + 2.dp.toPx(), size.height - 8.dp.toPx()), CornerRadius(2.dp.toPx()))
+				drawRoundRect(FlightOrange, Offset(cursorX - cursorWidth / 2, 8.dp.toPx()),
+					Size(cursorWidth, size.height - 10.dp.toPx()), CornerRadius(1.dp.toPx()))
 			}
 		}
 		ReplayStepButton("+$stepLabel") {
@@ -2819,7 +2787,8 @@ private fun FlightProfileView(
 		}
 		progress?.let {
 			val x = left + (right - left) * it.coerceIn(0f, 1f)
-			drawLine(FlightGreen, Offset(x, top), Offset(x, bottom), 2.dp.toPx())
+			drawLine(Color.Black, Offset(x, top), Offset(x, bottom), 6.dp.toPx())
+			drawLine(FlightOrange, Offset(x, top), Offset(x, bottom), 4.dp.toPx())
 		}
 
 		if (profile.recorded) return@Canvas
@@ -2839,7 +2808,7 @@ private fun FlightProfileView(
 					labels.lastIndex -> measured
 					else -> measured / 2f
 				}
-				canvas.nativeCanvas.drawText(label, desiredX.coerceIn(left, right - measured), size.height - 5.dp.toPx(), labelPaint)
+				canvas.nativeCanvas.drawText(label, desiredX.coerceIn(left, max(left, right - measured)), size.height - 5.dp.toPx(), labelPaint)
 			}
 		}
 	}

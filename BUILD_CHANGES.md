@@ -1,3 +1,3 @@
-- Make Photo+ scrolling lighter by pausing hidden map and terrain work and reusing photo thumbnails.
-- Make tile Files a dense inventory with one row per resolution and a single download-resolution menu.
+- Make Photo+ scrolling lighter and tile Files denser, with one row per resolution.
 - Stabilize phone aiming with an absolute filtered direction and a clear reference action.
+- Share a compact flight panel between Map and Window, with a larger vertical timeline cursor.
