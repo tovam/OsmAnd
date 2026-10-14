@@ -16,6 +16,9 @@ internal fun flightScaleStep(value: Double): Double {
         }
 }
 
+/** A real scale for the overview, occupying at most one quarter of its square. */
+internal fun flightOverviewScaleMeters(sideMeters: Double): Double = flightScaleStep(sideMeters / 4.0)
+
 /** Human-readable time intervals selected without exceeding the visible map duration. */
 internal fun flightTimeScaleStep(valueSeconds: Double): Double {
     if (!valueSeconds.isFinite() || valueSeconds < 1.0) return 0.0

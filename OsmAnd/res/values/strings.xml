@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_altitude_manual_value">Manual: %1$s</string>
+    <string name="flight_altitude_gps_value">GPS: %1$s</string>
     <string name="flight_range_edit_short">Flight limits</string>
     <string name="flight_timeline_future_short">Estimate</string>
     <string name="flight_timeline_past_short">Recorded</string>

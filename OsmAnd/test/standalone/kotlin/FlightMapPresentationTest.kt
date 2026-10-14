@@ -5,6 +5,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FlightMapPresentationTest {
+    @Test
+    fun overviewShowsAQuarterWidthScaleInsteadOfTheSquareSide() {
+        for (side in listOf(500.0, 800.0, 1200.0, 4000.0, 8000.0, 20000.0, 600000.0)) {
+            val meters = flightOverviewScaleMeters(side)
+            assertTrue(meters / side in 0.1..0.25)
+            assertEquals(meters, flightScaleStep(meters), 0.0)
+        }
+        assertEquals(100.0, flightOverviewScaleMeters(500.0), 0.0)
+        assertEquals(2000.0, flightOverviewScaleMeters(8000.0), 0.0)
+        assertEquals("100 m", formatFlightDistance(100.0))
+        assertEquals("2 km", formatFlightDistance(2000.0))
+        assertEquals("—", formatFlightDistance(Double.NaN))
+    }
+
     private fun sample(index: Int, longitude: Double) =
         FlightSample(index, 0, index * 1000L, 45.0, longitude, 12000.0, 250f, 90f, 5f)
 

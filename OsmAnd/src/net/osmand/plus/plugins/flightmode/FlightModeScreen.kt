@@ -3351,7 +3351,7 @@ private fun FlightCompassOverlay(
 				labelPaint
 			)
 			composeCanvas.nativeCanvas.drawText(
-				"$altitudeLabel ${altitude?.let { "${it.roundToInt()} m" } ?: "—"}",
+				"$altitudeLabel ${altitude?.let { formatFlightAltitude(it.toDouble()) } ?: "—"}",
 				center.x, center.y + radius + 37.dp.toPx(), labelPaint
 			)
 		}
@@ -3495,9 +3495,9 @@ private fun AltitudeOverrideControls(
 				)
 				Text(
 					text = if (manual) {
-						stringResource(R.string.flight_mode_altitude_manual, overrideAltitudeMeters ?: 0f)
+						stringResource(R.string.flight_altitude_manual_value, formatFlightAltitude((overrideAltitudeMeters ?: 0f).toDouble()))
 					} else if (reportedAltitudeMeters != null) {
-						stringResource(R.string.flight_mode_altitude_gps, reportedAltitudeMeters)
+						stringResource(R.string.flight_altitude_gps_value, formatFlightAltitude(reportedAltitudeMeters.toDouble()))
 					} else {
 						stringResource(R.string.flight_mode_altitude_gps_missing)
 					},

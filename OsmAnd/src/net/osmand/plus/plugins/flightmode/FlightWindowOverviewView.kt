@@ -120,6 +120,7 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 		textSize = density(8f)
 		setShadowLayer(density(2f), 0f, density(1f), Color.BLACK)
 	}
+	private val scalePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
 
 	private var trip: FlightTrip? = null
 	private var sample: FlightSample? = null
@@ -398,7 +399,21 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 
 		drawGaze(canvas, centerX, centerY, minOf(width, height) * 0.42f)
 		drawAircraft(canvas, centerX, centerY, current.bearingDegrees ?: 0f)
-		canvas.drawText(formatDistance(sideMeters), density(4f), height - density(5f), labelPaint)
+		val scaleMeters = flightOverviewScaleMeters(sideMeters)
+		val scalePixels = (scaleMeters * pixelsPerMeter).toFloat()
+		val scaleLeft = density(4f)
+		val scaleY = height - density(5f)
+		val scalePath = Path().apply {
+			moveTo(scaleLeft, scaleY - density(3f)); lineTo(scaleLeft, scaleY)
+			lineTo(scaleLeft + scalePixels, scaleY); lineTo(scaleLeft + scalePixels, scaleY - density(3f))
+		}
+		scalePaint.color = Color.BLACK
+		scalePaint.strokeWidth = density(3.5f)
+		canvas.drawPath(scalePath, scalePaint)
+		scalePaint.color = Color.WHITE
+		scalePaint.strokeWidth = density(1.5f)
+		canvas.drawPath(scalePath, scalePaint)
+		canvas.drawText(formatFlightDistance(scaleMeters), scaleLeft, scaleY - density(5f), labelPaint)
 		canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
 		canvas.restoreToCount(saved)
 	}
@@ -480,12 +495,6 @@ class FlightWindowOverviewView @JvmOverloads constructor(
 
 	private fun northMeters(referenceLatitude: Double, latitude: Double): Double =
 		Math.toRadians(latitude - referenceLatitude) * EARTH_RADIUS_METERS
-
-	private fun formatDistance(meters: Double): String = if (meters >= 1_000.0) {
-		"%.0f km".format(meters / 1_000.0)
-	} else {
-		"%.0f m".format(meters)
-	}
 
 	private fun density(dp: Float): Float = dp * resources.displayMetrics.density
 
