@@ -7,6 +7,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
+import kotlin.math.floor
+import kotlin.math.ln
 import net.osmand.plus.views.OsmandMapTileView
 
 /** Both halves share one flight snapshot. Each owns a disjoint pointer surface. */
@@ -27,9 +29,19 @@ internal fun FlightMixedScreen(
     onLockCenter: () -> Unit,
     onSetHeadingLocked: (Boolean) -> Unit,
     onRequestPointingTerrain: (Double, Double) -> Unit,
+    onSetMixedTerrainMap: (Boolean) -> Unit,
 ) {
     var sceneAspectRatio by remember { mutableFloatStateOf(1f) }
     var pointingEnabled by remember { mutableStateOf(false) }
+    var reliefPose by
+        remember(state.journeyId) {
+            mutableStateOf(
+                FlightReliefMapPose(
+                    state.snapshot?.sample?.latitude ?: 0.0,
+                    state.snapshot?.sample?.longitude ?: 0.0,
+                )
+            )
+        }
     val pointing = remember(state.journeyId) { FlightPointingState() }
     val scope = rememberCoroutineScope()
     SideEffect { pointing.selection.onGroundNeeded = onRequestPointingTerrain }
@@ -115,27 +127,121 @@ internal fun FlightMixedScreen(
                 Modifier.align(Alignment.TopEnd).padding(6.dp),
             )
             if (pointingEnabled)
-                FlightPointingStatus(selection, Modifier.align(Alignment.BottomStart).padding(8.dp),
-                    state.terrainStatus, { onRetry(); pointing.selection.retry(scope) })
+                FlightPointingStatus(
+                    selection,
+                    Modifier.align(Alignment.BottomStart).padding(8.dp),
+                    state.terrainStatus,
+                    {
+                        onRetry()
+                        pointing.selection.retry(scope)
+                    },
+                )
         }
-        FlightMapPanel(
-            state,
-            mapView,
-            onMapExplore,
-            onMapBounds,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            showCone = true,
-            coneAspectRatio = sceneAspectRatio,
-            onFollow = onFollow,
-            onLockCenter = onLockCenter,
-            onSetHeadingLocked = onSetHeadingLocked,
-            pickedPoint = selection.point.takeIf { pointingEnabled },
-            onMapPoint =
-                if (pointingEnabled)
-                    { lat, lon ->
-                        pointing.selection.select(scope, FlightPointingClick.Map(lat, lon))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (state.mixedTerrainMap)
+                FlightReliefMapPanel(
+                    state = state,
+                    pose = reliefPose,
+                    onPose = { reliefPose = it },
+                    onExplore = onMapExplore,
+                    onFollow = onFollow,
+                    onLockCenter = onLockCenter,
+                    onHeadingLocked = onSetHeadingLocked,
+                    pointingEnabled = pointingEnabled,
+                    point = selection.point.takeIf { pointingEnabled },
+                    onPoint = { click, context ->
+                        pointing.selection.select(scope, click, context)
+                    },
+                    coneAspectRatio = sceneAspectRatio,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            else
+                FlightMapPanel(
+                    state,
+                    mapView,
+                    onMapExplore,
+                    onMapBounds,
+                    modifier = Modifier.fillMaxSize(),
+                    showCone = true,
+                    coneAspectRatio = sceneAspectRatio,
+                    onFollow = onFollow,
+                    onLockCenter = onLockCenter,
+                    onSetHeadingLocked = onSetHeadingLocked,
+                    pickedPoint = selection.point.takeIf { pointingEnabled },
+                    onMapPoint =
+                        if (pointingEnabled)
+                            { lat, lon ->
+                                pointing.selection.select(scope, FlightPointingClick.Map(lat, lon))
+                            }
+                        else null,
+                )
+            FlightReliefMapToggle(
+                state.mixedTerrainMap,
+                { enabled ->
+                    if (enabled) {
+                        val box = mapView?.currentRotatedTileBox
+                        reliefPose =
+                            reliefPose
+                                .copy(
+                                    latitude =
+                                        box?.latitude
+                                            ?: state.snapshot?.sample?.latitude
+                                            ?: reliefPose.latitude,
+                                    longitude =
+                                        box?.longitude
+                                            ?: state.snapshot?.sample?.longitude
+                                            ?: reliefPose.longitude,
+                                    widthMeters =
+                                        box?.getDistance(
+                                                0,
+                                                box.pixHeight / 2,
+                                                box.pixWidth,
+                                                box.pixHeight / 2,
+                                            )
+                                            ?.takeIf { it.isFinite() && it > 0 }
+                                            ?: reliefPose.widthMeters,
+                                    headingDegrees = -(mapView?.rotate ?: 0f),
+                                )
+                                .clamped()
+                        mapView?.animatedDraggingThread?.stopAnimatingSync()
+                    } else {
+                        mapView?.let { map ->
+                            val sample = state.snapshot?.sample
+                            map.setLatLon(
+                                sample?.latitude.takeIf { state.mapFollowing }
+                                    ?: reliefPose.latitude,
+                                sample?.longitude.takeIf { state.mapFollowing }
+                                    ?: reliefPose.longitude,
+                            )
+                            val box = map.currentRotatedTileBox
+                            val width =
+                                box.getDistance(
+                                    0,
+                                    box.pixHeight / 2,
+                                    box.pixWidth,
+                                    box.pixHeight / 2,
+                                )
+                            if (width.isFinite() && width > 0) {
+                                val zoom =
+                                    (map.zoom +
+                                            map.zoomFloatPart +
+                                            ln(width / reliefPose.widthMeters) / ln(2.0))
+                                        .coerceIn(map.minZoom.toDouble(), map.maxZoom.toDouble())
+                                map.setZoomWithFloatPart(
+                                    floor(zoom).toInt(),
+                                    (zoom - floor(zoom)).toFloat(),
+                                )
+                            }
+                            val heading =
+                                sample?.bearingDegrees.takeIf { state.mapHeadingLocked }
+                                    ?: reliefPose.headingDegrees
+                            map.setRotate(-heading, true)
+                        }
                     }
-                else null,
-        )
+                    onSetMixedTerrainMap(enabled)
+                },
+                Modifier.align(Alignment.TopStart).padding(4.dp),
+            )
+        }
     }
 }

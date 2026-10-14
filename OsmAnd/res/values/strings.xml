@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <resources>
+    <string name="flight_relief_map_enable">Project the map onto downloaded relief</string>
+    <string name="flight_relief_map_disable">Return to the flat map</string>
+    <string name="flight_relief_map_waiting">Waiting for downloaded relief…</string>
+    <string name="flight_relief_map_outside">Outside loaded relief</string>
+    <string name="flight_relief_map_loading">Map on relief · %1$d/%2$d</string>
+    <string name="flight_relief_map_missing">Some cartography unavailable · satellite retained</string>
+    <string name="flight_relief_map_error">Relief map unavailable · switch back to the flat map</string>
     <string name="flight_altitude_manual_value">Manual: %1$s</string>
     <string name="flight_altitude_gps_value">GPS: %1$s</string>
     <string name="flight_range_edit_short">Flight limits</string>

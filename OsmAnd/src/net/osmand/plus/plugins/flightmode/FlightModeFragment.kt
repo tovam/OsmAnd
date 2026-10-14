@@ -183,6 +183,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 					onSetMapFollowing = viewModel::setMapFollowing,
 					onSetMapCenterLocked = viewModel::setMapCenterLocked,
 					onSetMapHeadingLocked = viewModel::setMapHeadingLocked,
+					onSetMixedTerrainMap = viewModel::setMixedTerrainMap,
 					onReturnLive = viewModel::returnToLive,
 					onShowTrackPoints = viewModel::setShowTrackPoints,
 					onMarkFlightStart = viewModel::markFlightStart,
@@ -385,7 +386,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 			setFlightProjection(false)
 			return
 		}
-		if (!isResumed || viewModel.uiState.page !in listOf(FlightPage.MAP, FlightPage.MIXED)) return
+		if (!isResumed || !FlightWorkPolicy.nativeMapVisible(viewModel.uiState.page, showFlightCamera, viewModel.uiState.mixedTerrainMap)) return
 		val activity = requireMapActivity()
 		val viewport = splitMapViewport ?: FlightSplitMapViewport(activity,
 			activity.findViewById(R.id.map_view_with_layers), activity.mapPositionManager).also { splitMapViewport = it }
@@ -400,7 +401,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		photos: List<FlightPhotoAttachment>
 	) {
 		// Photo editing must not rebuild the hidden native flight layer on every finger movement.
-		if (!isResumed || viewModel.uiState.page !in listOf(FlightPage.MAP, FlightPage.MIXED)) return
+		if (!isResumed || !FlightWorkPolicy.nativeMapVisible(viewModel.uiState.page, showFlightCamera, viewModel.uiState.mixedTerrainMap)) return
 		replayMapLayer?.update(trip, sample, showPoints, photos,
 			recorded = viewModel.uiState.sessionMode != FlightSessionMode.PREPARE)
 		replayMapLayer?.updateHypothesis(if(viewModel.uiState.sessionMode==FlightSessionMode.LIVE) viewModel.uiState.plan else null,
@@ -454,7 +455,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 	private fun setFlightProjection(enabled: Boolean) {
 		val map = app.osmandMap.mapView
 		val active = enabled && isResumed &&
-			viewModel.uiState.page in listOf(FlightPage.MAP, FlightPage.MIXED) &&
+			FlightWorkPolicy.nativeMapVisible(viewModel.uiState.page, showFlightCamera, viewModel.uiState.mixedTerrainMap) &&
 			NativeCoreContext.isInit() && map.hasMapRenderer()
 		if (flightProjectionEnabled == active) return
 		try { FlightVectorLineBridge.setFlightProjection(active) } catch (_: LinkageError) { return }
@@ -479,7 +480,7 @@ class FlightModeFragment : BaseFullScreenFragment() {
 		if (!isResumed || !::viewModel.isInitialized) return
 		val wrapper = requireMapActivity().findViewById<View>(R.id.map_view_with_layers)
 		if (previousMapVisibility == null) previousMapVisibility = wrapper.visibility
-		val visible = FlightWorkPolicy.nativeMapVisible(viewModel.uiState.page, showFlightCamera)
+		val visible = FlightWorkPolicy.nativeMapVisible(viewModel.uiState.page, showFlightCamera, viewModel.uiState.mixedTerrainMap)
 		// An opaque Compose page does not automatically suspend the shared GL surface beneath it.
 		wrapper.visibility = if (visible) previousMapVisibility!! else View.INVISIBLE
 		mapRenderLease.update(attachedNativeMapRenderer(), visible)

@@ -1520,6 +1520,10 @@ class FlightModeViewModel(application: Application) : AndroidViewModel(applicati
 		uiState = uiState.withMapFollowing(following)
 	}
 
+	fun setMixedTerrainMap(enabled: Boolean) {
+		uiState = uiState.copy(mixedTerrainMap = enabled)
+	}
+
 	fun setMapCenterLocked(locked: Boolean) {
 		uiState = uiState.withMapCenterLocked(locked)
 	}

@@ -9,6 +9,25 @@ import org.junit.Test
 /** All clicks, views and streamed meshes are synthetic; tests never access application data. */
 class FlightPointingSelectionTest {
     @Test
+    fun lowerReliefClickUsesItsVisibleMeshAndReplacesTheSharedPoint() {
+        val tasks = Tasks()
+        val scope = CoroutineScope(SupervisorJob() + tasks)
+        val selection = FlightPointingSelection(tasks)
+        val upper = scene(mesh())
+        val lower = scene(mesh(450f))
+        selection.update(scope, FlightPointingContext(FlightTerrainPicker(upper), frame(upper)), false)
+        selection.select(scope, FlightPointingClick.Map(0.0, 0.0))
+        tasks.drain()
+        assertEquals(0.0, selection.state.value.point!!.altitude, .001)
+        selection.select(scope, FlightPointingClick.Scene(.5, .5, frame(lower)),
+            FlightPointingContext(FlightTerrainPicker(lower), frame(lower)))
+        tasks.drain()
+        assertEquals(450.0, selection.state.value.point!!.altitude, .01)
+        assertEquals(FlightPointingPhase.READY, selection.state.value.phase)
+        scope.cancel()
+    }
+
+    @Test
     fun visibleTerrainIsReadyWithoutIndexingTheWholeScene() {
         val ground = scene(*Array(100) { mesh() })
         val picker = FlightTerrainPicker(ground)

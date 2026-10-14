@@ -33,8 +33,8 @@ internal object FlightWorkPolicy {
                 page == FlightPage.MIXED || page == FlightPage.WINDOW_SETUP ||
                 page == FlightPage.PHOTO && photoEditorVisible)
 
-    fun nativeMapVisible(page: FlightPage, cameraPreviewActive: Boolean): Boolean =
-        !cameraPreviewActive && (page == FlightPage.MAP || page == FlightPage.MIXED)
+    fun nativeMapVisible(page: FlightPage, cameraPreviewActive: Boolean, mixedTerrainMap: Boolean = false): Boolean =
+        !cameraPreviewActive && (page == FlightPage.MAP || page == FlightPage.MIXED && !mixedTerrainMap)
 
     /** Only pages displaying offline coverage need to maintain its inventory subscription. */
     fun offlineCoverageActive(page: FlightPage): Boolean =

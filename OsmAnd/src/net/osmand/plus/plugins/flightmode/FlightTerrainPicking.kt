@@ -370,13 +370,13 @@ internal class FlightPickingFrame(
         )
     }
 
-    fun project(local: DoubleArray): Pair<Double, Double>? {
+    fun project(local: DoubleArray, clipToViewport: Boolean = true): Pair<Double, Double>? {
         val clip = transform(matrix, local[0], local[1], local[2])
         if (clip[3] <= 0 || !clip.all { it.isFinite() }) return null
         if (clip[2] < -clip[3] || clip[2] > clip[3]) return null
         val x = (clip[0] / clip[3] + 1) / 2
         val y = (1 - clip[1] / clip[3]) / 2
-        return if (x in 0.0..1.0 && y in 0.0..1.0) x to y else null
+        return if (!clipToViewport || x in 0.0..1.0 && y in 0.0..1.0) x to y else null
     }
 }
 

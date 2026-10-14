@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flight_relief_map_enable">Projeter la carte sur le relief téléchargé</string>
+    <string name="flight_relief_map_disable">Revenir à la carte plane</string>
+    <string name="flight_relief_map_waiting">En attente du relief téléchargé…</string>
+    <string name="flight_relief_map_outside">Hors du relief chargé</string>
+    <string name="flight_relief_map_loading">Carte sur relief · %1$d/%2$d</string>
+    <string name="flight_relief_map_missing">Cartographie partiellement indisponible · satellite conservé</string>
+    <string name="flight_relief_map_error">Carte en relief indisponible · revenir à la carte plane</string>
     <string name="flight_files_download_resolution">Résolution à télécharger : z%1$s ▾</string>
     <string name="flight_files_size_short">Stocké</string>
     <string name="flight_files_remaining_short">À télécharger</string>

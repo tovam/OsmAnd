@@ -23,6 +23,7 @@ class FlightNativeMapTextureRepository(private val app: OsmandApplication) {
 
 	suspend fun renderTextures(
 		tileIds: Collection<TerrainTileId>,
+		onTextures: suspend (Map<TerrainTileId, String>) -> Unit = {},
 		onProgress: suspend (completed: Int, available: Int, failed: Int) -> Unit
 	): FlightNativeMapTextureResult {
 		val requested = tileIds.distinct()
@@ -39,6 +40,7 @@ class FlightNativeMapTextureRepository(private val app: OsmandApplication) {
 		var completed = result.size
 		var failed = 0
 		onProgress(completed, result.size, failed)
+		onTextures(result.toMap())
 
 		val blocks = missing.groupBy(::blockFor).entries.sortedWith(
 			compareBy<Map.Entry<NativeMapBlock, List<TerrainTileId>>>({ it.key.zoom }, { it.key.y }, { it.key.x })
@@ -52,6 +54,7 @@ class FlightNativeMapTextureRepository(private val app: OsmandApplication) {
 			completed += blockTiles.size
 			failed += blockTiles.size - rendered.size
 			onProgress(completed, result.size, failed)
+			onTextures(result.toMap())
 		}
 		return FlightNativeMapTextureResult(result, failed)
 	}
@@ -76,6 +79,17 @@ class FlightNativeMapTextureRepository(private val app: OsmandApplication) {
 		val resources = app.resourceManager
 		val renderer = resources.renderer
 		return synchronized(renderer) {
+			// A valid but empty bitmap is not cartography. Retain satellite relief outside OBF coverage.
+			val coveredTiles = tiles.filter { tile ->
+				listOf(0.01, 0.5, 0.99).any { dx ->
+					listOf(0.01, 0.5, 0.99).any { dy ->
+						renderer.containsLatLonMapData(
+							FlightTerrainTilePlanner.tileYToLatitude(tile.y + dy, tile.zoom),
+							FlightTerrainTilePlanner.tileXToLongitude(tile.x + dx, tile.zoom), tile.zoom)
+					}
+				}
+			}
+			if (coveredTiles.isEmpty()) return@synchronized emptyMap()
 			renderer.loadMap(tileBox, resources.mapTileDownloader)
 			val bitmap = renderer.bitmap
 			val bitmapLocation = renderer.bitmapLocation
@@ -86,7 +100,7 @@ class FlightNativeMapTextureRepository(private val app: OsmandApplication) {
 				return@synchronized emptyMap()
 			}
 			buildMap {
-				for (tileId in tiles) {
+				for (tileId in coveredTiles) {
 					val left = MAP_BLOCK_PADDING_PIXELS + (tileId.x - block.x) * MAP_TILE_SIZE_PIXELS
 					val top = MAP_BLOCK_PADDING_PIXELS + (tileId.y - block.y) * MAP_TILE_SIZE_PIXELS
 					if (left < 0 || top < 0 || left + MAP_TILE_SIZE_PIXELS > bitmap.width ||

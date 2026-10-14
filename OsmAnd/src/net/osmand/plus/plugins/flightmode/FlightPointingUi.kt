@@ -159,6 +159,16 @@ internal fun FlightTerrainPointingOverlay(
     val picker = pointing.terrain
     val selection by pointing.selection.state.collectAsState()
     val point = selection.point
+    FlightTerrainPickedOverlay(point, frame, picker, modifier)
+}
+
+@Composable
+internal fun FlightTerrainPickedOverlay(
+    point: FlightPickedPoint?,
+    frame: FlightPickingFrame?,
+    picker: FlightTerrainPicker?,
+    modifier: Modifier = Modifier,
+) {
     val visibility by
         produceState<Pair<FlightPickedPoint, Float>?>(null, frame, picker, point) {
             if (frame != null && picker != null && point != null)

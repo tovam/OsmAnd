@@ -95,7 +95,8 @@ class FlightTerrainView @JvmOverloads constructor(
 		onRendererError: (String) -> Unit,
 		onRenderStats: (FlightTerrainRenderStats) -> Unit,
 		inspection: FlightPhotoInspection? = null,
-		onPickingFrame: ((FlightPickingFrame) -> Unit)? = null
+		onPickingFrame: ((FlightPickingFrame) -> Unit)? = null,
+		reliefMapCamera: FlightReliefMapCamera? = null
 	) {
 		rendererErrorListener = onRendererError
 		renderStatsListener = onRenderStats
@@ -118,7 +119,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			terrainOpacity,
 			nativeMapOpacity,
 			spatialPhoto,
-			inspection
+			inspection,
+			reliefMapCamera
 		)
 		if (!paused) requestRender()
 	}
@@ -234,11 +236,12 @@ class FlightTerrainView @JvmOverloads constructor(
 			terrainOpacity: Float,
 			nativeMapOpacity: Float,
 			spatialPhoto: FlightSpatialPhotoOverlay?,
-			inspection: FlightPhotoInspection?
+			inspection: FlightPhotoInspection?,
+			reliefMapCamera: FlightReliefMapCamera?
 		) {
 			// One immutable publication: no frame can mix origins, aircraft and camera revisions.
 			this.viewState = RenderViewState(
-				scene = scene, sample = sample, inspection = inspection,
+				scene = scene, sample = sample, inspection = inspection, reliefMapCamera = reliefMapCamera,
 				windowPlacement = windowPlacement.clamped(), windowLook = windowLook.clamped(),
 				altitudeOverrideMeters = altitudeOverrideMeters, spatialPhoto = spatialPhoto?.clamped(),
 				shadingEnabled = shadingEnabled, shadowIntensity = shadowIntensity.coerceIn(0f, 1f),
@@ -385,8 +388,9 @@ class FlightTerrainView @JvmOverloads constructor(
 			val currentWindowLook = currentViewState.windowLook
 			val currentSpatialPhoto = currentViewState.spatialPhoto
 			val inspection = currentViewState.inspection
-			val latitude = inspection?.camera?.eyeLatitude ?: currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
-			val longitude = inspection?.camera?.eyeLongitude ?: currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
+			val mapCamera = currentViewState.reliefMapCamera
+			val latitude = mapCamera?.eyeLatitude ?: inspection?.camera?.eyeLatitude ?: currentSample?.latitude ?: currentScene?.centerLatitude ?: 0.0
+			val longitude = mapCamera?.eyeLongitude ?: inspection?.camera?.eyeLongitude ?: currentSample?.longitude ?: currentScene?.centerLongitude ?: 0.0
 			val sun = FlightSunPosition.direction(
 				currentSample?.timestampMillis ?: System.currentTimeMillis(),
 				latitude,
@@ -441,7 +445,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			val reportedAltitude = currentViewState.altitudeOverrideMeters
 				?: currentSample?.altitudeMeters?.toFloat()
 				?: DEFAULT_FLIGHT_ALTITUDE_METERS
-			val altitude = inspection?.camera?.eyeAltitudeMeters ?: max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
+			val altitude = mapCamera?.eyeAltitudeMeters?.let { max(it, ground + MINIMUM_GROUND_CLEARANCE_METERS) }
+				?: inspection?.camera?.eyeAltitudeMeters ?: max(reportedAltitude, ground + MINIMUM_GROUND_CLEARANCE_METERS)
 			val coordinates = FlightTerrainCoordinates(
 				currentScene.coordinateOriginLatitude,
 				currentScene.coordinateOriginLongitude
@@ -466,7 +471,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				groundFocus[1],
 				groundFocus[2]
 			)
-			val shadowStrength = if (shadingEnabled && shadowAvailable && sun.up > MINIMUM_SHADOW_SUN_UP) {
+			val shadowStrength = if (mapCamera == null && shadingEnabled && shadowAvailable && sun.up > MINIMUM_SHADOW_SUN_UP) {
 				shadowIntensity
 			} else 0f
 			val shadowsActive = shadowStrength > 0f
@@ -501,14 +506,14 @@ class FlightTerrainView @JvmOverloads constructor(
 			val directionX = (sin(viewAzimuth) * horizontalDirection).toFloat()
 			val directionY = sin(viewElevation).toFloat()
 			val directionZ = (-cos(viewAzimuth) * horizontalDirection).toFloat()
-			val viewDirection = coordinates.vectorToLocal(
+			val viewDirection = mapCamera?.direction(coordinates, camera) ?: coordinates.vectorToLocal(
 				latitude,
 				longitude,
 				directionX,
 				directionY,
 				directionZ
 			)
-			val cameraUp = coordinates.vectorToLocal(latitude, longitude, 0f, 1f, 0f)
+			val cameraUp = mapCamera?.up(coordinates) ?: coordinates.vectorToLocal(latitude, longitude, 0f, 1f, 0f)
 
 			// Never form eye + a one-metre direction: at distant scene origins float
 			// cancellation quantizes yaw/pitch even when touch input is continuous.
@@ -518,6 +523,11 @@ class FlightTerrainView @JvmOverloads constructor(
 				Matrix.perspectiveM(projection, 0, pose.verticalFieldOfViewDegrees.coerceIn(1f,170f),
 					surfaceWidth.toFloat()/surfaceHeight, NEAR_PLANE_METERS,
 					max(MINIMUM_FAR_PLANE_METERS,currentScene.radiusKm*2200f))
+			}
+			mapCamera?.let { pose ->
+				Matrix.perspectiveM(projection, 0, pose.fieldOfViewDegrees,
+					surfaceWidth.toFloat() / surfaceHeight, max(NEAR_PLANE_METERS, pose.pose.widthMeters.toFloat() * 0.001f),
+					max(MINIMUM_FAR_PLANE_METERS, max(currentScene.radiusKm * 2200f, pose.pose.widthMeters.toFloat() * 4f)))
 			}
 			val mvp = FloatArray(16)
 			Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
@@ -533,7 +543,7 @@ class FlightTerrainView @JvmOverloads constructor(
 			)
 			GLES20.glUniform3f(cameraLocation, camera[0], camera[1], camera[2])
 			GLES20.glUniform3f(lightLocation, lightDirection[0], lightDirection[1], lightDirection[2])
-			GLES20.glUniform1f(fogDistanceLocation, currentScene.radiusKm * 1_000f * 0.92f)
+			GLES20.glUniform1f(fogDistanceLocation, if (mapCamera != null) 10_000_000f else currentScene.radiusKm * 1_000f * 0.92f)
 			// Keep directional relief lighting deliberately subtle. Cast-shadow strength
 			// is controlled separately below; using the full shadow slider here used to
 			// dim every slope and made the toggle look like a global dark overlay.
@@ -542,7 +552,7 @@ class FlightTerrainView @JvmOverloads constructor(
 				if (shadingEnabled) RELIEF_LIGHTING_STRENGTH * shadowIntensity else 0f
 			)
 			GLES20.glUniform3f(skyColorLocation, sky[0], sky[1], sky[2])
-			GLES20.glUniform1f(daylightLocation, daylight)
+			GLES20.glUniform1f(daylightLocation, if (mapCamera != null) 1f else daylight)
 			GLES20.glUniform1f(satelliteOpacityLocation, satelliteOpacity)
 			GLES20.glUniform1f(qualityDebugEnabledLocation, if (showSatelliteQualityOverlay) 1f else 0f)
 			GLES20.glUniform1f(terrainOpacityLocation, terrainOpacity)
@@ -1377,7 +1387,8 @@ class FlightTerrainView @JvmOverloads constructor(
 			val showSatelliteQualityOverlay: Boolean = false,
 			val terrainOpacity: Float = 0.70f,
 			val nativeMapOpacity: Float = 0.58f,
-			val inspection: FlightPhotoInspection? = null
+			val inspection: FlightPhotoInspection? = null,
+			val reliefMapCamera: FlightReliefMapCamera? = null
 		)
 
 		private data class RenderMesh(

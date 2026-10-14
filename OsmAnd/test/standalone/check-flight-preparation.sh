@@ -12,6 +12,7 @@ echo "Flight logic check classes: $test_output"
 sources="$repo_root/OsmAnd/src/net/osmand/plus/plugins/flightmode"
 classpath="$test_output:$test_libs/ktfmt.jar:$test_libs/json.jar:$test_libs/coroutines.jar:$test_libs/junit.jar:$test_libs/hamcrest.jar:$test_libs/gson.jar"
 javac -d "$test_output" "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseSolver.java" \
+  "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/DirectionalViewMatrix.java" \
   "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPlaneGeometry.java" \
   "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PreparedResourceQueue.java" \
   "$repo_root/OsmAnd-java/src/main/java/net/osmand/util/PhotoPoseDiagnostics.java"
@@ -50,6 +51,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$sources/FlightNativeTrackUpdatePlan.kt" \
   "$sources/FlightRouteDashes.kt" "$sources/FlightMapPresentation.kt" \
   "$sources/FlightMapCamera.kt" \
+  "$sources/FlightReliefMapCamera.kt" \
   "$sources/FlightConcurrentTransfers.kt" \
   "$sources/FlightCameraKeyPolicy.kt" \
   "$sources/FlightCalibrationTerrain.kt" \
@@ -78,6 +80,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$test_libs/ktfmt.jar" org.jetbrains.ko
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightLibraryPresentationTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightFavoritesTest.kt" "$repo_root/OsmAnd/test/standalone/kotlin/FlightRelativeOrientationTest.kt" "$repo_root/OsmAnd/test/standalone/kotlin/FlightWebServerTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightPointingSelectionTest.kt" \
+  "$repo_root/OsmAnd/test/standalone/kotlin/FlightReliefMapTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightMonitoringTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightTileFilesTest.kt" \
   "$repo_root/OsmAnd/test/standalone/kotlin/FlightTilePresentationTest.kt" \
@@ -126,6 +129,7 @@ java -Djava.io.tmpdir="$test_output" -cp "$classpath" org.junit.runner.JUnitCore
   net.osmand.test.junit.FlightWebServerTest \
   net.osmand.test.junit.FlightTerrainPickingTest \
   net.osmand.test.junit.FlightPointingSelectionTest \
+  net.osmand.test.junit.FlightReliefMapTest \
   net.osmand.test.junit.FlightTileFilesTest \
   net.osmand.test.junit.FlightTilePresentationTest \
   net.osmand.test.junit.FlightFavoritesTest \

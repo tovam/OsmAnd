@@ -1,3 +1,3 @@
 - Speed up Photo+ and terrain pointing; make tile Files denser with one row per resolution.
 - Stabilize phone aiming with an absolute filtered direction and a clear reference action.
-- Share a compact flight panel, enlarge the cursor, group window altitudes and add a real minimap scale.
+- Share a compact flight panel, enlarge the cursor and improve altitude/scale displays; add a flat/relief map toggle in Mixed with bidirectional pointing.

@@ -330,7 +330,7 @@ private fun FlightMapScales(
 }
 
 @Composable
-private fun MapControl(
+internal fun MapControl(
     icon: Int,
     description: String,
     enabled: Boolean = true,
@@ -362,7 +362,7 @@ private fun MapControl(
 }
 
 @Composable
-private fun FlightCompactScale(label: String, fraction: Float) {
+internal fun FlightCompactScale(label: String, fraction: Float) {
     Text(label, color = Color.White, fontSize = 10.sp)
     Canvas(Modifier.width(90.dp).height(7.dp)) {
         val end = size.width * fraction.coerceIn(0f, 1f)

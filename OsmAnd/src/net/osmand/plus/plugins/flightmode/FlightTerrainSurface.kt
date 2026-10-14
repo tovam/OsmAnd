@@ -27,6 +27,7 @@ internal fun FlightTerrainSurface(
     inspection: FlightPhotoInspection? = null,
     rendererRevision: Int = 0,
     onPickingFrame: ((FlightPickingFrame) -> Unit)? = null,
+    reliefMapCamera: FlightReliefMapCamera? = null,
 ) {
     key(rendererRevision) {
         val context = LocalContext.current
@@ -57,6 +58,7 @@ internal fun FlightTerrainSurface(
                     onRenderStats = onRenderStats,
                     inspection = inspection,
                     onPickingFrame = onPickingFrame,
+                    reliefMapCamera = reliefMapCamera,
                 )
             },
         )

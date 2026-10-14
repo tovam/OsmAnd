@@ -202,6 +202,7 @@ fun FlightModeScreen(
 	onSetMapFollowing: (Boolean) -> Unit,
 	onSetMapCenterLocked: (Boolean) -> Unit = {},
 	onSetMapHeadingLocked: (Boolean) -> Unit = {},
+	onSetMixedTerrainMap: (Boolean) -> Unit = {},
 	onReturnLive: () -> Unit = {},
 	onShowTrackPoints: (Boolean) -> Unit,
 	onMarkFlightStart: () -> Unit,
@@ -277,7 +278,7 @@ fun FlightModeScreen(
 	var cloudSelectedKey by remember { mutableStateOf<String?>(null) }
 	var preparationSection by remember(state.journeyId) { mutableStateOf(0) }
 	var satelliteBlend by rememberSaveable { mutableStateOf(0f) }
-	FlightResumedEffect(satelliteBlend, state.page) {
+	FlightResumedEffect(satelliteBlend, state.page, state.mixedTerrainMap) {
 		onMapSatelliteBlend(if (state.page in listOf(FlightPage.MAP, FlightPage.MIXED)) satelliteBlend else 0f)
 	}
 	val openCloud: (String?) -> Unit = { cloudSelectedKey = it; showCloudLibrary = true }
@@ -336,7 +337,8 @@ fun FlightModeScreen(
 			state.page,
 			state.mapFollowing,
 			state.mapCenterLocked,
-			state.mapHeadingLocked
+			state.mapHeadingLocked,
+			state.mixedTerrainMap
 		) {
 			onMapState(
 				state.trip,
@@ -489,7 +491,7 @@ fun FlightModeScreen(
 					{ onSetMapFollowing(false) }, onSplitMapBounds, onMoveWindowLook, onChangeWindowZoom,
 					onRecenterWindowLook, onRetryTerrain, onTerrainRendererError, onTerrainRenderStats,
 					{ onSetMapFollowing(!state.mapFollowing) }, { onSetMapCenterLocked(!state.mapCenterLocked) },
-					onSetMapHeadingLocked, onRequestPointingTerrain)
+					onSetMapHeadingLocked, onRequestPointingTerrain, onSetMixedTerrainMap)
 				FlightPage.WINDOW_SETUP -> WindowSetupScreen(
 					state = state,
 					onBack = { onPageChange(FlightPage.WINDOW) },

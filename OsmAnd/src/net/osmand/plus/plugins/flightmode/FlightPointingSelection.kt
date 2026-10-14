@@ -130,22 +130,26 @@ internal class FlightPointingSelection(
         }
     }
 
-    fun select(scope: CoroutineScope, click: FlightPointingClick) {
+    fun select(
+        scope: CoroutineScope,
+        click: FlightPointingClick,
+        capturedContext: FlightPointingContext? = null,
+    ) {
         cancelRequest()
         latestClick = click
         demandSent = false
-        val current = context
+        val current = capturedContext ?: context
         if (current == null || !current.terrain.hasTerrain) {
             requestGround(click, current)
             publish(
                 mutableState.value.phase.takeIf { it == FlightPointingPhase.PREPARING }
                     ?: FlightPointingPhase.LOADING
             )
-        } else resolve(scope)
+        } else resolve(scope, current)
     }
 
-    private fun resolve(scope: CoroutineScope) {
-        val current = context ?: return
+    private fun resolve(scope: CoroutineScope, capturedContext: FlightPointingContext? = null) {
+        val current = capturedContext ?: context ?: return
         val click = latestClick?.freeze(current) ?: return
         latestClick = click
         val token = ++revision
