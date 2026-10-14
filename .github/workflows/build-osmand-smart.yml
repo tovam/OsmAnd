@@ -29,6 +29,12 @@ jobs:
       - name: Check flight string resource literals
         run: python3 android/OsmAnd/test/standalone/test_flight_string_resources.py
 
+      - name: Check flight Compose imports before native and APK builds
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s android/OsmAnd/test/standalone -p 'test_flight_compose_imports.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 android/OsmAnd/test/standalone/check_flight_compose_imports.py
+
       - name: Check fork local diagnostics behavior
         run: python3 android/OsmAnd/test/standalone/test_local_crash_report.py
 

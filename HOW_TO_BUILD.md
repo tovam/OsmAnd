@@ -3,6 +3,7 @@
 - Use `git push` to launch builds by default. The user has now installed and authorized `gh` for scoped Actions diagnosis, re-enabling workflows and dispatch when needed. Use existing authentication without inspecting credentials or running `gh auth login`; do not build locally.
 - Work in `cd /Users/tommy/dev/osmand-fork/OsmAnd`; check `git status --short` and `git branch --show-current` (must be `master`).
 - Before building application changes, update `BUILD_CHANGES.md` with 1–3 short bullets describing the features added, changed, or fixed since the previous published APK. Keep unchanged notes when rebuilding the same application code. Releases publish this file from the exact built revision instead of technical build boilerplate.
+- Before pushing flight UI changes, run `PYTHONDONTWRITEBYTECODE=1 python3 OsmAnd/test/standalone/check_flight_compose_imports.py` and `python3 OsmAnd/test/standalone/test_flight_string_resources.py`. These fast source/resource checks need no Gradle or Android SDK; Compose import checks also run at the start of CI, before native downloads/builds.
 - Stage only the intended changes: `git add <actual-file-paths>`; review with `git diff --cached`.
 - Launch: `git diff --cached --check && git commit -m "Describe the change" && git push` (skip the commit if already committed).
 - The push triggers the APK build for changes in `OsmAnd/**`, `OsmAnd-java/**`, `.github/scripts/**`, or `.github/workflows/build-osmand-smart.yml`.
